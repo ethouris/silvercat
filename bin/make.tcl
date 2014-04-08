@@ -299,14 +299,15 @@ proc fresher_depends {target depends} {
 }
 
 proc apply_special_variables {action target} {
+	#vlog "--- will apply special variables for '$target' in: $action"
 	set depends $::g_depends($target)
 
 	set str [string map \
 		                 [list \
 		                        {$@} $target \
 		                        {$<} [lindex $depends 0] \
-		                        {$^} $depends ] \
-								{$?} [fresher_depends $target $depends] \
+		                        {$^} $depends \
+								{$?} [fresher_depends $target $depends]] \
 		                 $action]
 	return $str
 }
@@ -401,11 +402,11 @@ proc perform_action {target actual_target} {
 	set actions ""
 	set depends ""
 	if { $generic == "" } {
-		vlog "Performing action:\n>>> $::g_actions($target)"
+		vlog "Performing action (normal):\n>>> $::g_actions($target)"
 		set depends $::g_depends($actual_target)
 		set actions [apply_special_variables $::g_actions($target) $actual_target]
 	} else {
-		vlog "Performing action:\n>>> $::g_actions($generic)"
+		vlog "Performing action (generic):\n>>> $::g_actions($generic)"
 		set depends [generate_depends $actual_target $generic $::g_depends($generic)]
 
 		# Update dependencies for generated generic target
