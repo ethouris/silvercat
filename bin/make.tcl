@@ -7,6 +7,9 @@ package require Tcl
 # Debug
 #package require Itcl
 
+# Allow for version recognition by makefiles
+package provide tclmake 0.5
+
 variable g_depends
 variable g_actions
 variable g_first_rule {}
@@ -16,6 +19,27 @@ variable g_action_performed 0
 
 set g_shell {/bin/bash}
 if { [info exists ::env(SHELL)] } { set g_shell $::env(SHELL) }
+
+set g_debug_indent 0
+proc debug_indent {} {
+	return [string repeat \t $::g_debug_indent]
+}
+
+proc debug_indent+ {} {
+	incr ::g_debug_indent
+}
+
+proc debug_indent- {} {
+	incr ::g_debug_indent -1
+}
+
+proc debug str {
+	puts stderr [debug_indent]$str
+}
+
+set g_debug pass
+
+proc pass args { }
 
 proc get {var} {
 	upvar $var v
@@ -45,10 +69,15 @@ proc rule args {
 	set args [expandif @ $args]
 	set size [llength $args]
 	if { $size < 2 } {
-		return -code error "*** rule: at least two arguments required (name,action)"
+		return -code error "+++ rule: at least two arguments required (name,action)"
 	}
 
 	set target [lindex $args 0]
+	if { [llength $target] > 1 && [string index [lindex $target 0] end] == ":" } {
+		set target [string map {"\\\n" ""} $target]
+		set args $target
+		set target [string range [lindex $target 0] 0 end-1]
+	}
 	set depends ""
 	if { $size > 2 } {
 		set depends {}
@@ -65,16 +94,31 @@ proc rule args {
 	# Check if this is a generic rule (contains *)
 	# remove all "* ? [ ]", but leave untouched "\* \? \[ \]"
 	if { [check_generic_upd_first $target] } {
+		$::g_debug "RULE '$target' is generic: {$action}"
 		set ::g_generic($target) $action
 	}
 	
+	$::g_debug "RULE '$target' DEPS: $depends"
+	$::g_debug "RULE '$target' ACTION: {$action}"
 	set ::g_depends($target) $depends
 	set ::g_actions($target) $action
 
 	vlog "Target $target = $::g_depends($target)"
+
+	# This feature is blocked because specifying the target as "-name" conflicts with option recognotion
+# --- 	# Make phony all targets with name starting from "-"
+# --- 	foreach dep $depends {
+# --- 		if { [string index $dep 0] == "-" } {
+# --- 			$::g_debug "RULE '$target': dependency '$dep' is set phony"
+# --- 			set ::g_phony($dep) ""
+# --- 		}
+# --- 	}
 	set target
 }
 
+# This function checks if the target is generic and returns true if it is.
+# If the target isn't generic, and it was first such a target in the session,
+# it also sets its name as the default target.
 proc check_generic_upd_first {target} {
 	set checked [string map {{\*} {\*} {\?} {\?} {\[} {\[} {\]} {\]} * {} ? {} {[} {} {]} {}} $target]
 	if { $checked != $target } {
@@ -89,7 +133,13 @@ proc check_generic_upd_first {target} {
 
 proc phony {name args} {
 	check_generic_upd_first $name
-    set ::g_depends($name) $args
+
+	# Don't set depends, if already set (was defined already).
+	# In this case, just set it phony flag.
+	$::g_debug "PHONY: set to target '$name', deps: $args"
+	if { ![info exists ::g_depends($name)] } {
+    	set ::g_depends($name) $args
+	}
 	set ::g_phony($name) ""
 }
 
@@ -144,8 +194,33 @@ proc subst_action action {
 }
 
 proc is_target_stale {target depend} {
-	return [expr {![file exists $target]
-		        || [file mtime $depend] > [file mtime $target]} ]
+	# Check if $depend is phony.
+	# If phony, then just forward the request to its depends.
+	# XXX THIS FEATURE IS SLIGHTLY CONTROVERSIAL.
+	# Probably another type of target "forward" should exist, parallel to "phony".
+	if { [info exists ::g_phony($depend)] } {
+		set out false
+		if { [info exists ::g_depends($depend)] && [expr {$::g_depends($depend) != ""}] } {
+			vlog "... ... and has deps ..."
+			foreach d $::g_depends($depend) {
+				vlog "... ... forwarding: against $d ... [expr {[info exists ::g_phony($d)] ? "(also phony)" : ""}]"
+				set stale [is_target_stale $target $d]
+				set out [expr {$out || $stale} ]
+				vlog "... stale: $out"
+			}
+		} else {
+			vlog "... ... and has no deps ..."
+			return true ;# phony that has no deps means always stale
+		}
+		return $out
+	}
+	if { [catch {set stale [expr {![file exists $target]
+		        || [file mtime $depend] > [file mtime $target]} ]}] } {
+		puts stderr "MTIME checked on nonexistent '$depend'"
+		return false
+	}
+
+	return $stale
 }
 
 proc depends {args} {
@@ -197,6 +272,7 @@ proc make target {
 	set hasdepends [info exists ::g_depends($target)] 
 
     if { !$hasdepends } {
+		vlog "No direct depends, checking for generic depends"
         set generic [find_generic $target]
         if { $generic != "" } {
             set depends [generate_depends $target $generic $::g_depends($generic)]
@@ -210,13 +286,14 @@ proc make target {
 
 	set result "(reason unknown)"
     if { $hasdepends } {
+		vlog "Has dependencies: $depends"
         foreach depend $depends {
             vlog "Considering $depend as dependency for $target"
 			if { [catch {make $depend} result] } {
                 set status 0
                 vlog "Making $depend failed, so $target won't be made"
 				if { $::g_keep_going } {
-					vlog "- continuing with other targets"
+					vlog "- although continuing with other targets (-k)"
 				} else {
 					break
 				}
@@ -225,30 +302,41 @@ proc make target {
     }
 
  	if { $status == 0 } {
- 		error "*** Make failed for '$depend':\n$result"
+ 		error "+++ Make failed for '$depend':\n$result"
  	}
 
-	if { [info exists ::g_phony($target)] } {
+	# If a phony target doesn't have action, it won't be checked for generic action, too.
+	if { [info exists ::g_phony($target)] && ![info exists ::g_actions($target)] } {
 		vlog "Target '$target' is phony - not checking for action"
 		return
 	}
 
 	set stale 0
 	
-	if { ![file exists $target] } {
-		vlog "File $target not found, so performing action for $target"
+	set need_build 0
+	set reason "is wrong"
+	if { [info exists ::g_phony($target)] } {
+		set need_build 1
+		set reason "is phony"
+	} elseif { ![file exists $target] } {
+		set need_build 1
+		set reason "is missing"
+	}
+
+	if { $need_build } {
+		vlog "File '$target' $reason - performing action for '$target'"
 		if { ![perform_action $target $target] } {
-            error "Action failure for $target"
+            error "Action failure for '$target'"
         }
 	} elseif { $hasdepends } {
 		vlog "Checking if $target is fresh:"
 		foreach depend $depends {
-            vlog "... against $depend..."
-		        if { [is_target_stale $target $depend] } {
-		                vlog "File $target is stale against $depend, will be made"
-		                set stale 1
-		                break
-		        }
+            vlog "... against $depend [expr {[info exists ::g_phony($depend)] ? "(PHONY)":""}]..."
+		    set stale [is_target_stale $target $depend]
+			if { $stale } {
+		        vlog "File '$target' is stale against '$depend', will be made"
+		        break
+		    }
 		}
 
 		if { $stale } {
@@ -316,6 +404,33 @@ proc find_generic target {
 	if { ![info exists ::g_generic] } return
 
 	foreach rule [array names ::g_generic] {
+		# Special case for rule == "*" to
+		# prevent infinite loop of something
+		# that can match everything in infinity
+		if { [string index $rule end] == "*" } {
+			set prefix [string range $rule 0 end-1]
+			if { $prefix != "" } {
+				if { [string first $prefix $target] != 0 } {
+					# Prefix doesn't match anyway.
+					return 
+				} else {
+					set target [string range [string length $prefix] end]
+				}
+			}
+
+			# It is allowed to do:
+			# rule first.second.* first.second.*.cc { ... }
+			# The above procedure should cut off the 'first.second.' fragment
+			# as a prefix and do check only on rest of the file. If the checked
+			# target is, for example, 'first.second.none', then 'none' is the
+			# effectively checked target name - and it matches in this case.
+
+			# Check if 'target' has some dotted suffix
+			# If it has, it means it doesn't match.
+			if { [file extension $target] != "" } {
+				return
+			}
+		}
 		if { [string match $rule $target] } {
 		        return $rule
 		}
@@ -384,14 +499,19 @@ proc generate_depends {target template depends} {
 # the action, which should be taken.
 proc perform_action {target actual_target} {
 
-    vlog "Performing action defined for '$target' for the sake of '$actual_target'"
+	set sake ""
+	if { $target != $actual_target } {
+		set sake " for the sake of '$actual_target'"
+	}
+
+    vlog "Performing action defined for '$target'$sake"
 	set generic ""
 	
 	if { ![info exists ::g_actions($target)] } {
         vlog "No specific actions found for '$target' - checking generic actions"
 		set generic [find_generic $actual_target]
 		if { $generic == "" } {
-			puts stderr "*** No rule to make target '$target'"
+			puts stderr "+++ No rule to make target '$target'"
             lappend ::g_failed $target
             return false
 		} else {
@@ -433,7 +553,7 @@ proc perform_action {target actual_target} {
 				link {
 					if { ![info exists ::g_actions($arglist)] } {
 						puts stderr \
-						"*** Can't resolve $arglist as a link to action"
+						"+++ Can't resolve $arglist as a link to action"
 						lappend ::g_failed $target
 						return false
 					}
@@ -470,11 +590,11 @@ proc perform_action {target actual_target} {
 		        }
 		        if { $failed } {
                    if { !$::g_ignore } {
-		                puts stderr "*** Action for '$actual_target' failed!"
+		                puts stderr "+++ Action for '$actual_target' failed!"
 		                lappend ::g_failed $target
 		                return false
                    } else {
-                       puts stderr "*** Action for '$actual_target' failed (but ignored)."
+                       puts stderr "+++ Action for '$actual_target' failed (but ignored)."
                    }
 		        }
 		} else {
@@ -488,16 +608,6 @@ proc perform_action {target actual_target} {
 }
 
 # Autoclean automaton
-
-proc debug_indent {} {
-	return [string repeat \t $::g_debug_indent]
-}
-
-proc debug str {
-	puts stderr [debug_indent]$str
-}
-
-proc pass args { }
 
 proc rolling_autoclean {rule debug} {
 
@@ -545,10 +655,17 @@ proc autoclean-test {rule} {
 	puts stderr "Autoclean would delete: $ac"
 }
 
-
 proc pset {name args} {
     upvar $name var
     set var ""
+    foreach a $args {
+        append var " $a"
+    }
+}
+
+proc pset+ {name arg1 args} {
+    upvar $name var
+    append var " $arg1"
     foreach a $args {
         append var " $a"
     }
@@ -569,6 +686,11 @@ proc pget {name} {
     }
     return $lname
 }
+
+proc pdef {name arg} {
+	proc $name {} { return [expr $arg] }
+}
+
 
 # utilities (for debug stuff)
 
@@ -591,36 +713,80 @@ proc tribool_logical in {
 }
 
 
-
-set makefile Makefile.tcl
+set makefile {}
 set g_keep_going 0
+set help 0
+set g_debug_on 0
 
-set argplain {}
+array set g_optargs {
+	-k *g_keep_going
+	-f makefile
+	--help *help
+	-help *help
+	-d *g_debug_on
+	-v *g_verbose
+}
 
-for {set i 0} {$i < [llength $argv]} {incr i} {
-	set arg [lindex $argv $i]
-	switch -- $arg {
-		-f {
-		        incr i
-		        set makefile [lindex $argv $i]
+set g_args ""
+set g_variables ""
+
+set in_option ""
+
+foreach e $argv {
+
+	# This variable is set only if there are more than 0 optargs for this option
+	if { $in_option != "" } {
+		lassign $in_option on ox
+		set os [llength $::g_optargs($on)]
+		set pos [expr {$os-$ox}]
+		set [lindex $::g_optargs($on) $pos] $e
+		incr ox -1
+		if { $ox == 0 } {
+			set in_option ""
+		} else {
+			set in_option [list $on $ox]
+		}
+		continue
 		}
 
-		-k {
-		        set ::g_keep_going 1
+	if { [string index $e 0] == "-" } {
+		if { [info exists ::g_optargs($e)] } {
+			set oa $::g_optargs($e)
+			if { [string index $oa 0] == "*" } {
+				# boolean option. set to 1,default is 0
+				set [string range $oa 1 end] 1
+				continue
 		}
 
-		-v {
-		        set ::g_verbose 1
+			# Otherwise set the hook for the next iteration
+			set in_option [list $e 1]
+			continue
 		}
 
-		default {
-		        lappend argplain $arg
+		error "No such option: $e"
 		}
+
+    set varval [split $e =]
+    if { [llength $varval] == 1 } {
+        lappend g_args $e
+    } else {
+        lappend g_variables [lindex $varval 0] [lindex $varval 1]
 	}
 }
 
-set argv $argplain
+if { $help } {
+	parray g_optargs
+	exit 1
+}
 
+if { $g_debug_on } {
+	set g_debug debug
+}
+
+foreach {name value} $g_variables {
+    #puts "Setting $name to $value"
+    set $name $value
+}
 
 if { $makefile == "" } {
 	if { [file exists Makefile.tcl] } {
@@ -630,24 +796,10 @@ if { $makefile == "" } {
 	} else {
 		error "Makefile.tcl not found"
 	}
+} elseif { ![file exists $makefile] } {
+	error "Makefile '$makefile' not found"
 }
 
-set g_args ""
-set g_variables ""
-
-foreach e $argv {
-    set varval [split $e =]
-    if { [llength $varval] == 1 } {
-        lappend g_args $e
-    } else {
-        lappend g_variables [lindex $varval 0] [lindex $varval 1]
-    }
-}
-
-foreach {name value} $g_variables {
-    #puts "Setting $name to $value"
-    set $name $value
-}
 
 source $makefile
 
@@ -660,12 +812,12 @@ if { [set xc [catch {
     } result]] } {
 
 		puts stderr $result
-		puts stderr "*** Target '$tar' failed"
-		#puts stderr "*** $errorInfo"
+		puts stderr "+++ Target '$tar' failed"
+		#puts stderr "+++ $errorInfo"
 		exit 1
 }
 
 if { !$g_action_performed } {
-    puts stderr "*** Nothing to be done for: $g_args"
+    puts stderr "+++ Nothing to be done for: $g_args"
 }
 
