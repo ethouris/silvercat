@@ -278,6 +278,10 @@ proc UnaliasOption alias {
 proc ag {target args} {
 	set lastopt ""
 
+	if { [llength $args] == 1 } {
+		set args [lindex $args 0]
+	}
+
 	foreach o $args {
 		if { [string index $o 0] == "-" } {
 			set lastopt [string range $o 1 end]
@@ -438,17 +442,24 @@ proc ag-genrules target {
 	}
 }
 
+proc ag-help {args} {
+	puts "Usage: [file tail $::argv0] genrules <target>"
+}
+
 if { !$tcl_interactive } {
 
-# TEST
-cd ../examples/tclmake
+if { ![file exists Makefile.ag.tcl] } {
+	puts stderr "File not found: Makefile.ag.tcl"
+	exit 1
+}
 
-ag-profile gcc-native
+source Makefile.ag.tcl
 
-# Makefile.ag.tcl contents
-ag answer -type program -sources file1.cc file2.cc -headers file.h
+set arg1 [lindex $argv 0]
+if { $arg1 == "" } {
+	set arg1 help
+}
+ag-$arg1 [lrange $argv 1 end]
 
-
-ag-genrules answer
 
 }
