@@ -1,5 +1,13 @@
 #!/usr/bin/tclsh
 
+# Get definitions of make.tcl as library
+# XXX (find some better way to do it)
+set was_interactive $tcl_interactive
+set tcl_interactive 1
+source [file dirname [info script]]/make.tcl
+set tcl_interactive $was_interactive
+
+
 namespace eval agv {
 	set version 0.1 ;# just to define something
 
@@ -11,14 +19,6 @@ namespace eval agv {
 		set exefor(.dylib) .app
 		set exefor(.so) ""
 
-
-		proc Get variable {
-			upvar $variable v
-			if { ![info exists v] } {
-				return
-			}
-			return $v
-		}
 
 		set langextmap {
 			c {
@@ -157,7 +157,7 @@ proc GenerateCompileFlags lang {
 		lappend define_flags -D$def
 	}
 
-	foreach def [agv::p::Get agv::defines] {
+	foreach def [get agv::defines] {
 		lappend define_flags -D$def
 	}
 
@@ -408,22 +408,10 @@ proc GenerateLinkRule:program {db lang outfile objects ldflags} {
 }
 
 proc ag-genrules target {
-	# Check if defined
 
-	if { ![info exists agv::target($target)] } {
-		error "No such target: $target"
-	}
+	# Complete lacking values that have to be generated.
+	ag-prepare-database $target
 
-	set type [dict:at $agv::target($target) type]
-
-	if { $type == "" } {
-		set type [DetectType $target]
-		if { $type == "" } {
-			error "Can't recognize target type for '$target' - please declare explicitly"
-		}
-	}
-
-	Process:$type $target
     set phony [dict:at $agv::target($target) phony]
 
 	if { $phony != "" } {
@@ -440,6 +428,50 @@ proc ag-genrules target {
 	foreach {tarfile data} $rules {
 		puts "rule $tarfile $data"
 	}
+}
+
+proc ag-make target {
+	ag-prepare-database $target
+
+	set rules [dict:at $agv::target($target) rules]
+
+	# Now define the rules according to the 
+    set phony [dict:at $agv::target($target) phony]
+
+	if { $phony != "" } {
+		foreach {rule deps} $phony {
+			phony $rule {*}$deps
+		}
+	}
+
+	set rules [dict:at $agv::target($target) rules]
+
+	# Rules is itself also a dictionary.
+	# Key is target file, value is dependencies and command at the end.
+
+	foreach {tarfile data} $rules {
+		rule $tarfile {*}$data
+	}
+
+	make $target
+}
+
+proc ag-prepare-database target {
+	# Check if defined
+	if { ![info exists agv::target($target)] } {
+		error "No such target: $target"
+	}
+
+	set type [dict:at $agv::target($target) type]
+
+	if { $type == "" } {
+		set type [DetectType $target]
+		if { $type == "" } {
+			error "Can't recognize target type for '$target' - please declare explicitly"
+		}
+	}
+
+	Process:$type $target
 }
 
 proc ag-help {args} {

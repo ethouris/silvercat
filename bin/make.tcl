@@ -710,6 +710,9 @@ proc tribool_logical in {
 	return indeterminate
 }
 
+# Rest of the file is interactive.
+if { !$tcl_interactive } {
+
 
 set makefile {}
 set g_keep_going 0
@@ -819,3 +822,4 @@ if { !$g_action_performed } {
     puts stderr "+++ Nothing to be done for: $g_args"
 }
 
+} ;# end of interactive actions
