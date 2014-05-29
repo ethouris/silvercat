@@ -1,1 +1,6 @@
-This directory will contain example configuration files. Stay tuned.
+There's currently one and the same example with two C++ source files and one header file.
+
+'tclmake' contains these files and Makefile.tcl as a build configuration for make.tcl
+'silvercat' contains these files and Makefile.ag.tcl as a build configuration for ag.tcl
+
+

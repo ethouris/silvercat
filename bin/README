@@ -1,0 +1,42 @@
+The tclmake tool (make.tcl)
+===========================
+
+Requires Makefile.tcl build configuration. This works merely like the
+usual 'make' tool. The example simple Makefile:
+
+///////////////////////////////
+CC=gcc
+
+hello.o: hello.c hello.h
+	$(CC) -o $@ $<
+
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+can be written in Makefile.tcl as:
+
+/////////////////////////////
+set CC gcc
+
+rule hello.o hello.c hello.h {
+	$CC -o $@ $<
+}
+\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+
+It has also several more advanced facilities, and it covers practically
+all important features of the 'make' tool, except default rules.
+
+
+The silvercat tool (ag.tcl)
+===========================
+
+Currently supported features:
+
+1. The only currently used configuration file name: Makefile.ag.tcl
+
+2. The most basic target definition command: ag
+
+3. Two subcommands are supported:
+
+	-ag.tcl genrules - print rules to produce given target for Makefile.tcl on stdout
+	-ag.tcl make - use the rules for given target to make the target directly
+
