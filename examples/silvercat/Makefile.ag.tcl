@@ -1,5 +1,7 @@
 # This is a silvercat file.
 
+set ::g_verbose 1
+
 # First thing to do is to define the profile. It defines what main
 # compilers should be used with what modification flags.
 ag-profile gcc-native
@@ -24,8 +26,9 @@ ag answer {
 	-type 		program
 	-category 	bin
 	-sources 	file1.cc file2.cc
-	-headers 	file.h
+	-packages   zlib
 }
+	#-headers 	file.h
 
 # For programs there can be later created a more convenient
 # command:

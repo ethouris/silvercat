@@ -19,6 +19,16 @@ namespace eval agv {
 		set exefor(.dylib) .app
 		set exefor(.so) ""
 
+		proc lsuniq {ls} {
+			set out ""
+			foreach e $ls {
+				if { $e ni $out } {
+					lappend out $e
+				}
+			}
+
+			return $out
+		}
 
 		set langextmap {
 			c {
@@ -29,12 +39,20 @@ namespace eval agv {
 				.C .cc .cpp .cxx .c++
 			}
 
+			c-header {
+				.h
+			}
+			
+			c++-header {
+				.H .hh .hpp .hxx .h++
+			}
+
 			objc {
 				.m
 			}
 
 			objc++ {
-				.M .mm .mpp .m++
+				.M .mm .mpp .mxx .m++
 			}
 		}
 
@@ -104,6 +122,31 @@ namespace eval agv {
 			}
 		}
 
+		namespace eval fw {
+			proc pkg-config {target} {
+				vlog "Running pkg-config framework for '$target'"
+				# Take the package name, extract the library
+				# parameters, apply to the database.
+				set db $::agv::target($target)
+
+				set packages [dict:at $db packages]
+				vlog "Packages: $packages"
+				foreach p $packages {
+					exec pkg-config --exists $p
+					set ldflags [exec pkg-config --libs $p]
+					set cflags [exec pkg-config --cflags $p]
+
+					vlog "Data for $p: cflags='$cflags' ldflags='$ldflags'"
+
+					dict lappend db ldflags {*}$ldflags
+					dict lappend db cflags {*}$cflags
+				}
+
+				# Write back the database
+				set ::agv::target($target) $db
+			}
+		}
+
 	}
 
 	set exe $p::exefor([info sharedlibextension])
@@ -160,7 +203,6 @@ proc GenerateCompileFlags lang {
 	foreach def [get agv::defines] {
 		lappend define_flags -D$def
 	}
-
 	set cflags [dict:at $agv::profile($lang) cflags]
 
 	return "$define_flags $cflags"
@@ -186,9 +228,11 @@ proc ShellWrapAll arg {
 }
 
 proc GenerateDepends {lang cflags source} {
+	vlog "Extracting ingredients of '$source':"
 	set gendep [dict:at $agv::profile($lang) gendep]
 
 	set cmd "$gendep [ShellWrapAll $cflags] $source"
+	vlog "Command: $cmd"
 
 	# Run the command to generate deps
 	#puts "Command: "
@@ -201,9 +245,11 @@ proc GenerateDepends {lang cflags source} {
 	# Rules are generated in the convention of "make".
 	# Make them a plain list, as needed for "make.tcl"
 	set deps [string map { "\\\n" "" } $deps]
-
 	# Drop the *.o target, we don't need it.
-	return [lrange $deps 1 end]
+	set deps [lrange $deps 1 end]
+	vlog "Resulting deps: $deps"
+
+	return $deps
 }
 
 proc IdentifyLanguage sourcefile {
@@ -238,7 +284,7 @@ proc DetectType target {
 
 proc ag-profile name {
 
-	if { $name in {general structure} } {
+	if { $name in {default structure} } {
 		error "Invalid profile name (keyword)"
 	}
 
@@ -246,7 +292,10 @@ proc ag-profile name {
 		error "No such profile: $name"
 	}
 
-	set prof [dict get $agv::p::profiles default]
+	set prof [get agv::profile]
+	if { $prof == "" } {
+		set prof [dict get $agv::p::profiles default]
+	}
 	set prof [dict merge $prof [dict get $agv::p::profiles $name]]
 
 	# Now merge every language item with default.
@@ -269,6 +318,7 @@ proc UnaliasOption alias {
 		s { return sources }
 		h { return headers }
 		nh { return noinst-headers }
+		fw { return frameworks }
 	}
 
 	return $alias
@@ -290,6 +340,8 @@ proc ag {target args} {
 
 		lappend options($lastopt) [UnaliasOption $o]
 	}
+
+	vlog "Target: $target {[array get options]}"
 
 	set agv::target($target) [array get options]
 }
@@ -315,9 +367,12 @@ proc Process:program target {
 	set rules [dict:at $db rules]
 
 	set used_langs ""
+	set hsufs [concat [dict:at $agv::p::langextmap c-header] [dict:at $agv::p::langextmap c++-header]]
 
+	vlog "Performing general processing for program '$target':"
+
+	set hdrs ""
 	foreach s $sources {
-
 		set o [file rootname $s].ag.o
 
 		# Now identify the programming language
@@ -325,6 +380,7 @@ proc Process:program target {
 
 		dict lappend used_langs $lang $s
 
+		vlog " ... processing $s (language $lang) --> $o"
 		# Generate rule for the target
 		set rule [GenerateCompileRule $db $lang $o $s]
 
@@ -337,7 +393,31 @@ proc Process:program target {
 		if { ![dict exists $rules $o] } {
 			dict set rules $o $rule
 		}
+
+		# Find headers among dependent files in the rules
+		set ifiles [lrange $rule 1 end-1]
+
+		# Find header files in the deps.
+		# If there are any, and they are not found in 'headers',
+		# add them to noinst-headers
+		foreach n $ifiles {
+			if { [file extension $n] in $hsufs } {
+				lappend hdrs $n
+			}
+		}
+
 	}
+
+	# Extract existing headers
+	set th [dict:at $db headers]
+	set tnh [dict:at $db noinst-headers]
+	set hdrs [agv::p::lsuniq $hdrs]
+	foreach h $hdrs {
+		if { $h ni $tnh && $h ni $th } {
+			lappend tnh $h
+		}
+	}
+	dict set db noinst-headers $tnh
 
 	set lang [GetCommonLanguage [dict keys $used_langs]]
 
@@ -379,7 +459,13 @@ proc GenerateCompileRule {db lang objfile source} {
 	# General language cflags applicable for all targets
 	# For example, definitions will be collected here for -D option
 	# The value of agv::cflags($lang) will be also included
-	append cflags " [GenerateCompileFlags $lang]"
+	set lang_cflags [GenerateCompileFlags $lang]
+
+	vlog "Generating compile rule for '$objfile':"
+	vlog " ... target's cflags: $cflags"
+	vlog " ... lang($lang) cflags: $lang_cflags"
+
+	append cflags " $lang_cflags"
 
 	# The rule should be formed as for make.tcl
 	# except the 'rule' command and the target name.
@@ -396,6 +482,7 @@ proc GenerateCompileRule {db lang objfile source} {
 }
 
 proc GenerateLinkRule:program {db lang outfile objects ldflags} {
+	vlog "Generating link rule for '$outfile' ldflags: $ldflags"
 
 	set linker [dict get $agv::profile($lang) link]
 	set oflag [dict get $agv::profile($lang) link_oflag]
@@ -470,8 +557,33 @@ proc ag-prepare-database target {
 			error "Can't recognize target type for '$target' - please declare explicitly"
 		}
 	}
+	vlog "Preparing database for '$target' type=$type"
+
+	set frameworks [dict:at $agv::target($target) frameworks]
+	if { $frameworks == "" } {
+		set frameworks pkg-config
+	}
+	vlog " ... Frameworks: $frameworks"
+	foreach frm $frameworks {
+		if { [string first : $frm] == -1 } {
+			# Treat it as a builtin, that is agv::p::fw::$NAME
+			set frm "::agv::p::fw::$frm"
+
+			if { [info command $frm] != $frm } {
+				error "No such BUILTIN framework '$frm' (external fw must use namespaces)"
+			}
+		}
+
+		$frm $target
+	}
 
 	Process:$type $target
+	
+	vlog "DATABASE AFTER PROCESSING:"
+	foreach k [dict keys $agv::target($target)] {
+		vlog "  -$k: [dict get $agv::target($target) $k]"
+	}
+
 }
 
 proc ag-help {args} {
