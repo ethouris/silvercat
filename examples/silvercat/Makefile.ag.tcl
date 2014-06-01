@@ -4,15 +4,25 @@ set ::g_verbose 1
 
 # First thing to do is to define the profile. It defines what main
 # compilers should be used with what modification flags.
-ag-profile gcc-native
 
-# Add also the installation profile
-ag-profile posix-install
+
+ag-profile gcc-native      ;# Profile for compiler
+ag-profile posix-install   ;# Profile for installation rules
 
 # It's expected that "native" would be replaced with 32 or 64.
 
-
 # The most low level command that defines targets to build.
+
+ag answer {
+	-type 		program
+	-category 	bin
+	-sources 	file1.cc file2.cc
+	#-headers 	file.h (headers will still be extracted to -noinst-headers if detected by deps checker)
+	-packages   zlib
+}
+
+
+
 # The first argument is always the target to be built.
 # It is usually a symbolic name, not necessarily the name
 # of the file.
@@ -24,14 +34,6 @@ ag-profile posix-install
 # The -category bin statement states that this program is
 # to be installed as a binary application, on POSIX systems
 # will be installed in $PREFIX/bin.
-
-ag answer {
-	-type 		program
-	-category 	bin
-	-sources 	file1.cc file2.cc
-	-packages   zlib
-}
-	#-headers 	file.h
 
 # For programs there can be later created a more convenient
 # command:

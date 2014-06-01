@@ -342,7 +342,8 @@ proc ag {target args} {
 	set lastopt ""
 
 	if { [llength $args] == 1 } {
-		set args [lindex $args 0]
+		# May contain multiple lines, so wipe out comments
+		set args [lindex [no_comment $args] 0]
 	}
 
 	foreach o $args {
@@ -460,7 +461,7 @@ proc Process:program target {
 	set icmd ""
 	set prefix [get agv::prefix]
 	if { $prefix == "" } {
-		set prefix [dict at $agv::profile(default) prefix]
+		set prefix [dict:at $agv::profile(default) prefix]
 	}
 
 	if { $prefix != "" } {
@@ -472,7 +473,9 @@ proc Process:program target {
 			bin {
 				set bindir [subst -nocommands [dict:at $agv::profile(default) installdir_bin]]
 				if { $bindir != "" } {
-					set icmd "install $outfile $bindir"
+					set icmd "
+	install $outfile $bindir
+"
 				}
 			}
 		}
@@ -481,7 +484,7 @@ proc Process:program target {
 	if { $icmd != "" } {
 		dict set rules $itarget [list $outfile $icmd]
 		# Make the install target phony
-		dict set phony $itarget
+		dict set phony $itarget ""
 	}
 
 	# Ok, ready. Write back to the database
@@ -559,7 +562,16 @@ proc ag-genrules target {
 	}
 }
 
-proc ag-make target {
+proc ag-make {target} {
+
+	if { [llength $target] > 1 } {
+		set exp_targets [lrange $target 1 end]
+		set target [lindex $target 0]
+	} else {
+		set exp_targets $target
+	}
+
+	vlog "Preparing database for '$target' to make '$exp_targets'"
 	ag-prepare-database $target
 
 	set rules [dict:at $agv::target($target) rules]
@@ -569,6 +581,7 @@ proc ag-make target {
 
 	if { $phony != "" } {
 		foreach {rule deps} $phony {
+			vlog "Preparing phony: $rule $deps"
 			phony $rule {*}$deps
 		}
 	}
@@ -579,10 +592,11 @@ proc ag-make target {
 	# Key is target file, value is dependencies and command at the end.
 
 	foreach {tarfile data} $rules {
+		vlog "Preparing rule: $tarfile [lrange $data 0 end-1]"
 		rule $tarfile {*}$data
 	}
 
-	make $target
+	make {*}$exp_targets
 }
 
 proc ag-prepare-database target {
