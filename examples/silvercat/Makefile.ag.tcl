@@ -6,6 +6,9 @@ set ::g_verbose 1
 # compilers should be used with what modification flags.
 ag-profile gcc-native
 
+# Add also the installation profile
+ag-profile posix-install
+
 # It's expected that "native" would be replaced with 32 or 64.
 
 

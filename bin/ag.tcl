@@ -83,6 +83,14 @@ namespace eval agv {
 				}
 			}
 
+			posix-install {
+				default {
+					prefix /usr/local
+					installdir_bin {$prefix/bin}
+					installdir_lib {$prefix/lib}
+				}
+			}
+
 			gcc-native {
 				c++ {
 					compile "g++ -c"
@@ -160,6 +168,11 @@ namespace eval agv {
 	# They can be as just one thing or variable=value
 	variable defines
 	namespace export defines
+
+	# Install prefix.
+	# Will be set to the profile's default, unless overridden.
+	variable prefix
+	namespace export prefix
 }
 
 proc GetCommonLanguage langs {
@@ -292,8 +305,8 @@ proc ag-profile name {
 		error "No such profile: $name"
 	}
 
-	set prof [get agv::profile]
-	if { $prof == "" } {
+	set prof ""
+	if { ![array exists agv::profile] } {
 		set prof [dict get $agv::p::profiles default]
 	}
 	set prof [dict merge $prof [dict get $agv::p::profiles $name]]
@@ -440,6 +453,35 @@ proc Process:program target {
 	set phony ""
 	if { $outfile != $target } {
 		dict set phony $target $outfile
+	}
+
+	set itarget install-$target
+	set cat [dict:at $db category]
+	set icmd ""
+	set prefix [get agv::prefix]
+	if { $prefix == "" } {
+		set prefix [dict at $agv::profile(default) prefix]
+	}
+
+	if { $prefix != "" } {
+		switch -- $cat {
+			noinst {
+				# Nothing.
+			}
+
+			bin {
+				set bindir [subst -nocommands [dict:at $agv::profile(default) installdir_bin]]
+				if { $bindir != "" } {
+					set icmd "install $outfile $bindir"
+				}
+			}
+		}
+	}
+
+	if { $icmd != "" } {
+		dict set rules $itarget [list $outfile $icmd]
+		# Make the install target phony
+		dict set phony $itarget
 	}
 
 	# Ok, ready. Write back to the database
