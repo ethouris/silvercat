@@ -560,6 +560,11 @@ proc ag-genrules target {
 	foreach {tarfile data} $rules {
 		puts "rule $tarfile $data"
 	}
+
+	# Clean rule
+	puts "rule $target-clean {
+	!tcl autoclean $target
+}"
 }
 
 proc ag-make {target} {
@@ -595,6 +600,10 @@ proc ag-make {target} {
 		vlog "Preparing rule: $tarfile [lrange $data 0 end-1]"
 		rule $tarfile {*}$data
 	}
+
+	rule $target-clean "
+		!tcl autoclean $target
+	"
 
 	make {*}$exp_targets
 }
