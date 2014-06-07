@@ -12,13 +12,17 @@ package provide tclmake 0.5
 
 variable g_depends
 variable g_actions
+
 variable g_first_rule {}
+
 variable g_failed {}
 
 variable g_action_performed 0
 
 set g_shell {/bin/bash}
 if { [info exists ::env(SHELL)] } { set g_shell $::env(SHELL) }
+
+set g_action_performed 0
 
 set g_debug_indent 0
 proc debug_indent {} {
@@ -387,7 +391,6 @@ proc fresher_depends {target depends} {
 }
 
 proc apply_special_variables {action target} {
-	#vlog "--- will apply special variables for '$target' in: $action"
 	set depends $::g_depends($target)
 
 	set str [string map \
@@ -522,11 +525,11 @@ proc perform_action {target actual_target} {
 	set actions ""
 	set depends ""
 	if { $generic == "" } {
-		vlog "Performing action (normal):\n>>> $::g_actions($target)"
+		vlog "Performing action:\n>>> $::g_actions($target)"
 		set depends $::g_depends($actual_target)
 		set actions [apply_special_variables $::g_actions($target) $actual_target]
 	} else {
-		vlog "Performing action (generic):\n>>> $::g_actions($generic)"
+		vlog "Performing action:\n>>> $::g_actions($generic)"
 		set depends [generate_depends $actual_target $generic $::g_depends($generic)]
 
 		# Update dependencies for generated generic target
@@ -553,7 +556,7 @@ proc perform_action {target actual_target} {
 				link {
 					if { ![info exists ::g_actions($arglist)] } {
 						puts stderr \
-						"+++ Can't resolve $arglist as a link to action"
+						     "+++ Can't resolve $arglist as a link to action"
 						lappend ::g_failed $target
 						return false
 					}
@@ -655,9 +658,17 @@ proc autoclean-test {rule} {
 	puts stderr "Autoclean would delete: $ac"
 }
 
-proc pset {name args} {
+proc pset {name arg1 args} {
     upvar $name var
-    set var ""
+    set var $arg1
+    foreach a $args {
+        append var " $a"
+    }
+}
+
+proc pset+ {name arg1 args} {
+    upvar $name var
+    append var " $arg1"
     foreach a $args {
         append var " $a"
     }
@@ -712,6 +723,8 @@ proc tribool_logical in {
 	return indeterminate
 }
 
+# Rest of the file is interactive.
+if { !$tcl_interactive } {
 
 set makefile {}
 set g_keep_going 0
@@ -821,3 +834,4 @@ if { !$g_action_performed } {
     puts stderr "+++ Nothing to be done for: $g_args"
 }
 
+} ;# end of interactive actions

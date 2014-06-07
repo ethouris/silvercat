@@ -1,6 +1,8 @@
 # This is a standard general-purpose makefile for a flail-simple program
 # consisting of more than one source file.
 
+# Makefile.tcl is the default name. Another name can be used with -f option.
+
 # The structure looks almost exactly like in the standard Makefile.
 # The most basic command is "rule" and it results in the standard
 # Makefile's statement: target: depend1 depend2...\n\tcommand to build target
@@ -40,4 +42,5 @@ rule clean {
 }
 
 # Unblock this, if you want to see how the make.tcl tool works.
+# Alternatively, use the -v option.
 #set g_verbose 1
