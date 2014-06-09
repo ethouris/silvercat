@@ -346,13 +346,44 @@ proc ag {target args} {
 		set args [lindex [no_comment $args] 0]
 	}
 
+	# Get old options
+	array set options [get agv::target($target)]
+
 	foreach o $args {
-		if { [string index $o 0] == "-" } {
+		if { [string index $o 0] == "-" && [string index $o 1] != " " } {
 			set lastopt [string range $o 1 end]
+			set lastopt [UnaliasOption $lastopt]
 			continue
 		}
 
-		lappend options($lastopt) [UnaliasOption $o]
+		# This time it's -option {- config speed}
+		if { [string index $o 0] == "-" } {
+			set o [lrange $o 1 end]
+			set opt [get options($lastopt)]
+			set pos ""
+
+			foreach e $o {
+				lappend pos {*}[lsearch -all -exact $opt $e]
+			}
+
+			set out ""
+			set len [llength $opt]
+			for {set i 0} {$i < $len} {incr i} {
+				if { $i ni $pos } {
+					lappend out [lindex $opt $i]
+				}
+			}
+			set options($lastopt) $out
+			continue
+		}
+
+		if { [string index $o 0] == "=" && [string index $o 1] == " " } {
+			# Reset option (replace existing value)
+			set options($lastopt) [string range $o 2 end]
+			continue
+		}
+
+		lappend options($lastopt) $o
 	}
 
 	vlog "Target: $target {[array get options]}"
