@@ -13,14 +13,20 @@ ag-profile posix-install   ;# Profile for installation rules
 
 # The most low level command that defines targets to build.
 
-ag answer {
-	-type 		program
-	-category 	bin
-	-sources 	file1.cc file2.cc
-	#-headers 	file.h (headers will still be extracted to -noinst-headers if detected by deps checker)
-	-packages   zlib
-}
+# ag answer {
+# 	-type 		program
+# 	-category 	bin
+# 	-sources 	file1.cc file2.cc
+# 	-headers 	file.h
+# 	-packages   zlib
+# }
 
+ag answer -type program -category bin
+ag answer -packages zlib
+ag answer -sources file1.cc file2.cc
+
+# (headers will still be extracted to -noinst-headers if detected by deps checker)
+#ag answer -headers file.h
 
 
 # The first argument is always the target to be built.
