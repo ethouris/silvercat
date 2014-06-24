@@ -166,7 +166,9 @@ namespace eval agv {
 				set packages [dict:at $db packages]
 				vlog "Packages: $packages"
 				foreach p $packages {
-					exec pkg-config --exists $p
+					if { [catch {exec pkg-config --exists $p}] } {
+						error "Package not found: $p"
+					}
 					set ldflags [exec pkg-config --libs $p]
 					set cflags [exec pkg-config --cflags $p]
 
@@ -612,7 +614,10 @@ proc GenerateLinkRule:program {db lang outfile objects ldflags} {
 proc ag-genrules target {
 
 	# Complete lacking values that have to be generated.
-	agp-prepare-database $target
+	if { ![agp-prepare-database $target] } {
+		puts stderr "Failed to prepare database for '$target'"
+		return false
+	}
 
     set phony [dict:at $agv::target($target) phony]
 
@@ -647,7 +652,10 @@ proc ag-make {target} {
 	}
 
 	vlog "Preparing database for '$target' to make '$exp_targets'"
-	agp-prepare-database $target
+	if { ![agp-prepare-database $target] } {
+		puts "Failed to prepare database for '$target'"
+		return
+	}
 
 	set rules [dict:at $agv::target($target) rules]
 
@@ -703,6 +711,8 @@ proc agp-prepare-database target {
 	vlog "Preparing database for '$target' type=$type"
 
 	set frameworks [dict:at $agv::target($target) frameworks]
+
+	# XXX default frameworks
 	if { $frameworks == "" } {
 		set frameworks pkg-config
 	}
@@ -717,7 +727,10 @@ proc agp-prepare-database target {
 			}
 		}
 
-		$frm $target
+		if { [catch {$frm $target} err] } {
+			puts stderr "Error executing framework '$frm' on '$target':\n$err"
+			return false
+		}
 	}
 
 	Process:$type $target
@@ -730,8 +743,12 @@ proc agp-prepare-database target {
 	vlog "PROCESSING DEPENDS:"
 
 	foreach dep [dict:at $agv::target($target) depends] {
-		agp-prepare-database $dep
+		if { ![agp-prepare-database $dep] } {
+			return false
+		}
 	}
+
+	return true
 }
 
 proc ag-subdir args {
