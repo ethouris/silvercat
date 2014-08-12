@@ -17,8 +17,6 @@ variable g_first_rule {}
 
 variable g_failed {}
 
-variable g_action_performed 0
-
 set g_shell {/bin/bash}
 if { [info exists ::env(SHELL)] } { set g_shell $::env(SHELL) }
 
@@ -44,14 +42,6 @@ proc debug str {
 set g_debug pass
 
 proc pass args { }
-
-proc get {var} {
-	upvar $var v
-	if { [info exists v] } {
-		return $v
-	}
-	return
-}
 
 # Provide expansion in style of {expand} in tcl 8.5
 # use any character provided in $ch
@@ -108,15 +98,14 @@ proc rule args {
 	set ::g_actions($target) $action
 
 	vlog "Target $target = $::g_depends($target)"
-
-	# This feature is blocked because specifying the target as "-name" conflicts with option recognotion
-# --- 	# Make phony all targets with name starting from "-"
-# --- 	foreach dep $depends {
-# --- 		if { [string index $dep 0] == "-" } {
-# --- 			$::g_debug "RULE '$target': dependency '$dep' is set phony"
-# --- 			set ::g_phony($dep) ""
-# --- 		}
-# --- 	}
+	# Make phony all targets with name starting from "-"
+	# (feature disabled - doesn't make much sense)
+   #foreach dep $depends {
+   #	if { [string index $dep 0] == "-" } {
+   #		$::g_debug "RULE '$target': dependency '$dep' is set phony"
+   #		set ::g_phony($dep) ""
+   #	}
+   #}
 	set target
 }
 
@@ -674,14 +663,6 @@ proc pset+ {name arg1 args} {
     }
 }
 
-proc pset+ {name arg1 args} {
-    upvar $name var
-    append var " $arg1"
-    foreach a $args {
-        append var " $a"
-    }
-}
-
 proc phas {name} {
     upvar $name lname
     if {![info exists lname]} {
@@ -690,10 +671,10 @@ proc phas {name} {
     return [string is true $lname]
 }
 
-proc pget {name} {
+proc pget {name {default ""}} {
     upvar $name lname
     if {![info exists lname]} {
-        return ""
+        return $default
     }
     return $lname
 }
@@ -725,6 +706,7 @@ proc tribool_logical in {
 
 # Rest of the file is interactive.
 if { !$tcl_interactive } {
+
 
 set makefile {}
 set g_keep_going 0

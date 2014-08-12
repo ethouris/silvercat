@@ -111,11 +111,15 @@ namespace eval agv {
 				c++ {
 					compile "clang++ -c"
 					link "clang++"
+					linkdl "clang++ -dynamic"
+					gendep "clang++ -MM"
 				}
 
 				c {
 					compile "clang -c"
 					link "clang"
+					linkdl "clang -dynamic"
+					gendep "clang -MM"
 				}
 			}
 		}
@@ -213,7 +217,7 @@ proc GenerateCompileFlags lang {
 		lappend define_flags -D$def
 	}
 
-	foreach def [get agv::defines] {
+	foreach def [pget agv::defines] {
 		lappend define_flags -D$def
 	}
 	set cflags [dict:at $agv::profile($lang) cflags]
@@ -347,7 +351,7 @@ proc ag {target args} {
 	}
 
 	# Get old options
-	array set options [get agv::target($target)]
+	array set options [pget agv::target($target)]
 
 	foreach o $args {
 		if { [string index $o 0] == "-" && [string index $o 1] != " " } {
@@ -359,7 +363,7 @@ proc ag {target args} {
 		# This time it's -option {- config speed}
 		if { [string index $o 0] == "-" } {
 			set o [lrange $o 1 end]
-			set opt [get options($lastopt)]
+			set opt [pget options($lastopt)]
 			set pos ""
 
 			foreach e $o {
@@ -490,10 +494,7 @@ proc Process:program target {
 	set itarget install-$target
 	set cat [dict:at $db category]
 	set icmd ""
-	set prefix [get agv::prefix]
-	if { $prefix == "" } {
-		set prefix [dict:at $agv::profile(default) prefix]
-	}
+	set prefix [pget agv::prefix [dict:at $agv::profile(default) prefix]]
 
 	if { $prefix != "" } {
 		switch -- $cat {
