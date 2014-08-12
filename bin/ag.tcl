@@ -7,14 +7,20 @@ set tcl_interactive 1
 source [file dirname [info script]]/make.tcl
 set tcl_interactive $was_interactive
 
-
 namespace eval agv {
 	set version 0.1 ;# just to define something
 
 	variable target
 	namespace export target
 
+	# Supporting directories
+	variable directories
+	namespace export directories
+
 	namespace eval p {
+
+		set me [info script]
+
 		set exefor(.dll) .exe
 		set exefor(.dylib) .app
 		set exefor(.so) ""
@@ -28,6 +34,26 @@ namespace eval agv {
 			}
 
 			return $out
+		}
+
+		proc PrepareGeneralTarget {} {
+			# This procedure should collect all targets of
+			# type 'program' or 'library' and create a phony
+			# target named 'all' that has them all as dependencies
+
+			set subtargets {}
+			foreach t [array names agv::target] {
+				set type [dict:at $agv::target($t) type]
+				vlog "Target '$t', type $type:"
+				if { $type in {program library} } {
+					vlog " --> Added to 'all'"
+					lappend subtargets $t
+				} else {
+					vlog " --| Not added to 'all'"
+				}
+			}
+
+			ag all -type phony -depends {*}$subtargets
 		}
 
 		set langextmap {
@@ -144,7 +170,9 @@ namespace eval agv {
 				set packages [dict:at $db packages]
 				vlog "Packages: $packages"
 				foreach p $packages {
-					exec pkg-config --exists $p
+					if { [catch {exec pkg-config --exists $p}] } {
+						error "Package not found: $p"
+					}
 					set ldflags [exec pkg-config --libs $p]
 					set cflags [exec pkg-config --cflags $p]
 
@@ -526,6 +554,19 @@ proc Process:program target {
 	dict set db phony $phony
 
 	set agv::target($target) $db
+
+	Process:phony $target
+}
+
+proc Process:phony target {
+	# Do the general depends processing
+	set phony [dict:at $agv::target($target) phony]
+	set deps [dict:at $agv::target($target) depends]
+
+	# Intentionally 2 elements as it should be a dict
+	lappend phony [list $target $deps]
+
+	dict set agv::target($target) phony $phony
 }
 
 proc GenerateCompileRule {db lang objfile source} {
@@ -574,7 +615,10 @@ proc GenerateLinkRule:program {db lang outfile objects ldflags} {
 proc ag-genrules target {
 
 	# Complete lacking values that have to be generated.
-	ag-prepare-database $target
+	if { ![agp-prepare-database $target] } {
+		puts stderr "Failed to prepare database for '$target'"
+		return false
+	}
 
     set phony [dict:at $agv::target($target) phony]
 
@@ -609,7 +653,10 @@ proc ag-make {target} {
 	}
 
 	vlog "Preparing database for '$target' to make '$exp_targets'"
-	ag-prepare-database $target
+	if { ![agp-prepare-database $target] } {
+		puts "Failed to prepare database for '$target'"
+		return
+	}
 
 	set rules [dict:at $agv::target($target) rules]
 
@@ -640,7 +687,15 @@ proc ag-make {target} {
 	make {*}$exp_targets
 }
 
-proc ag-prepare-database target {
+proc agp-prepare-database target {
+	vlog "--- Preparing database for target '$target'"
+
+	# Auto-generate target "all", if not defined
+	if { $target == "all" && ![info exists agv::target(all)] } {
+		vlog "--- Synthesizing 'all' target"
+		agv::p::PrepareGeneralTarget
+	}
+
 	# Check if defined
 	if { ![info exists agv::target($target)] } {
 		error "No such target: $target"
@@ -657,6 +712,8 @@ proc ag-prepare-database target {
 	vlog "Preparing database for '$target' type=$type"
 
 	set frameworks [dict:at $agv::target($target) frameworks]
+
+	# XXX default frameworks
 	if { $frameworks == "" } {
 		set frameworks pkg-config
 	}
@@ -671,7 +728,10 @@ proc ag-prepare-database target {
 			}
 		}
 
-		$frm $target
+		if { [catch {$frm $target} err] } {
+			puts stderr "Error executing framework '$frm' on '$target':\n$err"
+			return false
+		}
 	}
 
 	Process:$type $target
@@ -681,6 +741,23 @@ proc ag-prepare-database target {
 		vlog "  -$k: [dict get $agv::target($target) $k]"
 	}
 
+	vlog "PROCESSING DEPENDS:"
+
+	foreach dep [dict:at $agv::target($target) depends] {
+		if { ![agp-prepare-database $dep] } {
+			return false
+		}
+	}
+
+	return true
+}
+
+proc ag-subdir args {
+	if { [llength $args] == 1 } {
+		set args [lindex $args 0]
+	}
+
+	lappend agv::p::directories {*}$args
 }
 
 proc ag-help {args} {
