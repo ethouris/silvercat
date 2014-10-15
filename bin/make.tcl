@@ -43,14 +43,6 @@ set g_debug pass
 
 proc pass args { }
 
-proc get {var} {
-	upvar $var v
-	if { [info exists v] } {
-		return $v
-	}
-	return
-}
-
 # Provide expansion in style of {expand} in tcl 8.5
 # use any character provided in $ch
 proc expandif {ch ls} {
@@ -197,6 +189,8 @@ proc subst_action action {
 proc is_target_stale {target depend} {
 	# Check if $depend is phony.
 	# If phony, then just forward the request to its depends.
+	# XXX THIS FEATURE IS SLIGHTLY CONTROVERSIAL.
+	# Probably another type of target "forward" should exist, parallel to "phony".
 	if { [info exists ::g_phony($depend)] } {
 		set out false
 		if { [info exists ::g_depends($depend)] && [expr {$::g_depends($depend) != ""}] } {
@@ -292,7 +286,7 @@ proc make target {
                 set status 0
                 vlog "Making $depend failed, so $target won't be made"
 				if { $::g_keep_going } {
-					vlog "- continuing with other targets (-k)"
+					vlog "- although continuing with other targets (-k)"
 				} else {
 					break
 				}
@@ -551,7 +545,7 @@ proc perform_action {target actual_target} {
 				link {
 					if { ![info exists ::g_actions($arglist)] } {
 						puts stderr \
-		                                        "+++ Can't resolve $arglist as a link to action"
+						     "+++ Can't resolve $arglist as a link to action"
 						lappend ::g_failed $target
 						return false
 					}
@@ -677,10 +671,10 @@ proc phas {name} {
     return [string is true $lname]
 }
 
-proc pget {name} {
+proc pget {name {default ""}} {
     upvar $name lname
     if {![info exists lname]} {
-        return ""
+        return $default
     }
     return $lname
 }

@@ -113,6 +113,9 @@ namespace eval agv {
 				default {
 					prefix /usr/local
 					installdir_bin {$prefix/bin}
+					# XXX Mind that probably on 64-bit systems,
+					# the 64-bit libraries are installed in lib64,
+					# while lib is only for 32-bit libraries
 					installdir_lib {$prefix/lib}
 				}
 			}
@@ -137,11 +140,15 @@ namespace eval agv {
 				c++ {
 					compile "clang++ -c"
 					link "clang++"
+					linkdl "clang++ -dynamic"
+					gendep "clang++ -MM"
 				}
 
 				c {
 					compile "clang -c"
 					link "clang"
+					linkdl "clang -dynamic"
+					gendep "clang -MM"
 				}
 			}
 		}
@@ -166,7 +173,9 @@ namespace eval agv {
 				set packages [dict:at $db packages]
 				vlog "Packages: $packages"
 				foreach p $packages {
-					exec pkg-config --exists $p
+					if { [catch {exec pkg-config --exists $p}] } {
+						error "Package not found: $p"
+					}
 					set ldflags [exec pkg-config --libs $p]
 					set cflags [exec pkg-config --cflags $p]
 
@@ -239,7 +248,7 @@ proc GenerateCompileFlags lang {
 		lappend define_flags -D$def
 	}
 
-	foreach def [get agv::defines] {
+	foreach def [pget agv::defines] {
 		lappend define_flags -D$def
 	}
 	set cflags [dict:at $agv::profile($lang) cflags]
@@ -373,7 +382,7 @@ proc ag {target args} {
 	}
 
 	# Get old options
-	array set options [get agv::target($target)]
+	array set options [pget agv::target($target)]
 
 	foreach o $args {
 		if { [string index $o 0] == "-" && [string index $o 1] != " " } {
@@ -385,7 +394,7 @@ proc ag {target args} {
 		# This time it's -option {- config speed}
 		if { [string index $o 0] == "-" } {
 			set o [lrange $o 1 end]
-			set opt [get options($lastopt)]
+			set opt [pget options($lastopt)]
 			set pos ""
 
 			foreach e $o {
@@ -513,14 +522,12 @@ proc Process:program target {
 		vlog "Adding phony $target -> $outfile (because they differ)"
 		dict set phony $target $outfile
 	}
+	dict set db filename $outfile
 
 	set itarget install-$target
 	set cat [dict:at $db category]
 	set icmd ""
-	set prefix [get agv::prefix]
-	if { $prefix == "" } {
-		set prefix [dict:at $agv::profile(default) prefix]
-	}
+	set prefix [pget agv::prefix [dict:at $agv::profile(default) prefix]]
 
 	if { $prefix != "" } {
 		switch -- $cat {
@@ -539,10 +546,11 @@ proc Process:program target {
 		}
 	}
 
-	if { $icmd != "" && $phony == "" } {
+	vlog "TEST: icmd='$icmd' phony='$phony'"
+	if { $icmd != "" } {
 		dict set rules $itarget [list $outfile $icmd]
 		# Make the install target phony
-		vlog "Adding phony $target with empty depends because there is no make command for it"
+		vlog "Adding phony $itarget "
 		dict set phony $itarget ""
 	}
 
@@ -562,6 +570,8 @@ proc Process:phony target {
 	set phony [dict:at $agv::target($target) phony]
 	set deps [dict:at $agv::target($target) depends]
 
+	# XXX Unclear as to why this is done only if phony is not yet set
+	# with dependency
 	if { [dict:at $agv::target($target) phony $target] == "" } {
 		dict set agv::target($target) phony $target $deps
 	}
@@ -612,15 +622,20 @@ proc GenerateLinkRule:program {db lang outfile objects ldflags} {
 
 proc ag-genrules target {
 
+	# Default target is all.
+	# This is not as a "standard for makefiles" that it is
+	# normal to define "all" as first target. The "all"
+	# target is a special name for silvercat and it is
+	# always available as a target having everything else
+	# as dependency.
+	if { $target == "" } {
+		set target all
+	}
+
 	# Complete lacking values that have to be generated.
-	agp-prepare-database $target
-
-    set phony [dict:at $agv::target($target) phony]
-
-	if { $phony != "" } {
-		foreach {rule deps} $phony {
-			puts "phony $rule $deps"
-		}
+	if { ![agp-prepare-database $target] } {
+		puts stderr "Failed to prepare database for '$target'"
+		return false
 	}
 
 	set rules [dict:at $agv::target($target) rules]
@@ -631,6 +646,16 @@ proc ag-genrules target {
 	foreach {tarfile data} $rules {
 		puts "rule $tarfile $data"
 	}
+
+	# First rules, then phony. Later phonies may override earlier rules.
+    set phony [dict:at $agv::target($target) phony]
+
+	if { $phony != "" } {
+		foreach {rule deps} $phony {
+			puts "phony $rule $deps"
+		}
+	}
+
 
 	# Now generate everything for the dependent targets
 	set deps [dict:at $agv::target($target) depends]
@@ -647,6 +672,7 @@ proc ag-genrules target {
 	puts "rule $cleanname {
 	!tcl autoclean $target
 }"
+	puts "phony $cleanname"
 }
 
 proc ag-make {target} {
@@ -659,7 +685,10 @@ proc ag-make {target} {
 	}
 
 	vlog "Preparing database for '$target' to make '$exp_targets'"
-	agp-prepare-database $target
+	if { ![agp-prepare-database $target] } {
+		puts "Failed to prepare database for '$target'"
+		return
+	}
 
 	set rules [dict:at $agv::target($target) rules]
 
@@ -715,6 +744,8 @@ proc agp-prepare-database target {
 	vlog "Preparing database for '$target' type=$type"
 
 	set frameworks [dict:at $agv::target($target) frameworks]
+
+	# XXX default frameworks
 	if { $frameworks == "" } {
 		set frameworks pkg-config
 	}
@@ -729,24 +760,30 @@ proc agp-prepare-database target {
 			}
 		}
 
-		$frm $target
+		if { [catch {$frm $target} err] } {
+			puts stderr "Error executing framework '$frm' on '$target':\n$err"
+			return false
+		}
 	}
 
 	vlog " ... Processing '$target' as '$type'"
 	Process:$type $target
 	
-	vlog "DATABASE AFTER PROCESSING:"
+	vlog "DATABASE '$target' AFTER PROCESSING:"
 	foreach k [dict keys $agv::target($target)] {
-		vlog "  -$k: [dict get $agv::target($target) $k]"
+		vlog [join [list "   -$k:" [string map {\n " <CR> "} [dict get $agv::target($target) $k]]]]
 	}
 
 	vlog "PROCESSING DEPENDS of $target"
 
 	foreach dep [dict:at $agv::target($target) depends] {
-		agp-prepare-database $dep
+		if { ![agp-prepare-database $dep] } {
+			return false
+		}
 	}
 
 	vlog "END DEPENDS OF $target"
+	return true
 }
 
 proc ag-subdir args {
