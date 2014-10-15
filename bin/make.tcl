@@ -17,6 +17,8 @@ variable g_first_rule {}
 
 variable g_failed {}
 
+variable g_action_performed 0
+
 set g_shell {/bin/bash}
 if { [info exists ::env(SHELL)] } { set g_shell $::env(SHELL) }
 
@@ -98,14 +100,15 @@ proc rule args {
 	set ::g_actions($target) $action
 
 	vlog "Target $target = $::g_depends($target)"
-	# Make phony all targets with name starting from "-"
-	# (feature disabled - doesn't make much sense)
-   #foreach dep $depends {
-   #	if { [string index $dep 0] == "-" } {
-   #		$::g_debug "RULE '$target': dependency '$dep' is set phony"
-   #		set ::g_phony($dep) ""
-   #	}
-   #}
+
+	# This feature is blocked because specifying the target as "-name" conflicts with option recognotion
+# --- 	# Make phony all targets with name starting from "-"
+# --- 	foreach dep $depends {
+# --- 		if { [string index $dep 0] == "-" } {
+# --- 			$::g_debug "RULE '$target': dependency '$dep' is set phony"
+# --- 			set ::g_phony($dep) ""
+# --- 		}
+# --- 	}
 	set target
 }
 
@@ -300,7 +303,7 @@ proc make target {
 
 	# If a phony target doesn't have action, it won't be checked for generic action, too.
 	if { [info exists ::g_phony($target)] && ![info exists ::g_actions($target)] } {
-		vlog "Target '$target' is phony - not checking for action"
+		vlog "Target '$target' is phony and has no action - skipping"
 		return
 	}
 
@@ -574,7 +577,7 @@ proc perform_action {target actual_target} {
 		}
 
 		#set waserr [catch {exec $::g_shell -c $action} result]; set retcode $::errorCode
-		set waserr [catch {exec $::g_shell -c $action 2>@stderr >@stdout} result]; set retcode [get ::errorCode]
+		set waserr [catch {exec $::g_shell -c $action 2>@stderr >@stdout} result]; set retcode [pget ::errorCode]
 		set failed [expr {$retcode != "NONE"}]
 		if { $waserr } {
 		        if { $result != "" } {
