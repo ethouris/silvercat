@@ -254,7 +254,7 @@ proc vlog text {
 		append head "* "
 	}
 
-	puts "$head $text"
+	puts stderr "$head $text"
 }
 
 proc make target {

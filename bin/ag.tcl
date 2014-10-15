@@ -510,6 +510,7 @@ proc Process:program target {
 
 	set phony ""
 	if { $outfile != $target } {
+		vlog "Adding phony $target -> $outfile (because they differ)"
 		dict set phony $target $outfile
 	}
 
@@ -538,9 +539,10 @@ proc Process:program target {
 		}
 	}
 
-	if { $icmd != "" } {
+	if { $icmd != "" && $phony == "" } {
 		dict set rules $itarget [list $outfile $icmd]
 		# Make the install target phony
+		vlog "Adding phony $target with empty depends because there is no make command for it"
 		dict set phony $itarget ""
 	}
 
@@ -560,10 +562,9 @@ proc Process:phony target {
 	set phony [dict:at $agv::target($target) phony]
 	set deps [dict:at $agv::target($target) depends]
 
-	# Intentionally 2 elements as it should be a dict
-	lappend phony [list $target $deps]
-
-	dict set agv::target($target) phony $phony
+	if { [dict:at $agv::target($target) phony $target] == "" } {
+		dict set agv::target($target) phony $target $deps
+	}
 }
 
 proc GenerateCompileRule {db lang objfile source} {
@@ -631,8 +632,19 @@ proc ag-genrules target {
 		puts "rule $tarfile $data"
 	}
 
+	# Now generate everything for the dependent targets
+	set deps [dict:at $agv::target($target) depends]
+	foreach d $deps {
+		ag-genrules $d
+	}
+
+	set cleanname $target-clean
+	if { $target == "all" } {
+		set cleanname clean
+	}
+
 	# Clean rule
-	puts "rule $target-clean {
+	puts "rule $cleanname {
 	!tcl autoclean $target
 }"
 }
@@ -720,6 +732,7 @@ proc agp-prepare-database target {
 		$frm $target
 	}
 
+	vlog " ... Processing '$target' as '$type'"
 	Process:$type $target
 	
 	vlog "DATABASE AFTER PROCESSING:"
@@ -727,11 +740,13 @@ proc agp-prepare-database target {
 		vlog "  -$k: [dict get $agv::target($target) $k]"
 	}
 
-	vlog "PROCESSING DEPENDS:"
+	vlog "PROCESSING DEPENDS of $target"
 
 	foreach dep [dict:at $agv::target($target) depends] {
 		agp-prepare-database $dep
 	}
+
+	vlog "END DEPENDS OF $target"
 }
 
 proc ag-subdir args {
