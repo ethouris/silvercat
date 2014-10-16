@@ -7,6 +7,7 @@ set tcl_interactive 1
 source [file dirname [info script]]/make.tcl
 set tcl_interactive $was_interactive
 
+
 namespace eval agv {
 	set version 0.1 ;# just to define something
 
@@ -19,176 +20,16 @@ namespace eval agv {
 
 	namespace eval p {
 
+		# Prologue
 		set me [info script]
+		set here [file dirname $me]
 
-		set exefor(.dll) .exe
-		set exefor(.dylib) .app
-		set exefor(.so) ""
+		# Ingredients
 
-		proc lsuniq {ls} {
-			set out ""
-			foreach e $ls {
-				if { $e ni $out } {
-					lappend out $e
-				}
-			}
-
-			return $out
-		}
-
-		proc PrepareGeneralTarget {} {
-			# This procedure should collect all targets of
-			# type 'program' or 'library' and create a phony
-			# target named 'all' that has them all as dependencies
-
-			set subtargets {}
-			foreach t [array names agv::target] {
-				set type [dict:at $agv::target($t) type]
-				vlog "Target '$t', type $type:"
-				if { $type in {program library} } {
-					vlog " --> Added to 'all'"
-					lappend subtargets $t
-				} else {
-					vlog " --| Not added to 'all'"
-				}
-			}
-
-			ag all -type phony -depends {*}$subtargets
-		}
-
-		set langextmap {
-			c {
-				.c
-			}
-
-			c++ {
-				.C .cc .cpp .cxx .c++
-			}
-
-			c-header {
-				.h
-			}
-			
-			c++-header {
-				.H .hh .hpp .hxx .h++
-			}
-
-			objc {
-				.m
-			}
-
-			objc++ {
-				.M .mm .mpp .mxx .m++
-			}
-		}
-
-		set profiles {
-
-			structure {
-
-				# { Lang entry named "general" defines things that are common
-				# for all languages. }
-				lang {
-					compile "Command to produce .o file from source file"
-					compile_oflag "Usually -o"
-					link "Command to produce executable file"
-					link_oflag "Usually -o"
-					linkdl "(optional) Command to produce dynamic library file (defaults to link)"
-					gendep "Command to generate dependencies (produces a list of all files that can be extracted of a single source file)"
-					preproc "Command to run preprocessor (optional, can be empty if a language doesn't use one)"
-					cflags "Flags passed always to compile command (compile, gendep, preproc)"
-					ldflags "Flags passed to link command"
-				}
-			}
-
-			# { Options that apply by default unless overridden in particular profile }
-			default {
-				default {
-					compile_oflag -o
-					link_oflag -o
-				}
-			}
-
-			posix-install {
-				default {
-					prefix /usr/local
-					installdir_bin {$prefix/bin}
-					# XXX Mind that probably on 64-bit systems,
-					# the 64-bit libraries are installed in lib64,
-					# while lib is only for 32-bit libraries
-					installdir_lib {$prefix/lib}
-				}
-			}
-
-			gcc-native {
-				c++ {
-					compile "g++ -c"
-					link "g++"
-					linkdl "g++ -dynamic"
-					gendep "g++ -MM"
-				}
-
-				c {
-					compile "gcc -c"
-					link "gcc"
-					linkdl "gcc -dynamic"
-					gendep "gcc -MM"
-				}
-			}
-
-			clang-native {
-				c++ {
-					compile "clang++ -c"
-					link "clang++"
-					linkdl "clang++ -dynamic"
-					gendep "clang++ -MM"
-				}
-
-				c {
-					compile "clang -c"
-					link "clang"
-					linkdl "clang -dynamic"
-					gendep "clang -MM"
-				}
-			}
-		}
-
-		# Don't know if this is the best way, but let it be...
-		set compatible_langs {
-			c++ {
-				c d
-			}
-
-			c {
-			}
-		}
-
-		namespace eval fw {
-			proc pkg-config {target} {
-				vlog "Running pkg-config framework for '$target'"
-				# Take the package name, extract the library
-				# parameters, apply to the database.
-				set db $::agv::target($target)
-
-				set packages [dict:at $db packages]
-				vlog "Packages: $packages"
-				foreach p $packages {
-					if { [catch {exec pkg-config --exists $p}] } {
-						error "Package not found: $p"
-					}
-					set ldflags [exec pkg-config --libs $p]
-					set cflags [exec pkg-config --cflags $p]
-
-					vlog "Data for $p: cflags='$cflags' ldflags='$ldflags'"
-
-					dict lappend db ldflags {*}$ldflags
-					dict lappend db cflags {*}$cflags
-				}
-
-				# Write back the database
-				set ::agv::target($target) $db
-			}
-		}
+		source $here/agv.p.utilities.tcl
+		source $here/agv.p.builtin.tcl
+		source $here/agv.p.builtin-profiles.tcl
+		source $here/agv.p.builtin-frameworks.tcl
 
 	}
 
@@ -210,37 +51,7 @@ namespace eval agv {
 	namespace export prefix
 }
 
-proc GetCommonLanguage langs {
-
-	if { [llength $langs] < 2 } {
-		# No dillema :)
-		return $langs
-	}
-
-	set accepted ""
-
-	foreach a $langs {
-		foreach b $langs {
-			if { $a == $b } {
-				continue
-			}
-
-			#puts "--> Check if $a can supersede $b"
-
-			set c [dict:at $agv::p::compatible_langs $a]
-			#puts "---> Compatible languages for $a: $c"
-
-			if { $b in $c } {
-				#puts "-- $b is one."
-				lappend accepted $a
-			} else {
-				#puts "-- $b is not one"
-			}
-		}
-	}
-
-	return [lindex $accepted 0]
-}
+namespace import agv::p::dict:at
 
 proc GenerateCompileFlags lang {
 	set define_flags ""
@@ -314,6 +125,11 @@ proc IdentifyLanguage sourcefile {
 proc DetectType target {
 	# If any dot is found, try to determine by extension.
 	# If no dot found, return "program".
+
+	# XXX This is true only on POSIX.
+	# Mind the $agv::exe value as a suffix.
+	# On Windows and Mac the no-dot files should
+	# be reported as Unknown.
 
 	if { [string first $target .] == -1 } {
 		return program
@@ -427,14 +243,6 @@ proc ag {target args} {
 }
 
 
-proc dict:at {dic args} {
-	if { ![dict exists $dic {*}$args] } {
-		return ""
-	}
-
-	return [dict get $dic {*}$args]
-}
-
 proc Process:program target {
 	# If the target is program, then you need
 	# to generate rules that compile all sources
@@ -447,7 +255,6 @@ proc Process:program target {
 	set rules [dict:at $db rules]
 
 	set used_langs ""
-	set hsufs [concat [dict:at $agv::p::langextmap c-header] [dict:at $agv::p::langextmap c++-header]]
 
 	vlog "Performing general processing for program '$target':"
 
@@ -477,6 +284,8 @@ proc Process:program target {
 		# Find headers among dependent files in the rules
 		set ifiles [lrange $rule 1 end-1]
 
+		set hsufs [agv::p::GetHeaderSuffixes $lang]
+
 		# Find header files in the deps.
 		# If there are any, and they are not found in 'headers',
 		# add them to noinst-headers
@@ -499,7 +308,7 @@ proc Process:program target {
 	}
 	dict set db noinst-headers $tnh
 
-	set lang [GetCommonLanguage [dict keys $used_langs]]
+	set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
 
 	# ok, we have all sources processed.
 	# Now we need to generate the rule for
@@ -535,12 +344,15 @@ proc Process:program target {
 				# Nothing.
 			}
 
-			bin {
-				set bindir [subst -nocommands [dict:at $agv::profile(default) installdir_bin]]
+			default {
+				# Try to use the directory marked for particular category
+				set bindir [subst -nocommands [dict:at $agv::profile(default) installdir:$cat]]
 				if { $bindir != "" } {
 					set icmd "
 	install $outfile $bindir
 "
+				} else {
+					puts stderr "+++AG WARNING: No installdir for -category $cat - can't install $outfile"
 				}
 			}
 		}
@@ -620,7 +432,7 @@ proc GenerateLinkRule:program {db lang outfile objects ldflags} {
 	return $rule
 }
 
-proc ag-genrules target {
+proc ag-do-genrules target {
 
 	# Default target is all.
 	# This is not as a "standard for makefiles" that it is
@@ -636,6 +448,13 @@ proc ag-genrules target {
 	if { ![agp-prepare-database $target] } {
 		puts stderr "Failed to prepare database for '$target'"
 		return false
+	}
+
+	if { [info level] < 2 } {
+		# Print header
+		# Just don't print this in the sub-calls
+		puts "# Makefile for make.tcl"
+		puts "# DO NOT MODIFY THIS FILE. It's generated and its contents will be overwritten.\n"
 	}
 
 	set rules [dict:at $agv::target($target) rules]
@@ -656,11 +475,12 @@ proc ag-genrules target {
 		}
 	}
 
+	puts ""
 
 	# Now generate everything for the dependent targets
 	set deps [dict:at $agv::target($target) depends]
 	foreach d $deps {
-		ag-genrules $d
+		ag-do-genrules $d
 	}
 
 	set cleanname $target-clean
@@ -675,7 +495,7 @@ proc ag-genrules target {
 	puts "phony $cleanname"
 }
 
-proc ag-make {target} {
+proc ag-do-make {target} {
 
 	if { [llength $target] > 1 } {
 		set exp_targets [lrange $target 1 end]
@@ -794,7 +614,7 @@ proc ag-subdir args {
 	lappend agv::p::directories {*}$args
 }
 
-proc ag-help {args} {
+proc ag-do-help {args} {
 	puts "Usage: [file tail $::argv0] genrules <target>"
 }
 
@@ -811,7 +631,7 @@ set arg1 [lindex $argv 0]
 if { $arg1 == "" } {
 	set arg1 help
 }
-ag-$arg1 [lrange $argv 1 end]
+ag-do-$arg1 [lrange $argv 1 end]
 
 
 }
