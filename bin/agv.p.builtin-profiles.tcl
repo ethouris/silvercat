@@ -46,6 +46,7 @@ set profiles {
 			# while lib is only for 32-bit libraries }
 			installdir:lib {$prefix/lib}
 			installdir:data {$prefix/share}
+			installdir:include {$prefix/include}
 		}
 	}
 

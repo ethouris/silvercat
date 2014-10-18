@@ -418,6 +418,74 @@ proc Process:library target {
 	Process:phony $target
 }
 
+proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
+	set icmd ""
+
+	switch -- $cat {
+		noinst {
+			# Nothing.
+		}
+
+		default {
+			# Try to use the directory marked for particular category
+			set bindir [subst -nocommands [dict:at $agv::profile(default) installdir:$cat]]
+			if { $bindir != "" } {
+				if { $subdir != "" } {
+					set bindir [file join $bindir $subdir]
+				}
+				set icmd "\tinstall $outfile $bindir"
+			} else {
+				puts stderr "+++AG WARNING: No installdir for -category $cat - can't install $outfile"
+			}
+		}
+	}
+
+	return $icmd
+}
+
+proc GenerateInstallTarget:program {target prefix} {
+
+	set db $agv::target($target)
+	set outfile [dict:at $db filename]
+	set icmd [GenerateInstallCommand [dict:at $db category] $outfile $prefix]
+	if { $icmd == "" } {
+		return
+	}
+
+	set itarget install-$target
+	dict set db rules $itarget [list $outfile \n$icmd]
+	dict set db phony $itarget ""
+	# Ok, ready. Write back to the database
+	set agv::target($target) $db
+}
+
+proc GenerateInstallTarget:library {target prefix} {
+	set db $agv::target($target)
+
+	set libfile [dict:at $db filename]
+	set libicmd [GenerateInstallCommand [dict:at $db category] $libfile $prefix]
+
+	set cmds ""
+
+	# Generate also installation for headers
+	set hdr [dict:at $db headers]
+	foreach h $hdr {
+		set hcmd [GenerateInstallCommand include $h $prefix [dict:at $db headers-subdir]]
+		append cmds $hcmd\n
+	}
+
+	set itarget install-$target
+	dict set db rules install-$target-archive [list $libfile \n$libicmd\n]
+	dict set db phony install-$target-archive ""
+
+	dict set db rules install-$target-headers [list {*}$hdr \n$cmds]
+	dict set db phony install-$target-headers ""
+
+	dict set db phony install-$target [list install-$target-archive install-$target-headers]
+
+	# Ok, ready. Write back to the database
+	set agv::target($target) $db
+}
 
 proc ProcessCompileLink {type target outfile} {
 
@@ -453,43 +521,17 @@ proc ProcessCompileLink {type target outfile} {
 	}
 	dict set db filename $outfile
 
-	set itarget install-$target
-	set cat [dict:at $db category]
-	set icmd ""
-	set prefix [pget agv::prefix [dict:at $agv::profile(default) prefix]]
-
-	if { $prefix != "" } {
-		switch -- $cat {
-			noinst {
-				# Nothing.
-			}
-
-			default {
-				# Try to use the directory marked for particular category
-				set bindir [subst -nocommands [dict:at $agv::profile(default) installdir:$cat]]
-				if { $bindir != "" } {
-					set icmd "
-	install $outfile $bindir
-"
-				} else {
-					puts stderr "+++AG WARNING: No installdir for -category $cat - can't install $outfile"
-				}
-			}
-		}
-	}
-
-	vlog "TEST: icmd='$icmd' phony='$phony'"
-	if { $icmd != "" } {
-		dict set rules $itarget [list $outfile $icmd]
-		# Make the install target phony
-		vlog "Adding phony $itarget "
-		dict set phony $itarget ""
-	}
-
 	# Ok, ready. Write back to the database
 	dict set db rules $rules
 	dict set db phony $phony
 	set agv::target($target) $db
+
+	set prefix [pget agv::prefix [dict:at $agv::profile(default) prefix]]
+	if { $prefix == "" } {
+		puts stderr "WARNING: 'prefix' not found - not generating install targets"
+	} else {
+		GenerateInstallTarget:$type $target $prefix
+	}
 
 	ExecuteFrameworks $target complete
 }
