@@ -115,6 +115,38 @@ proc GenerateDepends {lang cflags source} {
 	return $deps
 }
 
+proc ExecuteFrameworks {target step args} {
+	set frameworks [dict:at $agv::target($target) frameworks]
+	vlog " ... Frameworks/$step: $frameworks ($args)"
+	foreach frm $frameworks {
+		if { [string first : $frm] == -1 } {
+			# Treat it as a builtin, that is agv::p::fw::$NAME
+			set frm "::agv::p::fw::$frm"
+
+			if { ![namespace exists $frm] } {
+				error "No such BUILTIN framework '$frm' (external fw must use namespaces)"
+			}
+		}
+
+		if { [string index $frm 0] != ":" } {
+			set frm "::$frm"
+		}
+
+		set procname [join [list $frm :: $step] ""]
+		if { [info command $procname] != $procname } {
+			continue
+		}
+
+		vlog "... Found step $step of in framework '$frm'"
+
+		if { [catch {$procname $target {*}$args} err] } {
+			puts stderr "Error executing framework '$procname' on '$target':\n$err"
+			return false
+		}
+	}
+	return true
+}
+
 proc IdentifyLanguage sourcefile {
 
 	set fext [file extension $sourcefile]
@@ -258,16 +290,14 @@ proc ag-info {filename args} {
 }
 
 
-proc Process:program target {
-	# If the target is program, then you need
-	# to generate rules that compile all sources
-	# into *.o files, then link them together
-	# using either global libraries or packages.
+proc ProcessSources target {
+
 	set db $agv::target($target)
 
 	set sources [dict:at $db sources]
 	set objects [dict:at $db objects]
 	set rules [dict:at $db rules]
+	set frameworks [dict:at $db frameworks]
 
 	set used_langs ""
 
@@ -275,16 +305,48 @@ proc Process:program target {
 
 	set hdrs ""
 	foreach s $sources {
-		set o [file rootname $s].ag.o
 
-		# Now identify the programming language
-		set lang [IdentifyLanguage $s]
+		set info [pget agv::fileinfo($s)]
+		set lang [dict:at $info language]
+
+		if { $lang == "" } {
+			# Now identify the programming language
+			set lang [IdentifyLanguage $s]
+			vlog " --- Audodetecting language for $s: $lang"
+			dict set agv::fileinfo($s) language $lang
+		}
+
 
 		dict lappend used_langs $lang $s
 
+		# Check if you have depends declared explicitly. If so, use them.
+		set info [pget agv::fileinfo($s)]
+		if { [dict exists $info includes] } {
+			vlog " --- Explicit include declaration for '$s' - not generating"
+			set deps [concat $s [dict get $info includes]]
+		} else {
+			vlog " --- Include info not found for '$s' - using gendep to generate:"
+			set cflags [CompleteCflags $db $lang]
+			set deps [GenerateDepends $lang $cflags $s]
+			# Write them back to the database
+			dict set agv::fileinfo($s) includes [lrange $deps 1 end] ;# skip the source itself
+		}
+	}
+
+	ExecuteFrameworks $target compile-pre $sources
+
+	foreach s $sources {
+
+		set info [pget agv::fileinfo($s)]
+		set lang [dict:at $info language]
+
+		set o [file rootname $s].ag.o
 		vlog " ... processing $s (language $lang) --> $o"
+
+		set deps [concat $s [dict get $info includes]]
+
 		# Generate rule for the target
-		set rule [GenerateCompileRule $db $lang $o $s]
+		set rule [GenerateCompileRule $db $lang $o $s $deps]
 
 		# Add rule to objects, notify in the database
 		if { [lsearch $objects $o] == -1 } {
@@ -323,19 +385,62 @@ proc Process:program target {
 	}
 	dict set db noinst-headers $tnh
 
+
 	set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
+	dict set db language $lang
+
+	# Write back the database
+	dict set db sources $sources
+	dict set db objects $objects
+	dict set db rules $rules
+
+	set agv::target($target) $db
+
+	ExecuteFrameworks $target compile-post $objects
+}
+
+proc Process:program target {
+
+	set outfile $target$agv::exe
+
+	ProcessCompileLink program $target $outfile
+	Process:phony $target
+}
+
+proc Process:library target {
+
+	# XXX THIS IS TRIAL ONLY!
+	# The exact filename should be prepared basing on
+	# the current OS and settings.
+	set outfile lib$target.a
+
+	ProcessCompileLink library $target $outfile
+	Process:phony $target
+}
+
+
+proc ProcessCompileLink {type target outfile} {
+
+	ProcessSources $target
+
+	# If the target is program, then you need
+	# to generate rules that compile all sources
+	# into *.o files, then link them together
+	# using either global libraries or packages.
+	set db $agv::target($target)
+	set rules [dict:at $db rules]
+	set phony [dict:at $db phony]
 
 	# ok, we have all sources processed.
 	# Now we need to generate the rule for
 	# main program.
-	set outfile $target$agv::exe
 
 	# Collect libraries.
 	# Turning packages from pkg-config or whatever
 	# other systems should be done before calling this
 	# function.
 
-	set rule [GenerateLinkRule:program $db $lang $outfile $objects [dict:at $db ldflags]]
+	set rule [GenerateLinkRule:$type $db $outfile]
 	dict set rules $outfile $rule
 
 	# Add a phony rule that redirects the symbolic name to physical file,
@@ -382,14 +487,11 @@ proc Process:program target {
 	}
 
 	# Ok, ready. Write back to the database
-	dict set db sources $sources
-	dict set db objects $objects
 	dict set db rules $rules
 	dict set db phony $phony
-
 	set agv::target($target) $db
 
-	Process:phony $target
+	ExecuteFrameworks $target complete
 }
 
 proc Process:phony target {
@@ -404,7 +506,7 @@ proc Process:phony target {
 	}
 }
 
-proc GenerateCompileRule {db lang objfile source} {
+proc CompleteCflags {db lang} {
 
 	# General cflags for the target
 	set cflags [dict:at $db cflags]
@@ -414,25 +516,22 @@ proc GenerateCompileRule {db lang objfile source} {
 	# The value of agv::cflags($lang) will be also included
 	set lang_cflags [GenerateCompileFlags $lang]
 
-	vlog "Generating compile rule for '$objfile':"
 	vlog " ... target's cflags: $cflags"
 	vlog " ... lang($lang) cflags: $lang_cflags"
 
 	append cflags " $lang_cflags"
 
+}
+
+proc GenerateCompileRule {db lang objfile source deps} {
+
+	vlog "Generating compile rule for '$objfile':"
+
+	set cflags [CompleteCflags $db $lang]
+
 	# The rule should be formed as for make.tcl
 	# except the 'rule' command and the target name.
 	# So: source-deps... command-to-compile
-
-	# Check if you have depends declared explicitly. If so, use them.
-	set info [pget agv::fileinfo($source)]
-	if { [dict exists $info includes] } {
-		vlog " --- Explicit include declaration for '$source' - not generating"
-		set deps [concat $source [dict get $info includes]]
-	} else {
-		vlog " --- Include info not found for '$source' - using gendep to generate:"
-		set deps [GenerateDepends $lang $cflags $source]
-	}
 
 	set compiler [dict get $agv::profile($lang) compile]
 	set oflag [dict get $agv::profile($lang) compile_oflag]
@@ -442,16 +541,33 @@ proc GenerateCompileRule {db lang objfile source} {
 	set rule "$deps {\n\t$command\n}"
 }
 
-proc GenerateLinkRule:program {db lang outfile objects ldflags} {
-	vlog "Generating link rule for '$outfile' ldflags: $ldflags"
+proc GenerateLinkRule:program {db outfile} {
+
+	set lang [dict:at $db language]
+	set objects [dict:at $db objects]
+	set ldflags [dict:at $db ldflags]
 
 	set linker [dict get $agv::profile($lang) link]
 	set oflag [dict get $agv::profile($lang) link_oflag]
+
+	vlog "Generating link rule for '$outfile' ldflags: $ldflags"
 
 	set command "$linker $objects $oflag $outfile $ldflags"
 
 	set rule "$objects {\n\t$command\n}"
 
+	return $rule
+}
+
+# XXX ONLY FOR TESTING!!!
+# This version creates just the static library out of given sources
+# NOTE: static libraries are just archives with *.o files, they don't
+# have dependencies - at worst they will be resolved at link time with
+# dynamic libraries or executables.
+proc GenerateLinkRule:library {db outfile} {
+	set objects [dict:at $db objects]
+	set command "ar rcs $outfile $objects"
+	set rule "$objects {\n\t$command\n}"
 	return $rule
 }
 
@@ -631,21 +747,9 @@ proc agp-prepare-database target {
 	if { $frameworks == "" } {
 		set frameworks pkg-config
 	}
-	vlog " ... Frameworks: $frameworks"
-	foreach frm $frameworks {
-		if { [string first : $frm] == -1 } {
-			# Treat it as a builtin, that is agv::p::fw::$NAME
-			set frm "::agv::p::fw::$frm"
 
-			if { [info command $frm] != $frm } {
-				error "No such BUILTIN framework '$frm' (external fw must use namespaces)"
-			}
-		}
-
-		if { [catch {$frm $target} err] } {
-			puts stderr "Error executing framework '$frm' on '$target':\n$err"
-			return false
-		}
+	if { ![ExecuteFrameworks $target prepare] } {
+		return false
 	}
 
 	vlog " ... Processing '$target' as '$type'"

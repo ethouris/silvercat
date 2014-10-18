@@ -25,10 +25,15 @@ ag answer -type program -category bin
 ag answer -packages zlib
 ag answer -sources file1.cc file2.cc
 
-ag-info file1.cc -includes file.h
+ag ff -type library -category lib -sources file2.cc
+
+# Define explicitly includes in this file. When this is not defined,
+# Silvercat will try to autodetect includes by running gendep-mapped command.
+#ag-info file1.cc -includes file.h
 
 
-# (headers will still be extracted to -noinst-headers if detected by deps checker)
+# (headers will still be extracted to -noinst-headers if detected by deps checker,
+# however they will be added to -noinst-header!)
 #ag answer -headers file.h
 
 
