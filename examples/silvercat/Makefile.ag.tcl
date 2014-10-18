@@ -25,6 +25,9 @@ ag answer -type program -category bin
 ag answer -packages zlib
 ag answer -sources file1.cc file2.cc
 
+ag-info file1.cc -includes file.h
+
+
 # (headers will still be extracted to -noinst-headers if detected by deps checker)
 #ag answer -headers file.h
 

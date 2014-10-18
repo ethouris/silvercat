@@ -49,6 +49,10 @@ namespace eval agv {
 	# Will be set to the profile's default, unless overridden.
 	variable prefix
 	namespace export prefix
+
+	# Per-file set information
+	variable fileinfo
+	namespace export fileinfo
 }
 
 namespace import agv::p::dict:at
@@ -103,7 +107,7 @@ proc GenerateDepends {lang cflags source} {
 
 	# Rules are generated in the convention of "make".
 	# Make them a plain list, as needed for "make.tcl"
-	set deps [string map { "\\\n" "" } $deps]
+	set deps [string map { "\\\n" " " } $deps]
 	# Drop the *.o target, we don't need it.
 	set deps [lrange $deps 1 end]
 	vlog "Resulting deps: $deps"
@@ -189,7 +193,10 @@ proc UnaliasOption alias {
 }
 
 
-proc ag {target args} {
+proc ModifyDatabase {array target args} {
+
+	upvar $array agv_db
+
 	set lastopt ""
 
 	if { [llength $args] == 1 } {
@@ -198,7 +205,7 @@ proc ag {target args} {
 	}
 
 	# Get old options
-	array set options [pget agv::target($target)]
+	array set options [pget agv_db($target)]
 
 	foreach o $args {
 		if { [string index $o 0] == "-" && [string index $o 1] != " " } {
@@ -239,7 +246,15 @@ proc ag {target args} {
 
 	vlog "Target: $target {[array get options]}"
 
-	set agv::target($target) [array get options]
+	set agv_db($target) [array get options]
+}
+
+proc ag {target args} {
+	return [ModifyDatabase agv::target $target {*}$args]
+}
+
+proc ag-info {filename args} {
+	return [ModifyDatabase agv::fileinfo $filename {*}$args]
 }
 
 
@@ -409,7 +424,15 @@ proc GenerateCompileRule {db lang objfile source} {
 	# except the 'rule' command and the target name.
 	# So: source-deps... command-to-compile
 
-	set deps [GenerateDepends $lang $cflags $source]
+	# Check if you have depends declared explicitly. If so, use them.
+	set info [pget agv::fileinfo($source)]
+	if { [dict exists $info includes] } {
+		vlog " --- Explicit include declaration for '$source' - not generating"
+		set deps [concat $source [dict get $info includes]]
+	} else {
+		vlog " --- Include info not found for '$source' - using gendep to generate:"
+		set deps [GenerateDepends $lang $cflags $source]
+	}
 
 	set compiler [dict get $agv::profile($lang) compile]
 	set oflag [dict get $agv::profile($lang) compile_oflag]
