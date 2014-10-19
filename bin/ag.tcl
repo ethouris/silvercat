@@ -137,7 +137,7 @@ proc ExecuteFrameworks {target step args} {
 			continue
 		}
 
-		vlog "... Found step $step of in framework '$frm'"
+		vlog "... Found step $step for framework '$frm'"
 
 		if { [catch {$procname $target {*}$args} err] } {
 			puts stderr "Error executing framework '$procname' on '$target':\n$err"
@@ -236,10 +236,16 @@ proc AccessDatabase {array target args} {
 		set args [lindex [no_comment $args] 0]
 	}
 
+	if { ![info exists agv_db($target)] } {
+		# Make the database created, if not yet exists
+		dict set agv_db($target) name $target
+	}
+
 	# Get old options
-	array set options [pget agv_db($target)]
+	array set options $agv_db($target)
 
 	set query ""
+	set nomoreoptions false
 
 	foreach o $args {
 		if { $query != "" } {
@@ -263,14 +269,15 @@ proc AccessDatabase {array target args} {
 			continue
 		}
 
-		if { [string index $o 0] == "-" && [string index $o 1] != " " } {
-			set lastopt [string range $o 1 end]
-			set lastopt [UnaliasOption $lastopt]
+		if { $o == "--" } {
+			set nomoreoptions true
 			continue
 		}
 
-		# This time it's -option {- config speed}
-		if { [string index $o 0] == "-" } {
+		set f2 [string range $o 0 1]
+
+		# This time it's -option {- config speed} - means remove these items
+		if { $f2 == "- " } {
 			set o [lrange $o 1 end]
 			set opt [pget options($lastopt)]
 			set pos ""
@@ -290,9 +297,19 @@ proc AccessDatabase {array target args} {
 			continue
 		}
 
-		if { [string index $o 0] == "=" && [string index $o 1] == " " } {
+		# This is -option {= config speed} - means set option to exact value
+		if { $f2 == "= " } {
 			# Reset option (replace existing value)
 			set options($lastopt) [string range $o 2 end]
+			continue
+		}
+
+		# if nomoreoptions, treat values starting from "-" as normal values,
+		# until the end of the arguments in this command. It means that there
+		# can be no more options passed in this command call.
+		if { !$nomoreoptions && [string index $o 0] == "-" } {
+			set lastopt [string range $o 1 end]
+			set lastopt [UnaliasOption $lastopt]
 			continue
 		}
 
@@ -611,6 +628,31 @@ proc GenerateCompileRule {db lang objfile source deps} {
 	set rule "$deps {\n\t$command\n}"
 }
 
+proc GetTargetFile target {
+	set dir [file dirname $target]
+	return [file join $dir [dict:at $agv::target($target) filename]]
+}
+
+proc GetDependentLibraryTargets target {
+	set libs ""
+	foreach d [dict:at $agv::target($target) depends] {
+		if { ![info exists agv::target($d)] } {
+			error "Target '$d' (dependency of [dict:at $db name]) is not defined"
+		}
+
+		if { [dict:at $agv::target($d) type] == "library" } {
+			lappend libs [GetTargetFile $d]
+
+			# Recursive call
+			# XXX consider unwinding - recursion in Tcl is limited and may
+			# result in internal error!
+			lappend libs {*}[GetDependentLibraryTargets $d]
+		}
+	}
+
+	return $libs
+}
+
 proc GenerateLinkRule:program {db outfile} {
 
 	set lang [dict:at $db language]
@@ -620,9 +662,13 @@ proc GenerateLinkRule:program {db outfile} {
 	set linker [dict get $agv::profile($lang) link]
 	set oflag [dict get $agv::profile($lang) link_oflag]
 
-	vlog "Generating link rule for '$outfile' ldflags: $ldflags"
+	# Check dependent targets. If this target has any dependent targets of type library,
+	# add its library specification to the flags.
+	set libs [GetDependentLibraryTargets [dict:at $db name]]
 
-	set command "$linker $objects $oflag $outfile $ldflags"
+	vlog "Generating link rule for '$outfile' ldflags: $ldflags libs: $libs"
+
+	set command "$linker $objects $oflag $outfile $libs $ldflags"
 
 	set rule "$objects {\n\t$command\n}"
 
@@ -816,6 +862,7 @@ proc agp-prepare-database target {
 	# XXX default frameworks
 	if { $frameworks == "" } {
 		set frameworks pkg-config
+		dict set agv::target($target) frameworks $frameworks
 	}
 
 	if { ![ExecuteFrameworks $target prepare] } {

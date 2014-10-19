@@ -24,21 +24,33 @@ ag-profile posix-install   ;# Profile for installation rules
 # 	-packages   zlib
 # }
 
-ag answer -type program -category bin
+ag answer -type program -category bin ;#-fw pkg-config (this is default if no framework is explicitly set)
+# (NOTE: if you are using any frameworks and would like to use pkg-config among others,
+# you have to declare it explicitly - although framework hooks are public functions, so
+# dependent frameworks may use them internally).
 ag answer -packages zlib
 ag answer -sources file1.cc file2.cc
 
 ag ff -type library -category lib -sources file2.cc -headers file.h
 # Ups, file2 should be removed from the answer file!
 ag answer -sources {- file2.cc}
+# This demonstrated how to add values that have "-" as the first character
+# This option is here blocked because it's for the libff.a library, same as
+# adding the ff target as dependent.
+#ag answer -ldflags -- -L.  -lff
+ag answer -depends ff
 
 # Define explicitly includes in this file. When this is not defined,
 # Silvercat will try to autodetect includes by running gendep-mapped command.
 #ag-info file1.cc -includes file.h
+#ag-info file2.cc -includes ""
 
 
-# (headers will still be extracted to -noinst-headers if detected by deps checker,
-# however they will be added to -noinst-header!)
+# Headers will still be extracted to -noinst-headers if detected by deps checker
+# (or declared explicitly in the fileinfo database for that file),
+# however they will be added to -noinst-header!
+# Although this is meaningless because header files are not to be installed for
+# the program-type target. That only happens for library-type targets.
 #ag answer -headers file.h
 
 
