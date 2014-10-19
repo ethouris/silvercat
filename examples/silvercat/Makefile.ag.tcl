@@ -1,10 +1,13 @@
 # This is a silvercat file.
 
+# Make things loud (this file is used for testing)
 set ::g_verbose 1
+
+# Usual minimum version requirement - using standard Tcl mechanism.
+package require ag 0.8
 
 # First thing to do is to define the profile. It defines what main
 # compilers should be used with what modification flags.
-
 
 ag-profile gcc-native      ;# Profile for compiler
 ag-profile posix-install   ;# Profile for installation rules

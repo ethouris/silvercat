@@ -865,6 +865,8 @@ proc ag-do-help {args} {
 	return 1
 }
 
+package provide ag 0.8
+
 if { !$tcl_interactive } {
 
 if { ![file exists Makefile.ag.tcl] } {
