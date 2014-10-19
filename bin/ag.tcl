@@ -225,7 +225,7 @@ proc UnaliasOption alias {
 }
 
 
-proc ModifyDatabase {array target args} {
+proc AccessDatabase {array target args} {
 
 	upvar $array agv_db
 
@@ -239,7 +239,30 @@ proc ModifyDatabase {array target args} {
 	# Get old options
 	array set options [pget agv_db($target)]
 
+	set query ""
+
 	foreach o $args {
+		if { $query != "" } {
+			# This is considered argument for the query, which is a mask.
+			set current [dict:at $agv_db($target) $query]
+			set out ""
+			foreach v $current {
+				if { [string match $o $v] } {
+					lappend out $v
+				}
+			}
+			# This query is not to modify the database - return immediately
+			return $out
+		}
+
+		if { [string index $o 0] == "?" } {
+			if { [string length $o] < 2 } {
+				error "Error in specification - query: The '?' character must be followed by the key name"
+			}
+			set query [string range $o 1 end]
+			continue
+		}
+
 		if { [string index $o 0] == "-" && [string index $o 1] != " " } {
 			set lastopt [string range $o 1 end]
 			set lastopt [UnaliasOption $lastopt]
@@ -276,17 +299,22 @@ proc ModifyDatabase {array target args} {
 		lappend options($lastopt) $o
 	}
 
+	if { $query != "" } {
+		# This means there was a query without a mask. So return everything as it goes.
+		return [dict:at $agv_db($target) $query]
+	}
+
 	vlog "Target: $target {[array get options]}"
 
 	set agv_db($target) [array get options]
 }
 
 proc ag {target args} {
-	return [ModifyDatabase agv::target $target {*}$args]
+	return [AccessDatabase agv::target $target {*}$args]
 }
 
 proc ag-info {filename args} {
-	return [ModifyDatabase agv::fileinfo $filename {*}$args]
+	return [AccessDatabase agv::fileinfo $filename {*}$args]
 }
 
 

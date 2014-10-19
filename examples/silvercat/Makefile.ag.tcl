@@ -26,6 +26,8 @@ ag answer -packages zlib
 ag answer -sources file1.cc file2.cc
 
 ag ff -type library -category lib -sources file2.cc -headers file.h
+# Ups, file2 should be removed from the answer file!
+ag answer -sources {- file2.cc}
 
 # Define explicitly includes in this file. When this is not defined,
 # Silvercat will try to autodetect includes by running gendep-mapped command.
