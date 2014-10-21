@@ -650,9 +650,24 @@ proc autoclean-test {rule} {
 	puts stderr "Autoclean would delete: $ac"
 }
 
+proc pexpand {arg {ulevel 2}} {
+	# This trick should expand the list in place and pack
+	# it back to the list. This replaces all first-level whitespaces
+	# into single spaces.
+	set code [catch {list {*}[uplevel $ulevel [list subst $arg]]} result]
+	if {$code} {
+		puts stderr "*** ERROR: can't expand: $result"
+		puts stderr "*** available variables: [uplevel $ulevel [list info vars]]"
+		error "Expanding '$arg'"
+	}
+
+	return $result
+}
+
 proc pset {name arg1 args} {
     upvar $name var
-    set var $arg1
+
+    set var [pexpand $arg1]
     foreach a $args {
         append var " $a"
     }
@@ -660,7 +675,7 @@ proc pset {name arg1 args} {
 
 proc pset+ {name arg1 args} {
     upvar $name var
-    append var " $arg1"
+    append var " [pexpand $arg1]"
     foreach a $args {
         append var " $a"
     }
@@ -679,6 +694,7 @@ proc pget {name {default ""}} {
     if {![info exists lname]} {
         return $default
     }
+
     return $lname
 }
 
@@ -707,16 +723,77 @@ proc tribool_logical in {
 	return indeterminate
 }
 
+proc mk-process-options {argv optargd} {
+
+	array set optargs $optargd
+
+	set args ""
+	set variables ""
+
+	set in_option ""
+
+	foreach e $argv {
+
+		# This variable is set only if there are more than 0 optargs for this option
+		if { $in_option != "" } {
+			lassign $in_option on ox
+			set os [llength $optargs($on)]
+			set pos [expr {$os-$ox}]
+			set varname [lindex $optargs($on) $pos]
+			upvar $varname r_$varname
+			set r_$varname $e
+			incr ox -1
+			if { $ox == 0 } {
+				set in_option ""
+			} else {
+				set in_option [list $on $ox]
+			}
+			continue
+		}
+
+		if { [string index $e 0] == "-" } {
+			if { [info exists optargs($e)] } {
+				set oa $optargs($e)
+				if { [string index $oa 0] == "*" } {
+					# boolean option. set to 1,default is 0
+					set varname [string range $oa 1 end]
+					upvar $varname r_$varname
+					set r_$varname 1
+					continue
+				}
+
+				# Otherwise set the hook for the next iteration
+				set in_option [list $e 1]
+				continue
+			}
+
+			# This is for command-line so this is ok.
+			error "No such option: $e"
+		}
+
+		set varval [split $e =]
+		if { [llength $varval] == 1 } {
+			lappend args $e
+		} else {
+			lappend variables [lindex $varval 0] [lindex $varval 1]
+		}
+	}
+
+	return [list $args $variables]
+}
+
+set g_keep_going 0
+set g_debug_on 0
+
+package provide make 1.0
+
 # Rest of the file is interactive.
 if { !$tcl_interactive } {
 
-
 set makefile {}
-set g_keep_going 0
 set help 0
-set g_debug_on 0
 
-array set g_optargs {
+set g_optargs {
 	-k *g_keep_going
 	-f makefile
 	--help *help
@@ -725,55 +802,13 @@ array set g_optargs {
 	-v *g_verbose
 }
 
-set g_args ""
-set g_variables ""
-
-set in_option ""
-
-foreach e $argv {
-
-	# This variable is set only if there are more than 0 optargs for this option
-	if { $in_option != "" } {
-		lassign $in_option on ox
-		set os [llength $::g_optargs($on)]
-		set pos [expr {$os-$ox}]
-		set [lindex $::g_optargs($on) $pos] $e
-		incr ox -1
-		if { $ox == 0 } {
-			set in_option ""
-		} else {
-			set in_option [list $on $ox]
-		}
-		continue
-		}
-
-	if { [string index $e 0] == "-" } {
-		if { [info exists ::g_optargs($e)] } {
-			set oa $::g_optargs($e)
-			if { [string index $oa 0] == "*" } {
-				# boolean option. set to 1,default is 0
-				set [string range $oa 1 end] 1
-				continue
-		}
-
-			# Otherwise set the hook for the next iteration
-			set in_option [list $e 1]
-			continue
-		}
-
-		error "No such option: $e"
-		}
-
-    set varval [split $e =]
-    if { [llength $varval] == 1 } {
-        lappend g_args $e
-    } else {
-        lappend g_variables [lindex $varval 0] [lindex $varval 1]
-	}
-}
+lassign [mk-process-options $argv $g_optargs] g_args g_variables
 
 if { $help } {
-	parray g_optargs
+	puts stderr "Options:"
+	foreach {opt arg} $g_optargs {
+		puts stderr [format "  %-8s %s" $opt: $arg]
+	}
 	exit 1
 }
 
