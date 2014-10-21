@@ -369,15 +369,10 @@ proc AccessDatabase {array target args} {
 			continue
 		}
 
-		if { [string index $o 0] == "-" && [string index $o 1] != " " } {
-			set lastopt [string range $o 1 end]
-			set lastopt [UnaliasOption $lastopt]
-			$::g_debug "--- ... OPTION: $lastopt"
-			continue
-		}
+		set f2 [string range $o 0 1]
 
 		# This time it's -option {- config speed}
-		if { [string index $o 0] == "-" } {
+		if { $f2 == "- " } {
 			set o [lrange $o 1 end]
 			set opt [pget options($lastopt)]
 			set pos ""
@@ -398,12 +393,19 @@ proc AccessDatabase {array target args} {
 			continue
 		}
 
-		if { [string index $o 0] == "=" && [string index $o 1] == " " } {
+		if { $f2 == "= " } {
 			# Reset option (replace existing value)
 
 			set o [string range $o 2 end]
 			$::g_debug " --- --- AC/DB: $lastopt = $o"
 			set options($lastopt) $o
+			continue
+		}
+
+		if { [string index $o 0] == "-" } {
+			set lastopt [string range $o 1 end]
+			set lastopt [UnaliasOption $lastopt]
+			$::g_debug "--- ... OPTION: $lastopt"
 			continue
 		}
 
