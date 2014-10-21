@@ -16,6 +16,9 @@ proc lsuniq {ls} {
 namespace export lsuniq
 
 proc dict:at {dic args} {
+	if { [llength $dic]%2 == 1 } {
+		error "This doesn't look like a dictionary: '$dic'"
+	}
 	if { ![dict exists $dic {*}$args] } {
 		return ""
 	}
