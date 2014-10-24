@@ -778,25 +778,38 @@ proc GenerateCompileRule {db lang objfile source deps} {
 }
 
 proc GetTargetFile target {
+	set filename [dict:at $agv::target($target) filename]
+	if { $filename == "" } {
+		$::g_debug "ERROR: no filename set in this database:"
+		DebugDisplayDatabase agv::target $target
+		error "Filename not defined for $target"
+	}
+
 	set dir [file dirname $target]
-	return [file join $dir [dict:at $agv::target($target) filename]]
+	return [file join $dir $filename]
 }
 
 proc GetDependentLibraryTargets target {
-	$::g_debug "Getting dependent targets for '$target':"
+	set depends [dict:at $agv::target($target) depends]  
+	$::g_debug "Getting dependent targets for '$target': $depends"
 	set libs ""
-	foreach d [dict:at $agv::target($target) depends] {
+	foreach d $depends {
 		if { ![info exists agv::target($d)] } {
 			error "Target '$d' (dependency of [dict:at $db name]) is not defined"
 		}
 
-		if { [dict:at $agv::target($d) type] == "library" } {
+		set type [dict:at $agv::target($d) type]
+
+		if { $type == "library" } {
 			lappend libs [GetTargetFile $d]
+			$::g_debug " --- Target '$d' provides libraries: $libs"
 
 			# Recursive call
 			# XXX consider unwinding - recursion in Tcl is limited and may
 			# result in internal error!
 			lappend libs {*}[GetDependentLibraryTargets $d]
+		} else {
+			$::g_debug " --- Target of type '$type' does not provide dependent libraries."
 		}
 	}
 

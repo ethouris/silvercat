@@ -1,0 +1,13 @@
+
+=====
+C1
+The dependency trakcing for program target and dependent library target should also check the languages used in all of them, and forcifully set language on the program to the value of [GetCommonLanguage] of them all.
+
+C2
+When a target has dependencies (both manually declared and generated, such as "all"), this must build the dependency tree and reorder targets so that the dependent target are always preceded by their dependency.
+
+C3
+Profiles should be able to be declared externally (with their names). If a namespace-based name is used, the profile should be tried to be loaded as module, unless the namespace name is already defined. 
+
+C4
+Profiles should provide also frameworks that are in force for all targets. Targets that don't want particular framework should be able to remove the framework from their framework cell in their database.
