@@ -807,7 +807,7 @@ proc GetDependentLibraryTargets target {
 			# Recursive call
 			# XXX consider unwinding - recursion in Tcl is limited and may
 			# result in internal error!
-			lappend libs {*}[GetDependentLibraryTargets $d]
+			set libs [concat [GetDependentLibraryTargets $d] $libs]
 		} else {
 			$::g_debug " --- Target of type '$type' does not provide dependent libraries."
 		}
