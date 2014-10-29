@@ -793,6 +793,8 @@ proc GetDependentLibraryTargets target {
 	set depends [dict:at $agv::target($target) depends]  
 	$::g_debug "Getting dependent targets for '$target': $depends"
 	set libs ""
+	set langs ""
+
 	foreach d $depends {
 		if { ![info exists agv::target($d)] } {
 			error "Target '$d' (dependency of [dict:at $db name]) is not defined"
@@ -802,32 +804,37 @@ proc GetDependentLibraryTargets target {
 
 		if { $type == "library" } {
 			lappend libs [GetTargetFile $d]
+			set langs [dict:at $agv::target($d) language]
 			$::g_debug " --- Target '$d' provides libraries: $libs"
 
 			# Recursive call
 			# XXX consider unwinding - recursion in Tcl is limited and may
 			# result in internal error!
-			set libs [concat [GetDependentLibraryTargets $d] $libs]
+			lassign [GetDependentLibraryTargets $d] adlibs adlangs
+			set libs [concat $adlibs $libs]
+			lappend langs $adlangs
 		} else {
 			$::g_debug " --- Target of type '$type' does not provide dependent libraries."
 		}
 	}
 
-	return $libs
+	return [list $libs $langs]
 }
 
 proc GenerateLinkRule:program {db outfile} {
 
-	set lang [dict:at $db language]
+	# Check dependent targets. If this target has any dependent targets of type library,
+	# add its library specification to the flags.
+	lassign [GetDependentLibraryTargets [dict:at $db name]] libs langs
+	lappend langs [dict:at $db language]
+	set langs [lsort -unique $langs]
+	set lang [agv::p::GetCommonLanguage $langs]
+
 	set objects [dict:at $db objects]
 	set ldflags [dict:at $db ldflags]
 
 	set linker [dict get $agv::profile($lang) link]
 	set oflag [dict get $agv::profile($lang) link_oflag]
-
-	# Check dependent targets. If this target has any dependent targets of type library,
-	# add its library specification to the flags.
-	set libs [GetDependentLibraryTargets [dict:at $db name]]
 
 	$::g_debug "Generating link rule for '$outfile' ldflags: $ldflags libs: $libs"
 
