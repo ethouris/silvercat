@@ -47,6 +47,11 @@ namespace eval agv {
 	# Per-file set information
 	variable fileinfo
 	namespace export fileinfo
+
+	# Private variable of genrules. Marks targets for which
+	# the rules have been already generated.
+	variable genrules_done ""
+	namespace export genrules_done
 }
 
 namespace import agv::p::dict:at
@@ -519,6 +524,7 @@ proc ProcessSources target {
 			set deps [GenerateDepends $lang $cflags $s]
 			# Write them back to the database
 			dict set agv::fileinfo($s) includes [lrange $deps 1 end] ;# skip the source itself
+			parray agv::fileinfo
 		}
 	}
 
@@ -527,6 +533,9 @@ proc ProcessSources target {
 	foreach s $sources {
 
 		set info [pget agv::fileinfo($s)]
+		
+		vlog "INFO($s): $agv::fileinfo($s) = $info"
+
 		set lang [dict:at $info language]
 
 		set o [file rootname $s].ag.o
@@ -809,14 +818,14 @@ proc GetDependentLibraryTargets target {
 		if { $type == "library" } {
 			lappend libs [GetTargetFile $d]
 			set langs [dict:at $agv::target($d) language]
-			$::g_debug " --- Target '$d' provides libraries: $libs"
+			$::g_debug " --- Target '$d' provides libraries: $libs (language: $langs)"
 
 			# Recursive call
 			# XXX consider unwinding - recursion in Tcl is limited and may
 			# result in internal error!
 			lassign [GetDependentLibraryTargets $d] adlibs adlangs
 			set libs [concat $adlibs $libs]
-			lappend langs $adlangs
+			lappend langs {*}$adlangs
 		} else {
 			$::g_debug " --- Target of type '$type' does not provide dependent libraries."
 		}
@@ -830,9 +839,10 @@ proc GenerateLinkRule:program {db outfile} {
 	# Check dependent targets. If this target has any dependent targets of type library,
 	# add its library specification to the flags.
 	lassign [GetDependentLibraryTargets [dict:at $db name]] libs langs
-	lappend langs [dict:at $db language]
+	lappend langs {*}[dict:at $db language]
 	set langs [lsort -unique $langs]
 	set lang [agv::p::GetCommonLanguage $langs]
+	vlog "GLR/p: Common language for '$langs': $lang"
 
 	set objects [dict:at $db objects]
 	set ldflags [dict:at $db ldflags]
@@ -916,6 +926,11 @@ proc ag-do-genrules target {
 
 proc GenerateMakefile {target fd} {
 
+	if { $target in $agv::genrules_done } {
+		vlog "NOT Generating rules for $target -- already generated"
+		return
+	}
+
 	vlog "Generating makefile for $target"
 
 	set rules [dict:at $agv::target($target) rules]
@@ -937,6 +952,8 @@ proc GenerateMakefile {target fd} {
 	}
 
 	puts $fd ""
+
+	lappend agv::genrules_done $target
 
 	# Now generate everything for the dependent targets
 	set deps [dict:at $agv::target($target) depends]

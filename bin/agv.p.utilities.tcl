@@ -28,6 +28,107 @@ proc dict:at {dic args} {
 
 namespace export dict:at
 
+# XXX
+# NOTE: This code comes from rosettacode.org and can be found here:
+# http://rosettacode.org/wiki/Topological_sort#Tcl
+# I state it's distributed under GNU Free Documentation License 1.2, as stated in the title page.
+proc topsort {data} {
+	# Clean the data
+	dict for {node depends} $data {
+		if {[set i [lsearch -exact $depends $node]] >= 0} {
+			set depends [lreplace $depends $i $i]
+			dict set data $node $depends
+		}
+		foreach node $depends {dict lappend data $node}
+	}
+	# Do the sort
+	set sorted {}
+	while 1 {
+		# Find available nodes
+		set avail [dict keys [dict filter $data value {}]]
+		if {![llength $avail]} {
+			if {[dict size $data]} {
+				error "graph is cyclic, possibly involving nodes \"[dict keys $data]\""
+			}
+			return $sorted
+		}
+		# Note that the lsort is only necessary for making the results more like other langs
+		lappend sorted {*}[lsort $avail]
+		# Remove from working copy of graph
+		dict for {node depends} $data {
+			foreach n $avail {
+				if {[set i [lsearch -exact $depends $n]] >= 0} {
+					set depends [lreplace $depends $i $i]
+					dict set data $node $depends
+				}
+			}
+		}
+		foreach node $avail {
+			dict unset data $node
+		}
+	}
+}
+
+namespace export topsort
+
+proc ReorderTargets subtargets {
+	set ltargets {}
+	lappend ltargets $subtargets
+	set point 0
+	set nomore true
+	set targets {}
+	set nest 50
+	set children() ""
+
+	while 1 {
+
+		if { ![incr nest -1] } {
+			error "Building dependency graph reached nest >50 - crashing to prevent infinite loop"
+		}
+
+		foreach t [lindex $ltargets $point] {
+			set deps [dict:at $agv::target($t) depends]
+			lappend targets {*}$deps
+			lappend children($t) {*}$deps
+		}
+
+		vlog "{$point} DEPS OF $t: $targets"
+
+		if { $targets == "" } {
+			break
+		}
+
+		# Check if any of found target doesn't already occur in previous ones
+		for {set i 0} {$i < $point} {incr i} {
+			foreach s $targets {
+				if { $s in [lindex $targets $i] } {
+					set msg "Cyclic dependency in definition of taret '$s' ($i)"
+					error $msg
+				}
+			}
+		}
+
+		lappend $ltargets $targets
+		set targets ""
+		incr point
+		vlog "LTARGETS:"
+		set i 0
+		foreach lt $ltargets {
+			vlog " -- {$i} $lt"
+			incr i
+		}
+	}
+
+	# Build dependency tree
+	set tree {}
+	foreach {node kids} [array get children] {
+		lappend tree $node $kids
+	}
+
+	vlog "Target dependency tree: $tree"
+
+	return [topsort $tree]
+}
 
 proc PrepareGeneralTarget {} {
 	# This procedure should collect all targets of
@@ -35,6 +136,7 @@ proc PrepareGeneralTarget {} {
 	# target named 'all' that has them all as dependencies
 
 	set subtargets {}
+	# Extract only targets of type program or library
 	foreach t [array names agv::target] {
 		set type [dict:at $agv::target($t) type]
 		vlog "Target '$t', type $type:"
@@ -45,6 +147,8 @@ proc PrepareGeneralTarget {} {
 			vlog " --| Not added to 'all'"
 		}
 	}
+
+	set subtargets [ReorderTargets $subtargets]
 
 	ag all -type phony -depends {*}$subtargets
 }

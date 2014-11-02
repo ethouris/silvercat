@@ -690,10 +690,47 @@ proc phas {name} {
 }
 
 proc pget {name {default ""}} {
+
+	# If part of the name is indexed array, then
+	# shift to its end before looking for a dot.
+	# That is, don't include the index value in dot search.
+
+	set endpar [string first ")" $name]
+	if { $endpar != -1 } {
+		set before [string range $name 0 $endpar]
+		set name [string range $name $endpar+1 end]
+	} else {
+		set before ""
+	}
+
+	if { [string first . $name] != -1 } {
+		set path [lassign [split $name .] name]
+	} else {
+		set path ""
+	}
+
+	# Restore name that was taken part from
+	if { $endpar != -1 } {
+		set name "$before$name"
+	}
+
     upvar $name lname
     if {![info exists lname]} {
         return $default
     }
+
+	if { $path != "" } {
+
+		if { [llength $lname] % 2 == 1 } {
+			# This is an odd list, so cannot be a dict
+			return $default
+		}
+
+		if { ![dict exists $lname {*}$path] } {
+			return $default
+		}
+		return [dict get $lname {*}$path]
+	}
 
     return $lname
 }
