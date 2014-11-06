@@ -128,6 +128,69 @@ proc ShellWrapAll arg {
 	return $out
 }
 
+# This function joins two lists into one list, keeping
+# the elements unique and preserving the order of elements.
+# There may be expected some elements occurring in both lists.
+# The resulting list returns the elements from both lists, where the
+# original order of elements is preserved.
+# For the best expected results, the input lists should:
+#  - contain only unique elements (one element cannot repeat more than once in one list)
+#  - elements common for both lists should be in the same order towards each other
+# If these conditions are not true, then:
+#  - if an element occurs in the same list more than once, only the first occurrence is
+#    passed to the output list and only this element's stability is preserved
+#    Example: StableUniq {a b a} {b c d} -> {a b c d}
+#  - if two elements occur in both lists, but in different order, the order of
+#    the first list is preserved.
+#    Example: StableUniq {a b d c} {a c e d} -> {a b d c e}
+proc StableUniq {l2 l1} {
+
+	set out ""
+
+	foreach e1 $l1 {
+		set ip [lsearch $l2 $e1]
+		if { $ip == -1 } {
+
+			# Add this element only if it wasn't added before.
+			# This can only happen in case when the common elements
+			# weren't in the same order (the order of l2 is actually
+			# preserved).
+			if { [lsearch $out $e1] == -1 } {
+				lappend out $e1
+			}
+			continue
+		}
+
+		# If found, then we move all elements
+		# before the found one to the output stream
+		if { $ip > 0 } {
+			for {set i 0} {$i < $ip} {incr i} {
+				set e2 [lindex $l2 $i]
+				if { [lsearch $out $e2] == -1 } {
+					lappend out $e2
+				}
+			}
+
+			# Remove all these elements preceding the found one,
+			# together with that one.
+		}
+		if { [lsearch $out $e1] == -1 } {
+			lappend out $e1
+		}
+		set l2 [lreplace $l2 0 $ip]
+	}
+
+	# Should there be anything remaining in the l2 list,
+	# add it at the end
+	foreach e2 $l2 {
+		if { [lsearch $out $e2] == -1 } {
+			lappend out $e2
+		}
+	}
+
+	return $out
+}
+
 proc GenerateDepends {lang cflags source} {
 	$::g_debug "Extracting ingredients of '$source' (cflags: $cflags)"
 
@@ -169,7 +232,7 @@ proc ExecuteFrameworks {target step args} {
 			set frm "::agv::p::fw::$frm"
 
 			if { ![namespace exists $frm] } {
-				error "No such BUILTIN framework '$frm' (external fw must use namespaces)"
+				error "No such BUILTIN framework '$frm'\n*** (external frameworks must be Tcl namespace names)"
 			}
 		}
 
@@ -237,6 +300,13 @@ proc ag-profile {name args} {
 	# - lang or {lang1 lang2} to apply to selected languages
 
 	if { $name == "general" } {
+
+		set results [AccessDatabase agv::profile default {*}$args]
+		if { [string index [lindex $args 0] 0] == "?" } {
+			# It was a query, so stop on querying the value for general.
+			return $results
+		}
+		# Otherwise continue and spread the requests to all other languages.
 		# Get all language names except "default"
 		set name [array names agv::profile]
 		set name [lsearch -all -inline -not $name default]
@@ -254,6 +324,7 @@ proc ag-profile {name args} {
 	}
 
 	$::g_debug "Updated profile($name): $agv::profile([lindex $name 0])"
+	return $results
 }
 
 proc InstallProfile {name} {
@@ -272,6 +343,14 @@ proc InstallProfile {name} {
 	}
 	set prof [dict merge $prof [dict get $agv::p::profiles $name]]
 
+	# Remove any "comments" that might have been put there :)
+	set prof [dict remove $prof #]
+	set o ""
+	dict for {k v} $prof {
+		lappend o $k [dict remove $v #]
+	}
+	set prof $o
+
 	# Now merge every language item with default.
 	# Leave the default untouched, however.
 
@@ -283,6 +362,8 @@ proc InstallProfile {name} {
 
 		dict set prof $lng [dict merge [dict:at $prof default] [dict:at $prof $lng]]
 	}
+
+	$::g_debug "InstallProfile: $prof"
 
 	array set agv::profile $prof
 }
@@ -446,7 +527,7 @@ proc AccessDatabase {array target args} {
 			if { [info exists options($lastopt)] } {
 				append options($lastopt) " $o"
 			} else {
-				set options($lastopt) $O
+				set options($lastopt) $o
 			}
 		}
 		# Do nothing in case when calculating lenght resulted in exception.
@@ -584,8 +665,11 @@ proc ProcessSources target {
 	dict set db noinst-headers $tnh
 
 
-	set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
-	dict set db language $lang
+	set lang [dict:at $db language]
+	if { $lang == "" } {
+		set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
+		dict set db language $lang
+	}
 
 	# Write back the database
 	dict set db sources $sources
@@ -1027,6 +1111,13 @@ proc ag-do-make {target} {
 proc agp-prepare-database target {
 	vlog "--- Preparing database for target '$target'"
 
+	# Make sure that the profile contains at least the "general"
+	# key with empty contents.
+
+	if { ![info exists agv::profile(default)] } {
+		set agv::profile(default) ""
+	}
+
 	# Auto-generate target "all", if not defined
 	if { $target == "all" && ![info exists agv::target(all)] } {
 		vlog "--- Synthesizing 'all' target"
@@ -1048,13 +1139,32 @@ proc agp-prepare-database target {
 	}
 	vlog "Preparing database for '$target' type=$type"
 
+	set tarlang [dict:at $agv::target($target) language]
+
+	# May happen that the target has already set language.
+	# If so, select only those frameworks that are defined for that language.
+	# Otherwise just use the general frameworks
+	if { $tarlang == "" } {
+		set tarlang default
+	}
+
+	# Note that the statements from 'default' are then spread to all
+	# languages, unless particular setting for particular language is already set.
+	# It means that if there was something set for general, it will be returned
+	# also when asking for particular language.
+	set globfw [dict:at $agv::profile($tarlang) frameworks]
 	set frameworks [dict:at $agv::target($target) frameworks]
+
+	# Now the trick is how to join elements, make them unique, but preserve the order.
+	set frameworks [StableUniq $frameworks $globfw]
 
 	# XXX default frameworks
 	if { $frameworks == "" } {
 		set frameworks pkg-config
-		dict set agv::target($target) frameworks $frameworks
 	}
+	
+	# Set precalculated frameworks to the overall target's frameworks
+	dict set agv::target($target) frameworks $frameworks
 
 	if { ![ExecuteFrameworks $target prepare] } {
 		return false

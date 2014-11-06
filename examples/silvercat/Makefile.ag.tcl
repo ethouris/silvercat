@@ -12,6 +12,16 @@ package require ag 0.8
 ag-profile gcc-native      ;# Profile for compiler
 ag-profile posix-install   ;# Profile for installation rules
 
+ag-profile general -fw test:ag
+
+namespace eval test:ag {
+	proc prepare {target} {
+		set dbv agv::target($target)
+		puts "HA!!!!!! PREPARE test for [pget $dbv.type] '$target'!"
+	}
+}
+
+
 # It's expected that "native" would be replaced with 32 or 64.
 
 # The most low level command that defines targets to build.

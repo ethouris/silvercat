@@ -122,7 +122,10 @@ proc ReorderTargets subtargets {
 	# Build dependency tree
 	set tree {}
 	foreach {node kids} [array get children] {
-		lappend tree $node $kids
+
+		if { $kids != "" } {
+			lappend tree $node $kids
+		}
 	}
 
 	vlog "Target dependency tree: $tree"
