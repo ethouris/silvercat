@@ -735,8 +735,17 @@ proc pget {name {default ""}} {
     return $lname
 }
 
-proc pdef {name arg} {
-	proc $name {} { return [expr $arg] }
+proc pdef {name args} {
+	proc $name {} "return {$args}"
+}
+
+proc pdefx {name args} {
+	set e [catch {expr $args} result]
+	if { $e } {
+		puts stderr "NOTE: '$args' can't be evaluated: $result"
+		set result $args
+	} 
+	proc $name {} [list return $result]
 }
 
 

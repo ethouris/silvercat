@@ -22,7 +22,7 @@ rule answer file1.o file2.o {
 	# As you can see, you can use the symbolic replacement known from Makefile.
 	# Well, treat this as an extension to Tcl; actually Tcl doesn't try to
 	# expand $, if not followed by [a-zA-Z0-9_], so this is just a text.
-	g++ -o $@ $^
+	[CXX] -o $@ $^
 }
 
 # This is a generic rule - surprise!
@@ -30,8 +30,12 @@ rule answer file1.o file2.o {
 # Actually this rule makes sense in this case because each *.cc
 # file includes file.h - this kind of generic rule is not too universal then.
 rule *.o *.cc file.h {
-	g++ -c $<
+	[CXX] -c $<
 }
+
+# pdef can define a delayed definition. Expand with [CXX].
+pdef CXX g++
+
 
 # No need to worry if your clean is properly defined and doesn't leave
 # any garbage. The 'autoclean' command provided by the make tool will

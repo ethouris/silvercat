@@ -29,70 +29,21 @@ all important features of the 'make' tool, except default rules.
 The silvercat tool (ag.tcl)
 ===========================
 
-Currently supported features:
+High level build system.
 
-1. The only currently used configuration file name: Makefile.ag.tcl
+The simplest definition for a program consisting of two source files is:
 
-2. The most basic target definition command: ag
+/////////////
+ag myprog -type program -sources source1.c source2.cpp
+\\\\\\\\\\\\\
 
-3. Two subcommands are supported:
+Two modes are currently supported:
 
-	-ag.tcl genrules - print rules to produce given target for Makefile.tcl on stdout
-	-ag.tcl make - use the rules for given target to make the target directly
-
-4. The idea of "frameworks" is supported.
-
-There's one standard framework currently supported: pkg-config. It is available
-by default if there's no -fw (-frameworks) option added to the ag target options.
-If this framework is active, just add -packages option to the target options
-to have this package's cflags and ldflags added to the compile and link rules.
-
-You can add your frameworks, if you want. The only requirement is that:
- - they must be externally identified by a name containing a : inside
-(in normal conditions it just requires them to be defined within a namespace)
- - they are Tcl commands called at the time of required processing with
-target given as argument
-
-What a framework has to do is to do whatever messup is needed in the database
-so that the requirements of this framework are satisfied. It can, for example:
- - expect some other (say, "nonstandard") options in the database
- - using these options, they can modify, for example, cflags or ldflags
- - they can add commands to produce source files out of other kinds of files and add them to 'sources'
-
-Note that frameworks are run exactly in the beginning, that is, they work with
-the data not processed yet by anything - however they are run in sequence. It
-means that you must take care of whether two frameworks can cooperate with each
-other or maybe they are dependent. Each framework is free to do whatever messup
-is needed in the database.
-
-5. Profiles
-
-There are several builtin profiles, like gcc-native. Every profile defines
-several commands to be executed in various situations, defined per language.
-This is actually a dictionary. The first level is the language name. The second
-is the set of keys assigned to commands to be executed in appropriate situations.
-See the "profiles" variable in agv::p namespace, and its "structure" key.
-It contains explanations of the meaning of particular fields.
-
-Profiles can be merged. The first called profile applies the default rules.
-Then you can apply a profile, although please note that it can always happen
-that settings from one profile override those from the other. However you can
-safely use multiple profiles as long as they add definitions for different
-languages.
-
-Note that the language is recognized by file extension (no other language
-recognition is currently supported). If you want to add your own compiler
-for some other language, you have to:
-
-a) extend the agv::p::langextmap (add a new key "language" to this map,
-with the value being a list of file extensions)
-
-b) create a profile, which covers only this language
-
-Note, however, that a "compiler" can only be something that produces an *.o
-file. It means that if this "compiler" would have to just generate a C++ file
-so that it would be later normally compiled, this is not the place where you
-should add it. You should add a FRAMEWORK instead.
+ag.tcl genrules - Generate Makefile.tcl with synthesized rules
+ag.rcl make - Synthesize rules and execute them in place
 
 
+The project is currently hosted on Gitorious, here's the Wiki homepage:
+
+https://gitorious.org/silvercat/pages/Home
 
