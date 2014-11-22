@@ -440,6 +440,8 @@ proc AccessDatabase {array target args} {
 	set nomoreoptions false
 
 	foreach o $args {
+
+		set push_front false
 		if { $query != "" } {
 			# This is considered argument for the query, which is a mask.
 			set current [dict:at $agv_db($target) {*}$keypath $query]
@@ -467,9 +469,10 @@ proc AccessDatabase {array target args} {
 		}
 
 		set f2 [string range $o 0 1]
+		set f3 [string range $o 0 2]
 
 		# This time it's -option {- config speed} - means remove these items
-		if { $f2 == "- " } {
+		if { !$nomoreoptions && $f2 == "- " } {
 			set o [pexpand [lrange $o 2 end] 3]
 			set opt [pget options($lastopt)]
 			set pos ""
@@ -491,7 +494,7 @@ proc AccessDatabase {array target args} {
 		}
 
 		# This is -option {= config speed} - means set option to exact value
-		if { $f2 == "= " } {
+		if {  !$nomoreoptions && $f2 == "= " } {
 			# Reset option (replace existing value)
 
 			set o [pexpand [string range $o 2 end] 3]
@@ -513,6 +516,11 @@ proc AccessDatabase {array target args} {
 			set o [string range $o 2 end]
 		}
 
+		if { !$nomoreoptions && $f3 == "++ " } {
+			set o [string range $o 3 end]
+			set push_front true
+		}
+
 		set o [pexpand $o 3]
 		# This time it's nothing special. At least try to strip one level,
 		# in case when user did -option {value1 value2}
@@ -520,12 +528,20 @@ proc AccessDatabase {array target args} {
 			if { $size == 1 } {
 				set o [lindex $o 0]
 			}
-			lappend options($lastopt) {*}$o
+			if { $push_front } {
+				set options($lastopt) [concat $o $options($lastopt)]
+			} else {
+				lappend options($lastopt) {*}$o
+			} 
 		} else {
 			# Happened to be a text not convertible to a list.
 			# Well, happens. Just append to the existing value.
 			if { [info exists options($lastopt)] } {
-				append options($lastopt) " $o"
+				if { $push_front } {
+					set options($lastopt) "$o $options($lastopt)"
+				} else {
+					append options($lastopt) " $o"
+				}
 			} else {
 				set options($lastopt) $o
 			}
@@ -1254,11 +1270,6 @@ proc ag-subdir args {
 	lappend agv::p::directories {*}$args
 }
 
-proc ag-do-help {args} {
-	puts "Usage: [file tail $::argv0] genrules <target>"
-	return 1
-}
-
 package provide ag 0.8
 
 if { !$tcl_interactive } {
@@ -1279,7 +1290,7 @@ set ag_optargs {
 lassign [mk-process-options $argv $ag_optargs] g_args g_variables
 
 if { $help } {
-	ag-do-help
+	puts "Usage: [file tail $::argv0] genrules <target>"
 	puts stderr "Options:"
 	foreach {opt arg} $g_optargs {
 		puts stderr [format "  %-8s %s" $opt: $arg]
