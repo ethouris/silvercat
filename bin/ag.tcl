@@ -412,7 +412,7 @@ proc AccessDatabase {array target args} {
 
 	if { [llength $args] == 1 } {
 		# May contain multiple lines, so wipe out comments
-		set args [lindex [no_comment $args] 0]
+		set args [lindex [puncomment $args] 0]
 		# Possibly expand using variables from 3 frames up
 		# (this function is always the first level call from ag-* functions)
 		set args [pexpand $args 3]

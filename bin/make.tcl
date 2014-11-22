@@ -43,19 +43,19 @@ proc debug str {
 
 set g_debug pass
 
-proc pass args { }
+proc pass args { return $args }
 
-# Provide expansion in style of {expand} in tcl 8.5
+# Provide expansion in style of {*} in tcl 8.5
 # use any character provided in $ch
 proc expandif {ch ls} {
 	set final {}
 	foreach e $ls {
 		if { [string index $e 0] == $ch } {
-		        foreach y [string range $e 1 end] {
-		                lappend final $y
-		        }
+			foreach y [string range $e 1 end] {
+				lappend final $y
+			}
 		} else {
-		        lappend final $e
+			lappend final $e
 		}
 	}
 	return $final
@@ -82,7 +82,7 @@ proc rule args {
 		}
 	}
 
-	set action [no_comment [lindex $args end]]
+	set action [puncomment [lindex $args end]]
 
 #   XXX Substitution defered to latest execution        
 #        set action [uplevel #0 [list subst_action $action]]
@@ -147,7 +147,7 @@ proc flatten args {
 	return $target
 }
 
-proc no_comment text {
+proc puncomment text {
 	set lines [split $text \n]
 	set output {}
 	foreach line $lines {
@@ -159,8 +159,43 @@ proc no_comment text {
 	return [join $output \n]
 }
 
+proc plist1 arg {
+	set out ""
+	set arg [string map {"\\\n" ""} $arg]
+	set lines [split $arg \n]
+	foreach l $lines {
+		#puts stderr "LINE: $l"
+		set lt [string trimleft $l]
+		if { [string index $lt 0] == "#" } {
+			continue
+		}
+		set ol [uplevel "list $l"]
+		#puts stderr "OUTPUT LINE: $ol"
+		lappend out $ol
+		#puts stderr "STATE: $out"
+	}
+
+	#puts "RESULT: $out"
+
+	return [join $out \n]
+}
+
+proc plist args {
+	if { [llength $args] == 1 } {
+		return [uplevel [list plist1 [lindex $args 0]]]
+	}
+
+	set out ""
+
+	foreach a $args {
+		lappend out [uplevel [list plist1 $a]]
+	}
+
+	return $out
+}
+
 proc rules {rulelist action} {
-	set rulelist [no_comment $rulelist]
+	set rulelist [puncomment $rulelist]
 	set firstrule [lindex $rulelist 0]
 	set rules [lrange $rulelist 1 end]
 

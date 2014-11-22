@@ -12,7 +12,7 @@ package require ag 0.8
 ag-profile gcc-native      ;# Profile for compiler
 ag-profile posix-install   ;# Profile for installation rules
 
-ag-profile general -fw test:ag
+ag-profile general -fw test:ag pkg-config
 
 namespace eval test:ag {
 	proc prepare {target} {
@@ -38,7 +38,7 @@ ag answer -type program -category bin ;#-fw pkg-config (this is default if no fr
 # (NOTE: if you are using any frameworks and would like to use pkg-config among others,
 # you have to declare it explicitly - although framework hooks are public functions, so
 # dependent frameworks may use them internally).
-ag answer -packages zlib
+ag answer -packages zlib-1.2
 ag answer -sources file1.cc file2.cc
 
 ag ff -type library -category lib -sources file2.cc -headers file.h
