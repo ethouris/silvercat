@@ -1287,7 +1287,7 @@ set ag_optargs {
 	-d *ag_debug_on
 }
 
-lassign [mk-process-options $argv $ag_optargs] g_args g_variables
+lassign [process-options $argv $ag_optargs] g_args g_variables
 
 if { $help } {
 	puts "Usage: [file tail $::argv0] genrules <target>"
@@ -1299,7 +1299,7 @@ if { $help } {
 }
 
 if { $ag_debug_on } {
-	set g_debug debug
+	set g_debug mkv::p::debug
 }
 
 

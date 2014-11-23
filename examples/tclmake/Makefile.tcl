@@ -45,6 +45,10 @@ rule clean {
 	!tcl autoclean answer
 }
 
+rule cleantest {
+	!tcl autoclean-test answer
+}
+
 # Unblock this, if you want to see how the make.tcl tool works.
 # Alternatively, use the -v option.
-#set g_verbose 1
+#set mkv::verbose 1
