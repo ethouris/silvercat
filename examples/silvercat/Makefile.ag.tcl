@@ -1,7 +1,7 @@
 # This is a silvercat file.
 
 # Make things loud (this file is used for testing)
-set ::g_verbose 1
+set mkv::p::verbose 1
 
 # Usual minimum version requirement - using standard Tcl mechanism.
 package require ag 0.8
@@ -9,20 +9,30 @@ package require ag 0.8
 # First thing to do is to define the profile. It defines what main
 # compilers should be used with what modification flags.
 
+# NOTE: this is temporary. In future Silvercat will have system
+# autodetection and it will apply the default profile automatically.
+# It's expected that "native" would be replaced with 32 or 64.
 ag-profile gcc-native      ;# Profile for compiler
 ag-profile posix-install   ;# Profile for installation rules
 
-ag-profile general -fw test:ag pkg-config
+# The pkg-config framework is declared by default, unless you set up
+# any frameworks by yourself - in this case you have to add it explicitly
+# (The reason is that pkg-config may interfere with other frameworks or be
+# needed by other frameworks and the order of declaration may matter).
 
-namespace eval test:ag {
-	proc prepare {target} {
-		set dbv agv::target($target)
-		puts "HA!!!!!! PREPARE test for [pget $dbv.type] '$target'!"
-	}
-}
+#ag-profile general -fw test:ag pkg-config
 
-
-# It's expected that "native" would be replaced with 32 or 64.
+# Well, our own framework. Just for testing to see if it works.
+# The framework name must be a namespace name and it must contain
+# at least one colon in the referring name. That is, either it must
+# contain a semicolon in the name, or it can be a second-nested
+# namespace.
+# --- namespace eval test:ag {
+# --- 	proc prepare {target} {
+# --- 		set dbv agv::target($target)
+# --- 		puts "HA!!!!!! PREPARE test for [pget $dbv.type] '$target'!"
+# --- 	}
+# --- }
 
 # The most low level command that defines targets to build.
 
@@ -34,12 +44,12 @@ namespace eval test:ag {
 # 	-packages   zlib
 # }
 
-ag answer -type program -category bin ;#-fw pkg-config (this is default if no framework is explicitly set)
-# (NOTE: if you are using any frameworks and would like to use pkg-config among others,
-# you have to declare it explicitly - although framework hooks are public functions, so
-# dependent frameworks may use them internally).
+ag-subdir party
+
+ag answer -type program -category bin ;#-fw pkg-config (framework can be also set per target)
 ag answer -packages zlib-1.2
 ag answer -sources file1.cc file2.cc
+ag answer -depends party/test
 
 ag ff -type library -category lib -sources file2.cc -headers file.h
 # Ups, file2 should be removed from the answer file!

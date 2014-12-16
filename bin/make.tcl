@@ -14,6 +14,12 @@ set debug mkv::p::pass
 
 namespace eval p {
 
+# Forwarder for standard-method running cmdline app
+proc run args {
+	puts stderr "+run: $args"
+	exec 2>@stderr >@stdout {*}$args
+}
+
 variable db_depends
 variable db_actions
 variable db_generic
@@ -68,6 +74,24 @@ proc process-options {argv optargd} {
 
 	array set optargs $optargd
 
+	# Set first all boolean options to false
+	foreach {on ov} $optargd {
+		if { [string index $ov 0] == "*" } {
+			set varname [string range $ov 1 end]
+			upvar $varname r_$varname
+			#puts stderr "OPTION VARIABLE: ::$varname (bool: 0)"
+			if { ![info exists r_$varname] } {
+				set r_$varname 0
+			}
+		} else {
+			upvar $ov r_$ov
+			#puts stderr "OPTION VARIABLE: ::$ov (string: '')"
+			if { ![info exists r_$ov] } {
+				set r_$ov ""
+			}
+		}
+	}
+
 	set args ""
 	set variables ""
 
@@ -81,8 +105,8 @@ proc process-options {argv optargd} {
 			set os [llength $optargs($on)]
 			set pos [expr {$os-$ox}]
 			set varname [lindex $optargs($on) $pos]
-			upvar $varname r_$varname
 			set r_$varname $e
+			#puts stderr "OPTION: ::$varname = $e"
 			incr ox -1
 			if { $ox == 0 } {
 				set in_option ""
@@ -98,8 +122,8 @@ proc process-options {argv optargd} {
 				if { [string index $oa 0] == "*" } {
 					# boolean option. set to 1,default is 0
 					set varname [string range $oa 1 end]
-					upvar $varname r_$varname
 					set r_$varname 1
+					#puts stderr "OPTION: ::$varname = $e"
 					continue
 				}
 
@@ -263,13 +287,13 @@ proc plist1 arg {
 
 proc plist args {
 	if { [llength $args] == 1 } {
-		return [uplevel [list plist1 [lindex $args 0]]]
+		return [uplevel [list [namespace current]::plist1 [lindex $args 0]]]
 	}
 
 	set out ""
 
 	foreach a $args {
-		lappend out [uplevel [list plist1 $a]]
+		lappend out [uplevel [list [namespace current]::plist1 $a]]
 	}
 
 	return $out
@@ -943,6 +967,7 @@ set public_export [puncomment {
 	phas
 	pdef
 	pdefx
+	plist
 	pexpand
 	puncomment
 	autoclean
@@ -963,6 +988,10 @@ namespace export {*}$public_export
 variable debug_on 0
 variable makefile {}
 
+proc MAKE {} {
+	return [file normalize $::argv0]
+}
+
 }
 
 
@@ -973,82 +1002,92 @@ namespace import {*}$mkv::p::public_import
 
 proc MakeInteractive {argv} {
 
-set help 0
+	set help 0
 
-set g_optargs {
-	-k *keep_going
-	-f makefile
-	--help *help
-	-help *help
-	-d *display_debug
-	-v *verbose
-}
-
-set keep_going 0
-set display_debug 0
-set verbose 0
-set makefile {}
-set help 0
-
-lassign [process-options $argv $g_optargs] cmd_args cmd_variables
-
-if { $help } {
-	puts stderr "Options:"
-	foreach {opt arg} $g_optargs {
-		puts stderr [format "  %-8s %s" $opt: $arg]
+	set g_optargs {
+		-k *keep_going
+		-f makefile
+		--help *help
+		-help *help
+		-d *display_debug
+		-v *verbose
+		-C makefiledir
 	}
-	exit 1
-}
 
-unset help
-set mkv::p::keep_going $keep_going
-set mkv::makefile $makefile
-set mkv::debug_on $display_debug
-set mkv::p::verbose $verbose
+	set keep_going 0
+	set display_debug 0
+	set verbose 0
+	set makefile {}
+	set help 0
+	set makefiledir .
 
-if { $display_debug } {
-	set mkv::debug mkv::p::debug
-}
+	lassign [process-options $argv $g_optargs] cmd_args cmd_variables
 
-foreach {name value} $cmd_variables {
-    #puts "Setting $name to $value"
-    set $name $value
-}
-
-if { $mkv::makefile == "" } {
-	if { [file exists Makefile.tcl] } {
-		set mkv::makefile Makefile.tcl
-	} elseif { [file exists makefile.tcl] } {
-		set mkv::makefile makefile.tcl
-	} else {
-		error "Makefile.tcl not found"
+	if { $help } {
+		puts stderr "Options:"
+		foreach {opt arg} $g_optargs {
+			puts stderr [format "  %-8s %s" $opt: $arg]
+		}
+		exit 1
 	}
-} elseif { ![file exists $mkv::makefile] } {
-	error "Makefile '$mkv::makefile' not found"
-}
 
-$mkv::debug "Sourcing makefile"
-source $mkv::makefile
-$mkv::debug "Executing statements"
+	unset help
+	set mkv::p::keep_going $keep_going
+	set mkv::makefile $makefile
+	set mkv::debug_on $display_debug
+	set mkv::p::verbose $verbose
+	set mkv::directory $makefiledir
 
-if {$cmd_args == ""} {set cmd_args $mkv::p::first_rule}
+	if { $display_debug } {
+		set mkv::debug mkv::p::debug
+	}
 
-if { [set xc [catch {
-	$mkv::debug "BUG $cmd_args $mkv::p::first_rule"
-        foreach tar $cmd_args {
+	foreach {name value} $cmd_variables {
+		#puts "Setting $name to $value"
+		set $name $value
+	}
+
+# --- SET DIRECTORY - before looking for makefile ---
+	set wd [pwd]
+	set makefiledir [file normalize $makefiledir]
+	cd $makefiledir
+
+	if { $mkv::makefile == "" } {
+		if { [file exists Makefile.tcl] } {
+			set mkv::makefile Makefile.tcl
+		} elseif { [file exists makefile.tcl] } {
+			set mkv::makefile makefile.tcl
+		} else {
+			error "Makefile.tcl not found"
+		}
+	} elseif { ![file exists $mkv::makefile] } {
+		error "Makefile '$mkv::makefile' not found"
+	}
+
+	$mkv::debug "Sourcing makefile"
+	source $mkv::makefile
+	$mkv::debug "Executing statements"
+
+	if {$cmd_args == ""} {set cmd_args $mkv::p::first_rule}
+
+	if { [set xc [catch {
+		$mkv::debug "BUG $cmd_args $mkv::p::first_rule"
+		foreach tar $cmd_args {
 			$mkv::debug "Applying make to '$tar'"
-            make $tar
-        }
-    } result]] } {
+			make $tar
+		}
+	} result]] } {
 
 		puts stderr $result
 		puts stderr "+++ Target '$tar' failed"
 		return 1
-}
+	}
 
-if { !$mkv::p::action_performed } {
-    puts stderr "+++ Nothing to be done for: $cmd_args"
-}
+	if { !$mkv::p::action_performed } {
+		puts stderr "+++ Nothing to be done for: $cmd_args"
+	}
+
+	cd $wd
 
 }
 
