@@ -194,11 +194,11 @@ proc CreateLibraryFilename {target type} {
 # If these conditions are not true, then:
 #  - if an element occurs in the same list more than once, only the first occurrence is
 #    passed to the output list and only this element's stability is preserved
-#    Example: StableUniq {a b a} {b c d} -> {a b c d}
+#    Example: StableIntersection {a b a} {b c d} -> {a b c d}
 #  - if two elements occur in both lists, but in different order, the order of
 #    the first list is preserved.
-#    Example: StableUniq {a b d c} {a c e d} -> {a b d c e}
-proc StableUniq {l2 l1} {
+#    Example: StableIntersection {a b d c} {a c e d} -> {a b d c e}
+proc StableIntersection {l2 l1} {
 
 	set out ""
 
@@ -1369,7 +1369,7 @@ proc agp-prepare-database target {
 	set frameworks [dict:at $agv::target($target) frameworks]
 
 	# Now the trick is how to join elements, make them unique, but preserve the order.
-	set frameworks [StableUniq $frameworks $globfw]
+	set frameworks [StableIntersection $frameworks $globfw]
 
 	# XXX default frameworks
 	if { $frameworks == "" } {

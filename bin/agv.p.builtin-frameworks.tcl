@@ -21,7 +21,7 @@ namespace eval fw {
 		# convention:
 		# 1. if "-[0-9]" phrase was found in the name, it's considered version. This version is extracted
 		# 2. The package is first tried to be found with the original name-version statement anyway
-		# 3. If this failed, the search continues with the original name this time, but the minumoum
+		# 3. If this failed, the search continues with the original name this time, but the minumum
 		# version is ensured by comparing it using [package vcompare].
 		proc FindPackage {namev} {
 			variable pkg_config
@@ -117,12 +117,12 @@ namespace eval fw {
 				$::g_debug "pkg-config:FindPackage returned name '$name' version '$version'"
 				if { [string index $version 0] == "-" } {
 					set v [string range $version 1 end]
-					puts stderr "NOTE: pkg-config found package '$name', but with outdated version $v"
+					$::g_debug "NOTE: pkg-config found package '$name', but with outdated version $v"
 					continue
 				}
 
 				if { $name == "" } {
-					puts stderr "NOTE: pkg-config found no package named '$p' nor '$name'"
+					$::g_debug "NOTE: pkg-config found no package named '$p' nor '$name'"
 					continue
 				}
 
