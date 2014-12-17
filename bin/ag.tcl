@@ -323,7 +323,7 @@ proc IdentifyLanguage sourcefile {
 
 proc DetectType target {
 	# If any dot is found, try to determine by extension.
-	# If no dot found, return empty string.
+	# If no dot found, return "phony".
 	# (program may be good, but it's not a good default)
 
 	# XXX This is true only on POSIX.
@@ -1324,6 +1324,14 @@ proc agp-prepare-database target {
 		if { $type == "" } {
 			error "Can't recognize target type for '$target' - please declare explicitly"
 		}
+
+		# If the target type had to be autodetected, change it to
+		# phony if command key is also defined. This is only in case
+		# when the type is not set - if the type was explicitly set
+		# as phony, leave it as is.
+		if { $type == "phony" && [dict exists $agv::target($target) command] } {
+			set type custom
+		}
 	} else {
 		lassign [split $type .] ncat ntype
 		if { $ntype != "" } {
@@ -1514,13 +1522,13 @@ proc ag-subdir1 target {
 }
 
 package provide ag 0.8
+set g_debug mkv::p::pass
+set ag_debug_on 0
 
 if { !$tcl_interactive } {
 
 set agfile {}
 set help 0
-set ag_debug_on 0
-set g_debug mkv::p::pass
 set agfiledir .
 
 set ag_optargs {
