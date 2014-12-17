@@ -168,6 +168,7 @@ proc rule args {
 	variable db_generic
 	variable db_phony
 	variable db_actions
+	variable db_prereq
 	
 	set args [expandif @ $args]
 	set size [llength $args]
@@ -182,17 +183,20 @@ proc rule args {
 		set target [string range [lindex $target 0] 0 end-1]
 	}
 	set depends ""
+	set prereq ""
+	set depvar depends
 	if { $size > 2 } {
 		set depends {}
 		foreach dep [lrange $args 1 end-1] {
-		        append depends "$dep "
+			if { $dep == "|" } {
+				set depvar prereq
+			} else {
+				append $depvar "$dep "
+			}
 		}
 	}
 
 	set action [puncomment [lindex $args end]]
-
-#   XXX Substitution defered to latest execution        
-#        set action [uplevel #0 [list subst_action $action]]
 
 	# Check if this is a generic rule (contains *)
 	# remove all "* ? [ ]", but leave untouched "\* \? \[ \]"
@@ -201,12 +205,13 @@ proc rule args {
 		set db_generic($target) $action
 	}
 	
-	$mkv::debug "RULE '$target' DEPS: $depends"
+	$mkv::debug "RULE '$target' DEPS: $depends PREREQ: $prereq"
 	$mkv::debug "RULE '$target' ACTION: {$action}"
 	set db_depends($target) $depends
 	set db_actions($target) $action
+	set db_prereq($target) $prereq
 
-	vlog "Target $target = $db_depends($target)"
+	vlog "Target $target = $db_depends($target) | $db_prereq($target)"
 
 	set target
 }
@@ -412,6 +417,7 @@ proc make target {
 	variable db_generic
 	variable db_phony
 	variable db_actions
+	variable db_prereq
 	
 	vlog "--- make $target ---"
 
@@ -423,6 +429,7 @@ proc make target {
 
 	set status 1
 	set hasdepends [info exists db_depends($target)] 
+	set prereq ""
 
     if { !$hasdepends } {
 		vlog "No direct depends, checking for generic depends"
@@ -432,27 +439,52 @@ proc make target {
             if { $depends != "" } {
                 set hasdepends 1
             }
+			if { [info exists db_prereq($generic)] } {
+				set prereq [generate_depends $target $generic $db_prereq($generic)]
+			}
+			vlog "Found generic '$generic' with deps: '$depends' and prereq '$prereq'"
         }
     } else {
         set depends $db_depends($target)
+		if { [info exists db_prereq($target)] } {
+			set prereq $db_prereq($target)
+		}
     }
 
 	set result "(reason unknown)"
-    if { $hasdepends } {
+	if { $hasdepends } {
 		vlog "Has dependencies: $depends"
-        foreach depend $depends {
-            vlog "Considering $depend as dependency for $target"
+		foreach depend $depends {
+			vlog "Considering $depend as dependency for $target"
 			if { [catch {make $depend} result] } {
-                set status 0
-                vlog "Making $depend failed, so $target won't be made"
+				set status 0
+				vlog "Making $depend failed, so $target won't be made"
 				if { $mkv::p::keep_going } {
 					vlog "- although continuing with other targets (-k)"
 				} else {
 					break
 				}
-            }
-        }
-    }
+			}
+		}
+
+		vlog "Has prerequisites: $prereq"
+
+		# For prereq, just make sure that they exist.
+		foreach p $prereq {
+			vlog "Considering $p as prerequisite for $target"
+			if { ![file exists $p] } {
+				if { [catch {make $p} result] } {
+					set status 0
+					vlog "Making $p failed, so $target won't be made"
+					if { $mkv::p::keep_going } {
+						vlog "- although continuing with other targets (-k)"
+					} else {
+						break
+					}
+				}
+			}
+		}
+	}
 
  	if { $status == 0 } {
  		error "+++ Make failed for '$depend':\n$result"
@@ -785,19 +817,32 @@ proc rolling_autoclean {rule debug} {
 	variable db_actions
 	variable db_generic
 	variable db_phony
+	variable db_prereq
 
 	set autoclean_candidates ""
 	$debug "TO CLEAN $rule:"
 	set deps ""
-	if { [info exists db_depends($rule)] } { lappend deps {*}$db_depends($rule) }
-	if { [info exists db_generic($rule)] } { lappend deps {*}$db_generic($rule) }
+	set hasrule 0
+	if { [info exists db_depends($rule)] } {
+		lappend deps {*}$db_depends($rule)
+		set hasrule 1
+	}
+	if { [info exists db_prereq($rule)] } { lappend deps {*}$db_prereq($rule) }
+	# WTF? under db_generic($x) there are generic ACTIONS!
+	#if { [info exists db_generic($rule)] } { lappend deps {*}$db_generic($rule) }
 	set generic [find_generic $rule]
 	if { $generic != "" } {
 		lappend deps {*}[generate_depends $rule $generic $db_depends($generic)]
+		lappend deps {*}[generate_depends $rule $generic $db_prereq($generic)]
 	}
 
 	if { $deps == "" } {
-		$debug "WON'T DELETE: $rule - no dependencies (generics: $generic)"
+		if { [info exists db_depends($rule)] && [info exists db_actions($rule)] } {
+			$debug "WILL DELETE: $rule - no dependencies, but has a build rule"
+			lappend autoclean_candidates $rule
+		} else {
+			$debug "WON'T DELETE: $rule - no dependencies (generics: $generic)"
+		}
 	} else {
 		if { ![info exists db_actions($rule)] && $generic == "" } {
 			$debug "WON'T DELETE: $rule - no action (phony rule)"
@@ -817,7 +862,7 @@ proc rolling_autoclean {rule debug} {
 
 proc autoclean {rule} {
 	set mkv::p::gg_debug_indent 0
-	set ac [rolling_autoclean $rule pass]
+	set ac [rolling_autoclean $rule $mkv::debug]
 	if { $ac != "" } {
 		puts stderr "Autoclean deletes: $ac"
 		file delete {*}$ac
