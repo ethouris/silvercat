@@ -114,6 +114,7 @@ namespace eval fw {
 			vlog "Packages: $packages"
 			foreach p $packages {
 				lassign [FindPackage $p] name version
+				$::g_debug "pkg-config:FindPackage returned name '$name' version '$version'"
 				if { [string index $version 0] == "-" } {
 					set v [string range $version 1 end]
 					$::g_debug "NOTE: pkg-config found package '$name', but with outdated version $v"
@@ -126,7 +127,7 @@ namespace eval fw {
 				}
 
 				# Package found. Add to the confirmed list.
-				lappend confirmed $name
+				lappend confirmed $p
 
 				set ldflags [exec $pkg_config --libs $name]
 				set cflags [exec $pkg_config --cflags $name]
@@ -144,6 +145,8 @@ namespace eval fw {
 					lappend newpkg $p
 				}
 			}
+			$::g_debug "Confirmed packages: $confirmed"
+			$::g_debug "Unrecognized packages: $newpkg"
 
 			# Keep the list of not found packages
 			dict set db packages $newpkg

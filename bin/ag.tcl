@@ -4,12 +4,26 @@
 # XXX (find some better way to do it)
 set was_interactive $tcl_interactive
 set tcl_interactive 1
-source [file dirname [info script]]/make.tcl
+set gg_makepath [file dirname [info script]]/make.tcl
+source $gg_makepath
 set tcl_interactive $was_interactive
 
+# Redefine MAKE so that the correct path is used
+namespace eval mkv {
+	proc MAKE {} {
+		return [file normalize $::gg_makepath]
+	}
+}
 
 namespace eval agv {
 	set version 0.1 ;# just to define something
+
+	set gg_agpath [file normalize [info script]]
+	variable runmode ""
+
+	proc AG {} {
+		return $agv::gg_agpath
+	}
 
 	variable target
 	namespace export target
@@ -52,6 +66,10 @@ namespace eval agv {
 	# the rules have been already generated.
 	variable genrules_done ""
 	namespace export genrules_done
+
+	variable srcdir .
+	variable statedir .
+	namespace export { srcdir statedir }
 }
 
 namespace import agv::p::dict:at
@@ -126,6 +144,43 @@ proc ShellWrapAll arg {
 
 	#puts stderr " --- --- Wrapped: '$out'"
 	return $out
+}
+
+
+proc FindSilverFile {agfile} {
+
+	set possible_agfiles {Makefile.ag.tcl Makefile.ag makefile.ag.tcl makefile.ag} 
+
+	if { $agfile == "" } {
+		foreach agfile [list {*}$possible_agfiles .] {
+			# "dot" always exists - it's the current directory
+			# buf even if it accidentally doesn't exist, it doesn't matter!
+			if { [file exists $agfile] } break
+		}
+
+		if { $agfile == "." } {
+			puts stderr "The Silvercat file not found among:"
+			puts stderr $possible_agfiles
+			puts stderr "Use -f <silvercat file> to set it explicitly"
+			return
+		}
+	} else {
+		if { ![file exists $agfile] } {
+			puts stderr "File not found: $agfile"
+			return
+		}
+	}
+
+	return $agfile
+}
+
+# XXX This should be platform-dependent!
+proc CreateLibraryFilename {target type} {
+	if { $type == "runtime" } {
+		return lib$target.so
+	}
+
+	return lib$target.a
 }
 
 # This function joins two lists into one list, keeping
@@ -268,7 +323,8 @@ proc IdentifyLanguage sourcefile {
 
 proc DetectType target {
 	# If any dot is found, try to determine by extension.
-	# If no dot found, return "program".
+	# If no dot found, return empty string.
+	# (program may be good, but it's not a good default)
 
 	# XXX This is true only on POSIX.
 	# Mind the $agv::exe value as a suffix.
@@ -276,18 +332,23 @@ proc DetectType target {
 	# be reported as Unknown.
 
 	if { [string first $target .] == -1 } {
-		return program
+		return phony
 	}
 
 	set ext [file extension $target]
 
 	if { $ext == [info sharedlibextension] } {
-		return library
+		return runtime
 	}
 
 	if { $ext in {.lib .a} } {
 		return archive
 	}
+
+	# names with dot in the name, but having no
+	# recognizable extension, return empty string
+	# as unrecognized.
+	return
 }
 
 proc ag-profile {name args} {
@@ -375,6 +436,7 @@ proc UnaliasOption alias {
 		nh { return noinst-headers }
 		fw { return frameworks }
 		hidir { return headers-installdir }
+		o { return output }
 		I { return incdir }
 		D { return defines }
 	}
@@ -567,7 +629,18 @@ proc AccessDatabase {array target args} {
 	}
 }
 
+proc file-normalize-relative {path} {
+	set norm [file normalize $path]
+	set b [string length [pwd]]
+	return [string range $norm $b+1 end]
+}
+
 proc ag {target args} {
+	# Turn target name into path-based target, if a relative
+	# state directory was set.
+	set tar [file join $agv::statedir $target]
+	set target [file-normalize-relative $tar]
+	
 	return [AccessDatabase agv::target $target {*}$args]
 }
 
@@ -707,12 +780,56 @@ proc Process:program target {
 
 proc Process:library target {
 
-	# XXX THIS IS TRIAL ONLY!
-	# The exact filename should be prepared basing on
-	# the current OS and settings.
-	set outfile lib$target.a
+	# NOTE: This immediate "archive" should be extracted
+	# from "libtype" key.
+	set outfile [CreateLibraryFilename $target archive]
 
 	ProcessCompileLink library $target $outfile
+	Process:phony $target
+}
+
+proc Process:directory target {
+
+	# The procedure must exist because there is a type
+	# however it's hard to say as to whether anything
+	# has to be done here.
+
+}
+
+proc Process:custom target {
+	# Custom targets are targets that declare the
+	# input files (-s), output files (-o) and
+	# the external command to build them.
+
+	set db $agv::target($target)
+
+	set rules [dict:at $db rules]
+	set phony [dict:at $db phony]
+	set outfile [dict:at $db output]
+	set sources [dict:at $db sources]
+	set command [dict:at $db command]
+
+	set rule [list {*}$sources "\n\t$command\n"]
+	foreach o $outfile {
+		dict set rules $o $rule
+	}
+
+	if { $outfile != $target } {
+		dict set phony $target $outfile
+	}
+
+	if { $outfile == "" } {
+		# The case when we have a command-only-and-maybe-do-something
+		# (so the above foreach loop did not pick up any files)
+		dict set rules $target $rule
+	}
+
+	dict set db rules $rules
+	dict set db phony $phony
+	set agv::target($target) $db
+
+	DebugDisplayDatabase agv::target $target
+
 	Process:phony $target
 }
 
@@ -751,7 +868,7 @@ proc GenerateInstallTarget:program {target prefix} {
 	}
 
 	set itarget install-$target
-	dict set db rules $itarget [list $outfile \n$icmd]
+	dict set db rules $itarget [list $outfile \n$icmd\n]
 	dict set db phony $itarget ""
 	# Ok, ready. Write back to the database
 	set agv::target($target) $db
@@ -909,8 +1026,8 @@ proc GetDependentLibraryTargets target {
 	set langs ""
 
 	foreach d $depends {
-		if { ![info exists agv::target($d)] } {
-			error "Target '$d' (dependency of [dict:at $db name]) is not defined"
+		if { ![CheckDefinedTarget $d] } {
+			error "Target '$d' (dependency of $target) is not defined"
 		}
 
 		set type [dict:at $agv::target($d) type]
@@ -946,6 +1063,7 @@ proc GenerateLinkRule:program {db outfile} {
 
 	set objects [dict:at $db objects]
 	set ldflags [dict:at $db ldflags]
+	set depends [dict:at $db depends]
 
 	set linker [dict get $agv::profile($lang) link]
 	set oflag [dict get $agv::profile($lang) link_oflag]
@@ -954,7 +1072,12 @@ proc GenerateLinkRule:program {db outfile} {
 
 	set command "$linker $objects $oflag $outfile $libs $ldflags"
 
-	set rule "$objects {\n\t$command\n}"
+	# The rule should contain all ingredient files
+	# and all "targets" declared here as its dependency
+	# (be it phony or file-based target). The exact file that
+	# needs to be used in the command is already extracted
+	# by GetDependentLibraryTargets.
+	set rule "$objects $depends {\n\t$command\n}"
 
 	return $rule
 }
@@ -1013,8 +1136,6 @@ proc ag-do-genrules target {
 	puts $fd "# DO NOT MODIFY THIS FILE - or remove the above comment line."
 	puts $fd "# This file is generated and its contents will be overwritten.\n"
 
-
-
 	set ok [GenerateMakefile $target $fd]
 	if { !$ok } {
 		puts $fd "# XXX THIS MAKEFILE IS INVALID. Please check errors and regenerate"
@@ -1034,6 +1155,7 @@ proc GenerateMakefile {target fd} {
 	vlog "Generating makefile for $target"
 
 	set rules [dict:at $agv::target($target) rules]
+	set type [dict:at $agv::target($target) type]
 
 	# Rules is itself also a dictionary.
 	# Key is target file, value is dependencies and command at the end.
@@ -1064,10 +1186,19 @@ proc GenerateMakefile {target fd} {
     }
     vlog "Makefile generator: finished sub-rules for deps"
 
+	# XXX This should be done different way:
+	# 1. This should be removed
+	# 2. TARGET-clean targets should be defined only for program and library, or all
+
 	set cleanname $target-clean
 	if { $target == "all" } {
 		set cleanname clean
+	} elseif { $type ni {program library custom} } {
+		vlog "Makefile generator: NOT generating clean for $target"
+		return true
 	}
+	
+	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target'"
 
 	# Clean rule
 	puts $fd "rule $cleanname {
@@ -1124,6 +1255,47 @@ proc ag-do-make {target} {
 	return 0
 }
 
+# This procedure should be used instead of checking if exists agv::target($target).
+# It's specifically for targets that may have a special form and because of that
+# have to be synthesized lazily.
+# Currently it concerns only detecting "directory-based targets"
+proc CheckDefinedTarget target {
+
+	# If the target exists - it's already done.
+	if { [info exists agv::target($target)] } {
+		return true
+	}
+
+	# Maybe it's undefined because it's directory based.
+	set parts [file split $target]
+	if { [llength $parts] < 2 } {
+		# Not a directory-based target, so it must be explicitly defined
+		return false
+	}
+
+	# It is directory based.
+	# So, check if directory target is defined
+	set dir [lindex $parts 0]
+	if { ![info exists agv::target($dir)] } {
+		error "Target '$target' is subdir-based, but no target '$dir' is defined (use ag-subdir to define)"
+	}
+
+	if { [dict:at $agv::target($dir) type] != "directory" } {
+		error "Target '$target' is subdir-based, but '$dir' is not a directory target"
+	}
+
+	# Ok, having that confirmed, synthesize the target
+	vlog "--- Synthesizing subdir-redirection target '$target'"
+	set subtarget [file join {*}[lrange $parts 1 end]]
+
+	set agv::target($target) [plist {
+		name $target
+		type custom
+		command "\[mkv::MAKE\] -C $dir $subtarget"
+	}]
+	return true
+}
+
 proc agp-prepare-database target {
 	vlog "--- Preparing database for target '$target'"
 
@@ -1140,20 +1312,37 @@ proc agp-prepare-database target {
 		agv::p::PrepareGeneralTarget
 	}
 
-	# Check if defined
-	if { ![info exists agv::target($target)] } {
+	if { ![CheckDefinedTarget $target] } {
 		error "No such target: $target"
 	}
 
 	set type [dict:at $agv::target($target) type]
+	set cat [dict:at $agv::target($target) category]
 
 	if { $type == "" } {
 		set type [DetectType $target]
 		if { $type == "" } {
 			error "Can't recognize target type for '$target' - please declare explicitly"
 		}
+	} else {
+		lassign [split $type .] ncat ntype
+		if { $ntype != "" } {
+			# ignore category if type specified this way
+			set cat $ncat
+			set type $ntype
+		}
 	}
-	vlog "Preparing database for '$target' type=$type"
+
+	# If category still not set, set default
+	if { $cat == "" } {
+		set cat noinst
+	}
+
+	# Write back to the database
+	dict set agv::target($target) type $type
+	dict set agv::target($target) category $cat
+
+	vlog "Preparing database for '$target' type=$type category=$cat"
 
 	set tarlang [dict:at $agv::target($target) language]
 
@@ -1187,6 +1376,8 @@ proc agp-prepare-database target {
 	}
 
 	vlog " ... Processing '$target' as '$type'"
+	# The 'Process:*' functions are expected to use the existing
+	# data in the target database to define build rules.
 	Process:$type $target
 	
 	$::g_debug "DATABASE for '$target' AFTER PROCESSING:"
@@ -1195,6 +1386,7 @@ proc agp-prepare-database target {
 	vlog "PROCESSING DEPENDS of $target"
 
 	foreach dep [dict:at $agv::target($target) depends] {
+		vlog " ... DEP OF '$target': '$dep'"
 		if { ![agp-prepare-database $dep] } {
 			return false
 		}
@@ -1267,7 +1459,58 @@ proc ag-subdir args {
 		set args [lindex $args 0]
 	}
 
-	lappend agv::p::directories {*}$args
+	foreach a $args {
+		ag-subdir1 $a
+	}
+}
+
+proc ag-subdir1 target {
+	set ttype [file type $target]
+
+	switch -- $ttype {
+		directory {
+			set agfile ""
+		}
+
+		file {
+			set agfile [file tail $target]
+			set target [file dirname $target]
+		}
+	}
+
+	ag $target -type directory
+	if { $agfile != "" } {
+		ag $target -agfile $agfile
+	}
+
+	lappend agv::p::directories $target
+
+	set osd $agv::srcdir
+	set od $agv::statedir
+	set sd [file join $od $target]
+
+	# XXX This may need 'mkdir' in case of shadow build
+	set wd [pwd]
+	cd $sd
+	set agv::statedir $sd
+
+	set agfile [FindSilverFile $agfile]
+
+	if { $agfile == "" } {
+		error "Can't process directory target '$sd': no Makefile.ag file found!"
+	}
+
+	$::g_debug "AG-SUBDIR: using directory '$sd'. Descending into Silverfile: '$agfile'"
+
+	mkv::p::run [agv::AG] $agv::runmode -f $agfile
+
+	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Restoring env."
+
+	# Restore environment
+
+	set agv::srcdir $osd
+	cd $wd
+	set agv::statedir $od
 }
 
 package provide ag 0.8
@@ -1277,31 +1520,36 @@ if { !$tcl_interactive } {
 set agfile {}
 set help 0
 set ag_debug_on 0
-set g_debug pass
+set g_debug mkv::p::pass
+set agfiledir .
 
 set ag_optargs {
 	-f agfile
 	-help *help
 	--help *help
-	-v *g_verbose
+	-v *verbose
 	-d *ag_debug_on
+	-C agfiledir
 }
 
-lassign [mk-process-options $argv $ag_optargs] g_args g_variables
+lassign [process-options $argv $ag_optargs] g_args g_variables
 
-if { $help } {
+if { $help || [string trim $g_args] == "" } {
 	puts "Usage: [file tail $::argv0] genrules <target>"
 	puts stderr "Options:"
-	foreach {opt arg} $g_optargs {
+	foreach {opt arg} $ag_optargs {
 		puts stderr [format "  %-8s %s" $opt: $arg]
 	}
 	exit 1
 }
 
 if { $ag_debug_on } {
-	set g_debug debug
+	set g_debug mkv::p::debug
 }
 
+
+set mkv::p::verbose $verbose
+set mkv::directory $agfiledir
 
 # XXX something special about g_debug_on ?
 
@@ -1310,39 +1558,24 @@ foreach {name value} $g_variables {
     set $name $value
 }
 
-set possible_agfiles {Makefile.ag.tcl Makefile.ag makefile.ag.tcl makefile.ag} 
+set wd [pwd]
+set agfiledir [file normalize $agfiledir]
+cd $agfiledir
 
-if { $agfile == "" } {
-	foreach agfile [list {*}$possible_agfiles .] {
-		# "dot" always exists - it's the current directory
-		# buf even if it accidentally doesn't exist, it doesn't matter!
-		if { [file exists $agfile] } break
-	}
 
-	if { $agfile == "." } {
-		puts stderr "The Silvercat file not found among:"
-		puts stderr $possible_agfiles
-		puts stderr "Use -f <silvercat file> to set it explicitly"
-		exit 1
-	}
-} else {
-	if { ![file exists $agfile] } {
-		puts stderr "File not found: $agfile"
-		exit 1
-	}
-}
+# Use the previous value, should that be set by option
+set agfile [FindSilverFile $agfile]
 
-set arg1 [lindex $g_args 0]
-if { $arg1 == "" } {
-	set arg1 help
-}
+
+set agv::runmode [lindex $g_args 0] ;# != "" because g_args != ""
 
 # XXX This should be somehow modified to support shadow builds
 # 
 set agv::srcdir [file dirname $agfile]
 source $agfile
 
-exit [ag-do-$arg1 [lrange $g_args 1 end]]
+set exitcode [ag-do-$agv::runmode [lrange $g_args 1 end]]
 
-
+cd $wd
+exit $exitcode
 }

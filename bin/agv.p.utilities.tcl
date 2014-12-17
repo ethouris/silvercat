@@ -73,7 +73,7 @@ namespace export topsort
 
 proc ReorderTargets subtargets {
 	set ltargets {}
-	lappend ltargets $subtargets
+	lappend ltargets {*}$subtargets
 	set point 0
 	set nomore true
 	set targets {}
@@ -90,9 +90,8 @@ proc ReorderTargets subtargets {
 			set deps [dict:at $agv::target($t) depends]
 			lappend targets {*}$deps
 			lappend children($t) {*}$deps
+			vlog "{$point} DEPS OF $t: $targets"
 		}
-
-		vlog "{$point} DEPS OF $t: $targets"
 
 		if { $targets == "" } {
 			break
@@ -108,7 +107,7 @@ proc ReorderTargets subtargets {
 			}
 		}
 
-		lappend $ltargets $targets
+		lappend $ltargets {*}$targets
 		set targets ""
 		incr point
 		vlog "LTARGETS:"
@@ -119,6 +118,14 @@ proc ReorderTargets subtargets {
 		}
 	}
 
+
+	if { $ltargets == "" } {
+		vlog "NO target dependency tree (only first level deps): $subtargets"
+		return $subtargets
+	}
+
+	set kidless ""
+
 	# Build dependency tree
 	set tree {}
 	foreach {node kids} [array get children] {
@@ -128,9 +135,19 @@ proc ReorderTargets subtargets {
 		}
 	}
 
-	vlog "Target dependency tree: $tree"
+	vlog "Target dependency tree: $tree (subs: $subtargets)"
 
-	return [topsort $tree]
+	set tree [topsort $tree]
+
+	foreach et $subtargets {
+		if { $et ni $tree } {
+			vlog " ... adding childless dep: $et"
+			lappend tree $et
+		}
+	}
+	
+
+	return $tree
 }
 
 proc PrepareGeneralTarget {} {
@@ -143,16 +160,21 @@ proc PrepareGeneralTarget {} {
 	foreach t [array names agv::target] {
 		set type [dict:at $agv::target($t) type]
 		vlog "Target '$t', type $type:"
-		if { $type in {program library} } {
-			vlog " --> Added to 'all'"
+		if { $type in {program library custom} } {
+			vlog " --> Added to 'all' (because $type)"
 			lappend subtargets $t
+		} elseif { $type == "directory" } {
+			vlog " --> Added to 'all' as $t/all (because $type)"
+			lappend subtargets $t/all
 		} else {
-			vlog " --| Not added to 'all'"
+			vlog " --| Not added to 'all' (because $type)"
 		}
 	}
 
+	vlog " --: ALL TARGETS: $subtargets"
 	set subtargets [ReorderTargets $subtargets]
 
+	vlog " --: ALL TARGETS: $subtargets"
 	ag all -type phony -depends {*}$subtargets
 }
 
