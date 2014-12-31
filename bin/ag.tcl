@@ -74,6 +74,31 @@ namespace eval agv {
 
 namespace import agv::p::dict:at
 
+proc RealFilePath target {
+	vlog "*** RESOLVING '$target' in $agv::srcdir"
+	if { [string first / $target] } {
+		set rem [lassign [file split $target] first]
+		if { $first == "." } {
+			# We have a ./FILENAME
+			vlog " ... explicit current directory: $target"
+			return $target
+		}
+
+		# Check if the path is absolute already
+		# If so, return it as is
+		if { [file normalize $target] == $target } {
+			vlog " ... explicit absolute directory: $target"
+			return $target
+		}
+	}
+
+	# In all other cases, return the path
+	# readjusted to srcdir
+	set out [file join $agv::srcdir $target]
+	vlog " ... readjusted: $out"
+	return $out
+}
+
 proc GenerateCompileFlags lang {
 	set define_flags ""
 
@@ -147,24 +172,32 @@ proc ShellWrapAll arg {
 }
 
 
-proc FindSilverFile {agfile} {
+proc FindSilverFile {agfile {agdir .}} {
 
 	set possible_agfiles {Makefile.ag.tcl Makefile.ag makefile.ag.tcl makefile.ag} 
 
 	if { $agfile == "" } {
+
+		vlog "*** Trying to find a standard silverfile in $agdir"
+
 		foreach agfile [list {*}$possible_agfiles .] {
 			# "dot" always exists - it's the current directory
 			# buf even if it accidentally doesn't exist, it doesn't matter!
-			if { [file exists $agfile] } break
+			if { [file exists [file join $agdir $agfile]] } break
 		}
 
 		if { $agfile == "." } {
-			puts stderr "The Silvercat file not found among:"
+			puts stderr "The Silvercat file not found in '[file normalize $agdir]' among:"
 			puts stderr $possible_agfiles
 			puts stderr "Use -f <silvercat file> to set it explicitly"
 			return
 		}
+
+		vlog "... Found: $agfile"
 	} else {
+
+		vlog "*** Checking file '$agfile' in '$agdir'"
+		set agfile [file join $agdir $agfile]
 		if { ![file exists $agfile] } {
 			puts stderr "File not found: $agfile"
 			return
@@ -266,7 +299,11 @@ proc GenerateDepends {lang cflags source} {
 #		puts " --> $c"
 #	}
 
+	# The command should be run originally in the source directory
+	set wd [pwd]
+	cd $agv::srcdir
 	set deps [exec {*}$cmd]
+	cd $wd
 
 	# Rules are generated in the convention of "make".
 	# Make them a plain list, as needed for "make.tcl"
@@ -631,8 +668,25 @@ proc AccessDatabase {array target args} {
 
 proc file-normalize-relative {path} {
 	set norm [file normalize $path]
-	set b [string length [pwd]]
-	return [string range $norm $b+1 end]
+
+	set common 0
+	set norm_parts [file split $norm]
+	set b_parts [file split [pwd]]
+	while { [lindex $norm_parts $common] == [lindex $b_parts $common] } {
+		incr common
+	}
+
+	set shift_norm_parts [lrange $norm_parts $common end]
+	set overhead [expr {[llength $b_parts]-$common}]
+	set uppath ""
+	if { $overhead > 0 } {
+		set uppath [lrepeat $overhead ..]
+	}
+	set rpath [file join {*}$uppath {*}$shift_norm_parts]
+
+
+	$::g_debug "Norma-localize in '[pwd]' $norm: $rpath"
+	return $rpath
 }
 
 proc ag {target args} {
@@ -704,7 +758,7 @@ proc ProcessSources target {
 
 		set info [pget agv::fileinfo($s)]
 		
-		vlog "INFO($s): $agv::fileinfo($s) = $info"
+		vlog "INFO($s): $info"
 
 		set lang [dict:at $info language]
 
@@ -809,7 +863,12 @@ proc Process:custom target {
 	set sources [dict:at $db sources]
 	set command [dict:at $db command]
 
-	set rule [list {*}$sources "\n\t$command\n"]
+	set rsrc ""
+	foreach s $sources {
+		lappend rsrc [RealFilePath $s]
+	}
+
+	set rule [list {*}$rsrc "\n\t$command\n"]
 	foreach o $outfile {
 		dict set rules $o $rule
 	}
@@ -1001,10 +1060,18 @@ proc GenerateCompileRule {db lang objfile source deps} {
 	set compiler [dict get $agv::profile($lang) compile]
 	set oflag [dict get $agv::profile($lang) compile_oflag]
 
+	# Ok, now we need to readjust source and deps to be in
+	# the srcdir
+	set source [RealFilePath $source]
+	set odeps ""
+	foreach d $deps {
+		lappend odeps [RealFilePath $d]
+	}
+
 	set command "$compiler $cflags $source $oflag $objfile"
 	$::g_debug "... Command: $command"
 
-	set rule "$deps {\n\t$command\n}"
+	set rule "$odeps {\n\t$command\n}"
 }
 
 proc GetTargetFile target {
@@ -1128,7 +1195,7 @@ proc ag-do-genrules target {
 
 	vlog "Database for '$target' completed. Generating Makefile"
 
-	set fd [open Makefile.tcl w]
+	set fd [open [file join $mkv::directory Makefile.tcl] w]
 
 	# Print header
 	# Just don't print this in the sub-calls
@@ -1460,12 +1527,14 @@ proc ag-subdir args {
 	}
 
 	foreach a $args {
+		vlog "*** ANALYZING SUBDIR: $a"
 		ag-subdir1 $a
 	}
 }
 
 proc ag-subdir1 target {
-	set ttype [file type $target]
+	set target_dir [RealFilePath $target]
+	set ttype [file type $target_dir]
 
 	switch -- $ttype {
 		directory {
@@ -1473,8 +1542,8 @@ proc ag-subdir1 target {
 		}
 
 		file {
-			set agfile [file tail $target]
-			set target [file dirname $target]
+			set agfile [file tail $target_dir]
+			set target [file dirname $target_dir]
 		}
 	}
 
@@ -1488,21 +1557,33 @@ proc ag-subdir1 target {
 	set osd $agv::srcdir
 	set od $agv::statedir
 	set sd [file join $od $target]
+	if { [file exists $sd] } {
+		if { ![file isdirectory $sd] } {
+			error "File '$sd' is blocking from creating a directory!"
+		}
+	} else {
+		file mkdir $sd
+	}
+
+	set target_dir_abs [file normalize $target_dir]
 
 	# XXX This may need 'mkdir' in case of shadow build
 	set wd [pwd]
 	cd $sd
 	set agv::statedir $sd
 
-	set agfile [FindSilverFile $agfile]
+	vlog "*** Trying $agfile in $target_dir"
+	set agfile [FindSilverFile $agfile $target_dir_abs]
 
 	if { $agfile == "" } {
 		error "Can't process directory target '$sd': no Makefile.ag file found!"
 	}
 
-	$::g_debug "AG-SUBDIR: using directory '$sd'. Descending into Silverfile: '$agfile'"
+	set agfilepath_abs [file join $target_dir_abs $agfile]
+	set agfilepath [file-normalize-relative $agfilepath_abs]
+	$::g_debug "AG-SUBDIR: using directory '$sd'. Descending into Silverfile: '$agfilepath'"
 
-	mkv::p::run [agv::AG] $agv::runmode -f $agfile
+	mkv::p::run [agv::AG] $agv::runmode -f $agfilepath
 
 	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Restoring env."
 
