@@ -22,7 +22,15 @@ namespace eval agv {
 	variable runmode ""
 
 	proc AG {} {
-		return $agv::gg_agpath
+		set options ""
+		if { $mkv::p::verbose } {
+			append options " -v"
+		}
+		if { $::ag_debug_on } {
+			append options " -d"
+		}
+
+		return $agv::gg_agpath$options
 	}
 
 	variable target
@@ -44,6 +52,9 @@ namespace eval agv {
 		source $here/agv.p.builtin.tcl
 		source $here/agv.p.builtin-profiles.tcl
 		source $here/agv.p.builtin-frameworks.tcl
+
+		set exported_proc ""
+		set exported_var ""
 	}
 
 	set exe $p::exefor([info sharedlibextension])
@@ -57,6 +68,7 @@ namespace eval agv {
 	# Will be set to the profile's default, unless overridden.
 	variable prefix
 	namespace export prefix
+	set prefix /usr/local
 
 	# Per-file set information
 	variable fileinfo
@@ -92,9 +104,14 @@ proc RealFilePath target {
 		}
 	}
 
+	set dir $agv::srcdir
+	if { $dir == "." } {
+		set dir ""
+	}
+
 	# In all other cases, return the path
 	# readjusted to srcdir
-	set out [file join $agv::srcdir $target]
+	set out [file join $dir $target]
 	vlog " ... readjusted: $out"
 	return $out
 }
@@ -279,7 +296,7 @@ proc StableIntersection {l2 l1} {
 	return $out
 }
 
-proc GenerateDepends {lang cflags source} {
+proc CreateDepGenCommand {lang cflags source} {
 	$::g_debug "Extracting ingredients of '$source' (cflags: $cflags)"
 
 	set gendep [dict:at [pget agv::profile($lang)] gendep]
@@ -291,7 +308,12 @@ proc GenerateDepends {lang cflags source} {
 	set wrapped_flags [ShellWrapAll $cflags]
 
 	set cmd "$gendep [ShellWrapAll $cflags] $source"
-	$::g_debug "Command: $cmd"
+	return $cmd
+}
+
+proc GenerateDepends {lang cflags source} {
+	set cmd [CreateDepGenCommand $lang $cflags $source]
+	vlog "Dep command: $cmd"
 
 	# Run the command to generate deps
 	#puts "Command: "
@@ -531,6 +553,8 @@ proc AccessDatabase {array target args} {
 		dict set agv_db($target) name $target
 	}
 
+	set singles [pget agv::p::singles]
+
 	# Get old options
 	set db $agv_db($target)
 	array set options [dict get $db {*}$keypath]
@@ -629,6 +653,9 @@ proc AccessDatabase {array target args} {
 			}
 			if { $push_front } {
 				set options($lastopt) [concat $o $options($lastopt)]
+			} elseif { $lastopt in $singles } {
+				puts stderr " +++ $lastopt is expected as single - OVERRIDING existing value with $o"
+				set options($lastopt) $o
 			} else {
 				lappend options($lastopt) {*}$o
 			} 
@@ -737,18 +764,23 @@ proc ProcessSources target {
 
 		dict lappend used_langs $lang $s
 
-		# Check if you have depends declared explicitly. If so, use them.
-		set info [pget agv::fileinfo($s)]
-		if { [dict exists $info includes] } {
-			$::g_debug " --- Headers for '$s' are known - not generating"
-			set deps [concat $s [dict get $info includes]]
+		set depspec [dict:at $agv::profile($lang) depspec]
+		if { $depspec == "auto" } {
+			# Check if you have depends declared explicitly. If so, use them.
+			set info [pget agv::fileinfo($s)]
+			if { [dict exists $info includes] } {
+				$::g_debug " --- Headers for '$s' are known - not generating"
+				set deps [concat $s [dict get $info includes]]
+			} else {
+				$::g_debug " --- Include info not found for '$s' - using gendep to generate:"
+				set cflags [CompleteCflags $db $lang]
+				set deps [GenerateDepends $lang $cflags $s]
+				# Write them back to the database
+				dict set agv::fileinfo($s) includes [lrange $deps 1 end] ;# skip the source itself
+				#parray agv::fileinfo
+			}
 		} else {
-			$::g_debug " --- Include info not found for '$s' - using gendep to generate:"
-			set cflags [CompleteCflags $db $lang]
-			set deps [GenerateDepends $lang $cflags $s]
-			# Write them back to the database
-			dict set agv::fileinfo($s) includes [lrange $deps 1 end] ;# skip the source itself
-			parray agv::fileinfo
+			#dict set agv::fileinfo($s) includes %$depspec
 		}
 	}
 
@@ -761,11 +793,31 @@ proc ProcessSources target {
 		vlog "INFO($s): $info"
 
 		set lang [dict:at $info language]
+		set depspec [dict:at $agv::profile($lang) depspec]
 
 		set o [file rootname $s].ag.o
 		$::g_debug " ... processing $s (language $lang) --> $o"
 
-		set deps [concat $s [dict get $info includes]]
+		if { $depspec == "cached" } {
+			set depfile [file rootname $s].ag.dep
+			$::g_debug " ... generating rule for dependency file $depfile"
+			if { ![dict exists $rules $depfile] } {
+				set cflags [CompleteCflags $db $lang]
+				set depcmd [CreateDepGenCommand $lang $cflags $s]
+				set rule "$s {\n\t!tcl gendep $depfile $depcmd\n}"
+				dict set rules $depfile $rule
+			}
+
+			# Set "dependency list" as "please use deps saved in a file"
+			# the info.include is unavailable in this mode.
+			set deps <$depfile
+		} else {
+
+			$::g_debug "Dependency specification mode: $depspec"
+			# This is for both "auto" and "explicit"
+			# For "explicit" it just requires to be set primarily.
+			set deps [concat $s [dict get $info includes]]
+		}
 
 		# Generate rule for the target
 		set rule [GenerateCompileRule $db $lang $o $s $deps]
@@ -1062,16 +1114,22 @@ proc GenerateCompileRule {db lang objfile source deps} {
 
 	# Ok, now we need to readjust source and deps to be in
 	# the srcdir
+	$::g_debug "GENERATING FROM $source: $deps"
 	set source [RealFilePath $source]
 	set odeps ""
 	foreach d $deps {
 		lappend odeps [RealFilePath $d]
 	}
+	$::g_debug "GENERATING FOR  $source: $odeps"
 
 	set command "$compiler $cflags $source $oflag $objfile"
 	$::g_debug "... Command: $command"
 
 	set rule "$odeps {\n\t$command\n}"
+
+	$::g_debug "... Generated rule: $rule"
+
+	return $rule
 }
 
 proc GetTargetFile target {
@@ -1221,6 +1279,19 @@ proc GenerateMakefile {target fd} {
 
 	vlog "Generating makefile for $target"
 
+	# Put exported variables and procedures into the script
+	foreach vv $agv::p::exported_var {
+		lassign $vv v a
+		puts $fd "set $v \"$a\""
+	}
+	foreach vv $agv::p::exported_proc {
+		lassign $vv n a b
+		puts $fd "proc $n {$a} {$b}" 
+	}
+	# Clear them so that they don't get generated again
+	set agv::p::exported_var ""
+	set agv::p::exported_proc ""
+
 	set rules [dict:at $agv::target($target) rules]
 	set type [dict:at $agv::target($target) type]
 
@@ -1363,7 +1434,7 @@ proc CheckDefinedTarget target {
 	return true
 }
 
-proc agp-prepare-database target {
+proc agp-prepare-database {target {parent ""}} {
 	vlog "--- Preparing database for target '$target'"
 
 	# Make sure that the profile contains at least the "general"
@@ -1380,7 +1451,12 @@ proc agp-prepare-database target {
 	}
 
 	if { ![CheckDefinedTarget $target] } {
-		error "No such target: $target"
+		set par ""
+		if { $parent != "" } {
+			set par " (as a dependency of $parent)"
+		}
+		puts stderr "No such target: $target$par"
+		return false
 	}
 
 	set type [dict:at $agv::target($target) type]
@@ -1454,7 +1530,7 @@ proc agp-prepare-database target {
 
 	foreach dep [dict:at $agv::target($target) depends] {
 		vlog " ... DEP OF '$target': '$dep'"
-		if { ![agp-prepare-database $dep] } {
+		if { ![agp-prepare-database $dep $target] } {
 			return false
 		}
 	}
@@ -1583,7 +1659,7 @@ proc ag-subdir1 target {
 	set agfilepath [file-normalize-relative $agfilepath_abs]
 	$::g_debug "AG-SUBDIR: using directory '$sd'. Descending into Silverfile: '$agfilepath'"
 
-	mkv::p::run [agv::AG] $agv::runmode -f $agfilepath
+	mkv::p::run {*}[agv::AG] $agv::runmode -f $agfilepath
 
 	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Restoring env."
 
@@ -1592,6 +1668,29 @@ proc ag-subdir1 target {
 	set agv::srcdir $osd
 	cd $wd
 	set agv::statedir $od
+}
+
+proc ag-export names {
+	foreach n $names {
+		# Check if it's a procedure
+		if { [info proc $n] == $n } {
+			set procspec [list $n [info args $n] [info body $n]]
+			#$::g_debug "EXPORTING PROC: $procspec"
+			if { [lsearch -exact -index 0 $agv::p::exported_proc $n] == -1 } {
+				lappend agv::p::exported_proc $procspec
+			}
+			continue
+		}
+
+		# Export a variable. Read the variable from the above stack frame
+		upvar $n var
+		if { ![info exists var] } {
+			error "ag-export: $n is neither a procedure nor a variable"
+		}
+		if { [lsearch -exact -index 0 $agv::p::exported_var $n] == -1 } {
+			lappend agv::p::exported_var [list $n $var]
+		}
+	}
 }
 
 package provide ag 0.8
@@ -1626,6 +1725,7 @@ if { $help || [string trim $g_args] == "" } {
 
 if { $ag_debug_on } {
 	set g_debug mkv::p::debug
+	set mkv::debug mkv::p::debug
 }
 
 
