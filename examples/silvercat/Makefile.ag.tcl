@@ -58,6 +58,14 @@ ag answer -sources {- file2.cc}
 # This option is here blocked because it's for the libff.a library, same as
 # adding the ff target as dependent.
 #ag answer -ldflags -- -L.  -lff
+
+# Setting a dependency on a target that was previously defined as of type library,
+# and when the target is a program, this statement makes the program to be linked
+# against the library built for that target. If you want to make the target simply
+# dependent on a library target, but not to be linked against it, make an intermediate
+# phony target and link them with dependencies. The phony target will not ship libraries,
+# so linkage against the library won't happen, and phony target being dependent on
+# a library only does forwarding when compiling.
 ag answer -depends ff
 
 # Define explicitly includes in this file. When this is not defined,

@@ -147,6 +147,27 @@ proc process-options {argv optargd} {
 	return [list $args $variables]
 }
 
+proc getdeps { target {depnames {}} } {
+	set depends ""
+	if { $depnames == "" } {
+		variable db_depends
+		set depnames $db_depends($target)
+	}
+	foreach d $depnames {
+		if { [string index $d 0] == "<" } {
+			set rf [string range $d 1 end]
+			set rule [load-rule $target $rf]
+			lappend depends {*}$rule $rf
+
+			# Here you can handle other cases of special characters
+			# Except @ of course.
+		} else {
+			lappend depends $d
+		}
+	}
+	return $depends
+}
+
 # Provide expansion in style of {*} in tcl 8.5
 # use any character provided in $ch
 proc expandif {ch ls} {
@@ -163,25 +184,66 @@ proc expandif {ch ls} {
 	return $final
 }
 
+proc load-rule {target rulefile} {
+	variable db_actions
+
+	vlog " --- Expecting that ingredients for $target are found in $rulefile"
+	if { [info exists db_actions($rulefile)] } {
+		# Make, no matter whether exists or not.
+		# May need to be refreshed.
+		vlog " -- Executing rules to make '$rulefile'"
+		make $rulefile
+	} else {
+		vlog " ??? NO RULES to make '$rulefile' - expecting that it just exists..."
+	}
+
+	if { ![file exists $rulefile] } {
+		error "*** No rule to make dependency file '$rulefile' for target '$target'"
+	}
+
+	set fd [open $rulefile r]
+	set rule [read $fd]
+	close $fd
+
+	$mkv::debug "RULE FROM FILE '$rulefile': ingredients: $rule"
+
+	return $rule
+}
+
 proc rule args {
 	variable db_depends
 	variable db_generic
 	variable db_phony
 	variable db_actions
 	variable db_prereq
-	
+
+	#$mkv::debug " #1 RULE ARGS: $args"
 	set args [expandif @ $args]
+	#$mkv::debug " #2 RULE ARGS: $args"
 	set size [llength $args]
 	if { $size < 2 } {
 		return -code error "+++ rule: at least two arguments required (name,action)"
 	}
 
 	set target [lindex $args 0]
-	if { [llength $target] > 1 && [string index [lindex $target 0] end] == ":" } {
+	set length [llength $args]
+	if { $length > 1 && [string index [lindex $target 0] end] == ":" } {
+
+		# In this case this should contain exactly two arguments.
+		# If any more, issue an error
+		if { $length != 2 } {
+			error "Syntax target:depends requires rule {deps} {action}. Incorrect number $length of arguments."
+		}
+
 		set target [string map {"\\\n" ""} $target]
+		set actionspec [lindex $args end]
 		set args $target
 		set target [string range [lindex $target 0] 0 end-1]
+		lappend args $actionspec
 	}
+	#$mkv::debug " #3 RULE ARGS: $args"
+	#$mkv::debug [join $args ;]
+
 	set depends ""
 	set prereq ""
 	set depvar depends
@@ -206,7 +268,7 @@ proc rule args {
 	}
 	
 	$mkv::debug "RULE '$target' DEPS: $depends PREREQ: $prereq"
-	$mkv::debug "RULE '$target' ACTION: {$action}"
+	$mkv::debug "... ACTION: {$action}"
 	set db_depends($target) $depends
 	set db_actions($target) $action
 	set db_prereq($target) $prereq
@@ -232,7 +294,25 @@ proc check_generic_upd_first {target} {
 	return false
 }
 
+proc gendep {depfile args} {
+	set origdeps [exec {*}$args]
 
+	# First, remove these stupid line breaks
+	set deps [string map {"\\\n" " "} $origdeps]
+
+	# Second, delete the first word which is the name of the target
+	# (we'll have the name set explicitly)
+	set deps [lrange $deps 1 end]
+
+	# And now write them into the depfile
+	set fd [open $depfile w]
+	puts $fd $deps
+	close $fd
+}
+
+proc dep-rule {depfile sourcefile action} {
+	rule $depfile $sourcefile "!tcl gendep $depfile [string trim $action]"
+}
 
 proc phony {name args} {
 	variable db_depends
@@ -272,22 +352,26 @@ proc puncomment text {
 proc plist1 arg {
 	set out ""
 	set arg [string map {"\\\n" ""} $arg]
-	set lines [split $arg \n]
-	foreach l $lines {
-		#puts stderr "LINE: $l"
-		set lt [string trimleft $l]
-		if { [string index $lt 0] == "#" } {
-			continue
-		}
-		set ol [uplevel "list $l"]
-		#puts stderr "OUTPUT LINE: $ol"
-		lappend out $ol
-		#puts stderr "STATE: $out"
-	}
 
-	#puts "RESULT: $out"
+ 	set lines [split $arg \n]
+ 	foreach l $lines {
+ 		#puts stderr "LINE: $l"
+ 		set lt [string trimleft $l]
+ 		if { [string index $lt 0] == "#" } {
+ 			continue
+ 		}
 
-	return [join $out \n]
+		# Escape the braces
+		set l [string map {"\{" "\\\{" "\}" "\\\}" ";" "\\;"} $l]
+ 		set ol [uplevel "list $l"]
+ 		#puts stderr "OUTPUT LINE: $ol"
+ 		lappend out $ol
+ 		#puts stderr "STATE: $out"
+ 	}
+ 
+ 	#puts "RESULT: $out"
+ 
+ 	return [join $out \n]
 }
 
 proc plist args {
@@ -330,7 +414,7 @@ proc subst_action action {
 		lappend lines_target $target
 	}
 
-	vlog "Substituting: $lines_target"
+	$mkv::debug "Substituting: $lines_target"
 
 	set o [catch {
 	set target [uplevel #0 subst [list $lines_target]]
@@ -338,22 +422,25 @@ proc subst_action action {
 	if { $o } {
 		vlog ERROR:$::errorInfo
 	}
-	vlog "Substituted: ---> $target"
+	$mkv::debug "Substituted: ---> $target"
 
 	return $target
 }
 
 proc is_target_stale {target depend} {
+	variable db_phony
+	variable db_depends
+
 	# Check if $depend is phony.
 	# If phony, then just forward the request to its depends.
 	# XXX THIS FEATURE IS SLIGHTLY CONTROVERSIAL.
 	# Probably another type of target "forward" should exist, parallel to "phony".
-	if { [info exists mkv::p::db_phony($depend)] } {
+	if { [info exists db_phony($depend)] } {
 		set out false
 		if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
 			vlog "... ... and has deps ..."
-			foreach d $db_depends($depend) {
-				vlog "... ... forwarding: against $d ... [expr {[info exists mkv::p::db_phony($d)] ? "(also phony)" : ""}]"
+			foreach d [getdeps $target] {
+				vlog "... ... forwarding: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
 				set stale [is_target_stale $target $d]
 				set out [expr {$out || $stale} ]
 				vlog "... stale: $out"
@@ -393,8 +480,10 @@ proc depends {args} {
 # -         }
 # - }
 
-variable depth 0
-variable verbose 0
+variable depth
+set depth 0
+variable verbose
+set verbose 0
 
 proc vlog text {
 	variable verbose
@@ -435,17 +524,17 @@ proc make target {
 		vlog "No direct depends, checking for generic depends"
         set generic [find_generic $target]
         if { $generic != "" } {
-            set depends [generate_depends $target $generic $db_depends($generic)]
-            if { $depends != "" } {
+            set depnames [generate_depends $target $generic $db_depends($generic)]
+            if { $depnames != "" } {
                 set hasdepends 1
             }
 			if { [info exists db_prereq($generic)] } {
 				set prereq [generate_depends $target $generic $db_prereq($generic)]
 			}
-			vlog "Found generic '$generic' with deps: '$depends' and prereq '$prereq'"
+			vlog "Found generic '$generic' with deps: '$depnames' and prereq '$prereq'"
         }
     } else {
-        set depends $db_depends($target)
+        set depnames $db_depends($target)
 		if { [info exists db_prereq($target)] } {
 			set prereq $db_prereq($target)
 		}
@@ -453,7 +542,11 @@ proc make target {
 
 	set result "(reason unknown)"
 	if { $hasdepends } {
-		vlog "Has dependencies: $depends"
+		vlog "Has dependencies: $depnames"
+
+		# Resolve possible file-contained dependencies
+
+		set depends [getdeps $target $depnames]
 		foreach depend $depends {
 			vlog "Considering $depend as dependency for $target"
 			if { [catch {make $depend} result] } {
@@ -563,6 +656,7 @@ proc fresher_depends {target depends} {
 	}
 	set out ""
 	foreach d $depends {
+		#vlog " ... against fresher depend $d"
 		if { [is_target_stale $target $d] } {
 			lappend out $d
 		}
@@ -574,7 +668,7 @@ proc fresher_depends {target depends} {
 proc apply_special_variables {action target} {
 	variable db_depends
 
-	set depends $db_depends($target)
+	set depends [getdeps $target]
 
 	set str [string map \
 		                 [list \
@@ -731,6 +825,8 @@ proc perform_action {target actual_target} {
 		set actions [apply_special_variables $db_actions($generic) $actual_target]
 	}
 
+	vlog "Actions resolved:\n>>> $actions"
+
 	if { [catch {
 		# XXX Action variable substitution replaced only here!
 		set actions [subst_action $actions]
@@ -739,7 +835,7 @@ proc perform_action {target actual_target} {
 		error $::errorInfo
 	}
 
-	vlog "ACTUAL ACTION: $actions"
+	#vlog "ACTUAL ACTION: $actions"
 	#Set special values
 
 	foreach action $actions {
@@ -771,7 +867,7 @@ proc perform_action {target actual_target} {
 
 				tcl {
 					if { !$mkv::p::quiet } {
-						puts "CUSTOM COMMAND: $arglist"
+						puts "%$arglist"
 					}
 					uplevel #0 [list eval $arglist]
 					continue
@@ -852,6 +948,19 @@ proc rolling_autoclean {rule debug} {
 		}
 	}
 
+	# Extract and filter out dependency files
+	set od ""
+	foreach dep $deps {
+		if { [string index $dep 0] == "<" } {
+			set rf [string range $dep 1 end]
+			set dp [load-rule $rule $rf]
+			lappend od {*}$dp $rf
+		} else {
+			lappend od $dep
+		}
+	}
+	set deps $od
+
 	incr ::gg_debug_indent
 	foreach dep $deps {
 		lappend autoclean_candidates {*}[rolling_autoclean $dep $debug]
@@ -879,14 +988,17 @@ proc pexpand {arg {ulevel 2}} {
 	# This trick should expand the list in place and pack
 	# it back to the list. This replaces all first-level whitespaces
 	# into single spaces.
-	set code [catch {list {*}[uplevel $ulevel [list subst $arg]]} result]
+	set cmd "subst {{$arg}}"
+	#puts stderr "EXPANDING BY: $cmd"
+	set code [catch {list {*}[uplevel $ulevel [list eval $cmd]]} result]
+	#puts stderr "EXPANDED: $result"
 	if {$code} {
 		puts stderr "*** ERROR: can't expand: $result"
 		puts stderr "*** available variables: [uplevel $ulevel [list info vars]]"
 		error "Expanding '$arg'"
 	}
 
-	return $result
+	return [lindex $result 0]
 }
 
 proc pset {name arg1 args} {
@@ -961,7 +1073,10 @@ proc pget {name {default ""}} {
 }
 
 proc pdef {name args} {
-	namespace inscope :: proc $name {} "return {$args}"
+	if { [llength $args] == 1 } {
+		set args [lindex $args 0]
+	}
+	namespace inscope :: proc $name {} "return \[uplevel concat $args\]"
 }
 
 proc pdefx {name args} {
@@ -1000,6 +1115,8 @@ set public_export [puncomment {
 	phony
 	rule
 	rules
+	gendep
+	dep-rule
 	make
 
 	# Logging
@@ -1034,7 +1151,19 @@ variable debug_on 0
 variable makefile {}
 
 proc MAKE {} {
-	return [file normalize $::argv0]
+	set path [file normalize $::argv0]
+	set options ""
+	variable debug_on
+	if { $debug_on } {
+		append options " -d"
+	}
+
+
+	if { $::mkv::p::verbose } {
+		append options " -v"
+	}
+
+	return $path$options
 }
 
 }
@@ -1044,8 +1173,10 @@ package provide make 0.5
 
 namespace import {*}$mkv::p::public_import
 
+# Rest of the file is interactive.
+if { !$tcl_interactive } {
 
-proc MakeInteractive {argv} {
+
 
 	set help 0
 
@@ -1111,12 +1242,18 @@ proc MakeInteractive {argv} {
 
 	$mkv::debug "Sourcing makefile"
 	source $mkv::makefile
+
+	$mkv::debug "SUMMARY DATABASE (direct targets):"
+	foreach n [array names mkv::p::db_depends] {
+		$mkv::debug "$n: $mkv::p::db_depends($n) {[pget mkv::p::db_actions($n)]}"
+	}
+
 	$mkv::debug "Executing statements"
 
 	if {$cmd_args == ""} {set cmd_args $mkv::p::first_rule}
 
 	if { [set xc [catch {
-		$mkv::debug "BUG $cmd_args $mkv::p::first_rule"
+		$mkv::debug "WILL MAKE: $cmd_args STARTING FROM $mkv::p::first_rule"
 		foreach tar $cmd_args {
 			$mkv::debug "Applying make to '$tar'"
 			make $tar
@@ -1134,12 +1271,6 @@ proc MakeInteractive {argv} {
 
 	cd $wd
 
-}
 
-
-# Rest of the file is interactive.
-if { !$tcl_interactive } {
-
-	MakeInteractive $argv
 
 } ;# end of interactive actions
