@@ -798,6 +798,14 @@ proc ProcessSources target {
 		set o [file rootname $s].ag.o
 		$::g_debug " ... processing $s (language $lang) --> $o"
 
+		# XXX The convention of dependency files may be generator dependent.
+		# Currently the Makefile.tcl generator is used, so the dependency file
+		# has *.ag.dep suffix and doesn't contain the *.o file spec. For Makefile
+		# it should contain the *.o: statement. For other generators it may be
+		# required to be even different. Also the structure is different. The
+		# syntax for Makefile.tcl is: rule TARGET <DEPFILE { ... } and so it is
+		# defined here. For Makefile it would have to be 'include(DEPFILE)' followed
+		# by the build command line.
 		if { $depspec == "cached" } {
 			set depfile [file rootname $s].ag.dep
 			$::g_debug " ... generating rule for dependency file $depfile"
