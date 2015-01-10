@@ -25,6 +25,16 @@ variable db_actions
 variable db_generic
 variable db_phony
 
+# structure {actual_target target depparent}
+variable q_pending
+
+# structure {target status}, where status is
+# 0 - succeeded (dependent targets can be started)
+# 1 - failed first
+# 2 - dropped because dependent target failed
+variable q_done
+
+
 variable first_rule {}
 
 variable failed {}
@@ -69,6 +79,75 @@ proc pass args { return $args }
 variable escaped
 variable quiet
 variable ignore
+
+proc ppspawn {args} {
+	set res ""
+
+	# This is lamah, but I really don't have much choice :)
+	set tracername "::S"
+
+    foreach cmd $args {
+        set cc [open "|$cmd 2>@stderr"] 
+        dict set res $cc command $cmd
+        fconfigure $cc -blocking 0 -buffering line
+		# cut off the "file" prefix, should it be any other word
+		set id [lindex [regexp -inline {[a-zA-Z]*([0-9]+)} $cc] 1]
+		if { $id == "" } {
+			set id $cc
+		}
+		append tracername ".$id"
+    }
+
+	set all [dict keys $res]
+	foreach cc $all {
+		fileevent $cc readable "set $tracername $cc"
+	}
+	dict set res tracer $tracername
+
+	return $res
+}
+
+proc pptrace {res {vblank {}}} {
+
+	set tracername [dict get $res tracer]
+	set res [dict remove $res tracer]
+	set background [dict keys $res]
+
+    while 1 {
+        foreach cc $background {
+            if {[eof $cc]} {
+                if {[set idx [lsearch -exact $background $cc]] >= 0} {
+                    set background [lreplace $background $idx $idx]
+                }
+                catch [close $cc] cres copts
+                dict set res $cc result $cres
+                dict set res $cc options $copts
+            } else {
+				# Roll until EOF or EAGAIN.
+				# When EAGAIN, it will be retried at the next roll.
+				# When EOF, it will be removed from the list at the next roll.
+				while { [gets $cc linein] != -1 } {
+                	puts "\[$cc\] $linein"
+				}
+            }
+        }
+
+        if {[llength $background] == 0} {
+			# All processes finished.
+			break
+        }
+		if { $vblank != "" } {
+			apply $vblank $background
+		}
+
+		# Ok, now clear the variable
+		set $tracername ""
+		vwait $tracername
+		#puts "UNBLOCKED BY: [set $tracername]"
+    }
+    return $res
+}
+
 
 proc process-options {argv optargd} {
 
@@ -411,7 +490,7 @@ proc vlog text {
 	puts stderr "$head $text"
 }
 
-proc make target {
+proc build_make_tree {target depparent} {
 
 	variable db_depends
 	variable db_generic
@@ -456,7 +535,7 @@ proc make target {
 		vlog "Has dependencies: $depends"
 		foreach depend $depends {
 			vlog "Considering $depend as dependency for $target"
-			if { [catch {make $depend} result] } {
+			if { [catch {build_make_tree $depend $target} result] } {
 				set status 0
 				vlog "Making $depend failed, so $target won't be made"
 				if { $mkv::p::keep_going } {
@@ -473,7 +552,7 @@ proc make target {
 		foreach p $prereq {
 			vlog "Considering $p as prerequisite for $target"
 			if { ![file exists $p] } {
-				if { [catch {make $p} result] } {
+				if { [catch {build_make_tree $p $target} result] } {
 					set status 0
 					vlog "Making $p failed, so $target won't be made"
 					if { $mkv::p::keep_going } {
@@ -510,7 +589,7 @@ proc make target {
 
 	if { $need_build } {
 		vlog "File '$target' $reason - performing action for '$target'"
-		if { ![perform_action $target $target] } {
+		if { ![perform_action $target $target $depparent] } {
             error "Action failure for '$target'"
         }
 	} elseif { $hasdepends } {
@@ -526,7 +605,7 @@ proc make target {
 
 		if { $stale } {
 			vlog "Performing make action for $target"
-			if {![perform_action $target $target]} {
+			if {![perform_action $target $target $depparent]} {
 				error "Action failure for $target"
 			}
 		} else {
@@ -534,6 +613,40 @@ proc make target {
 		}
 	} else {
 		vlog "File $target exists and has no dependencies, so won't be made"
+	}
+}
+
+proc make target {
+
+	set mkv::p::action_ringp 0
+
+	set pending_blocks ""
+
+	# Structure:
+	# { {commands...} pending_position target }
+	# Every pending block represents one target action to be done
+	# It's predicted that the pending command is to be executed
+	# together with the first with another block.
+	# Of course, usually this will be just one command.
+	# In order to succeed the block, all commands must succeed.
+	# The command must return with a report in orer to know what
+	# to do with it next. If it was the last command and it was 
+	# successful, then the associated target is moved to q_done.
+	# If the command failed, it's done after the failed command,
+	# although it's moved to q_done with status = 1.
+
+	build_make_tree $target ""
+
+	while 1 {
+
+		set targets2start [dequeue_action]
+		if { $targets2start == "" } {
+			break
+		}
+
+		foreach t $targets2start {
+
+		}
 	}
 }
 
@@ -681,6 +794,44 @@ proc generate_depends {target template depends} {
 	return $result
 }
 
+proc enqueue_action {action_target target depparent} {
+	variable q_done
+	variable q_pending
+
+	# Check if the target is already done
+	set p [lsearch -index 0 $q_done $target]
+
+	if { $p != -1 } {
+		# It's done, so don't try to do it again.
+		$mkv::debug "Not enqueuing $target - already done"
+		return
+	}
+
+	# Now check if already enqueued
+	set p [lsearch -index 0 $q_pending $target]
+	if { $p != -1 } {
+		# Already enqueued, so don't enqueue it again
+		$mkv::debug "Not enqueuing $target - already enqueued"
+		return
+	}
+
+	# Now check dependent targets if they are declared as failed
+	if { [info exists db_depends($target)] } {
+		foreach d $db_depends($target) {
+			set p [lsearch -index 0 $q_done $target]
+			set failed [lindex $q_done $p 1]
+			if { $failed } {
+				$mkv::debug "Not enqueuing $target - dependency $d failed"
+				lappend q_done [list $target 2]
+				return
+			}
+		}
+	}
+
+	# Ok, ready to be enqueued
+	lappend q_pending [list $target $action_target $depparent]
+}
+
 # Two arguments mean:
 # target - name of target which identifies actions to be taken
 # actual_target - name of target, which is actually being made
@@ -689,7 +840,7 @@ proc generate_depends {target template depends} {
 # If action is taken as a link to another target, second argument
 # is the target actually built; first is only the indetifier of
 # the action, which should be taken.
-proc perform_action {target actual_target} {
+proc perform_action {actual_target target depparent} {
 
 	variable db_depends
 	variable db_generic
@@ -754,15 +905,17 @@ proc perform_action {target actual_target} {
 
 			switch -- $command {
 				link {
-					if { ![info exists db_actions($arglist)] } {
+					set linked_target $arglist
+					# XXX handle multiple targets in !link command
+					if { ![info exists db_actions($linked_target)] } {
 						puts stderr \
-						     "+++ Can't resolve $arglist as a link to action"
+						     "+++ Can't resolve $linked_target as a link to action"
 						lappend mkv::p::failed $target
 						return false
 					}
 
 					# Do substitution before altering target
-					if { ![perform_action $arglist $target] } {
+					if { ![perform_action $target $linked_target $depparent] } {
 						lappend mkv::p::failed $target
 						return false
 					}
