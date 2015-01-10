@@ -174,6 +174,30 @@ proc PrepareGeneralTarget {} {
 	vlog " --: ALL TARGETS: $subtargets"
 	set subtargets [ReorderTargets $subtargets]
 
+	set otargets ""
+	# Now filter out those targets that are already
+	# dependencies on other targets
+	foreach t $subtargets {
+		set any 0
+		vlog " -- CHECKING if '$t' is top-level target"
+		foreach d $subtargets {
+			if { $t == $d } {
+				continue
+			}
+			set tdep [pget agv::target($d) depends]
+			if {$t in $tdep} {
+				set any 1
+				vlog " -- REMOVED $t because it's a dependency of $d"
+				break
+			}
+		}
+		if { !$any } {
+			vlog " -- TARGET $t is top-level - adding to all"
+			lappend otargets $t
+		}
+	}
+	set subtargets $otargets
+
 	vlog " --: ALL TARGETS: $subtargets"
 	ag all -type phony -depends {*}$subtargets
 }
