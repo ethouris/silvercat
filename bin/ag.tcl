@@ -694,7 +694,7 @@ proc ProcessSources target {
 			set deps [GenerateDepends $lang $cflags $s]
 			# Write them back to the database
 			dict set agv::fileinfo($s) includes [lrange $deps 1 end] ;# skip the source itself
-			parray agv::fileinfo
+			#parray agv::fileinfo
 		}
 	}
 
@@ -1396,7 +1396,17 @@ proc agp-prepare-database target {
 	return true
 }
 
-proc ag-instantiate {source target {varspec @}} {
+proc ag-instantiate {source {target ""} {varspec @}} {
+
+	if { $target == "" } {
+		if { [file extension $source] == ".in" } {
+			set target [file rootname $source]
+		} else {
+			error "ag-instantiate: Can't guess target for '$source', please specify explicitly"
+		}
+	}
+
+
 	set fd [open $source r]
 	set contents [read $fd]
 	close $fd
