@@ -68,7 +68,7 @@ namespace eval agv {
 	# Will be set to the profile's default, unless overridden.
 	variable prefix
 	namespace export prefix
-	set prefix /usr/local
+	set prefix "" ;# /usr/local value should be copied from profile
 
 	# Per-file set information
 	variable fileinfo
@@ -191,7 +191,7 @@ proc ShellWrapAll arg {
 
 proc FindSilverFile {agfile {agdir .}} {
 
-	set possible_agfiles {Makefile.ag.tcl Makefile.ag makefile.ag.tcl makefile.ag} 
+	set possible_agfiles {Makefile.ag.tcl Makefile.ag makefile.ag.tcl makefile.ag Silverball silverball}
 
 	if { $agfile == "" } {
 
@@ -644,6 +644,7 @@ proc AccessDatabase {array target args} {
 			set push_front true
 		}
 
+		set o [puncomment $o]
 		set o [pexpand $o 3]
 		# This time it's nothing special. At least try to strip one level,
 		# in case when user did -option {value1 value2}
@@ -719,6 +720,7 @@ proc file-normalize-relative {path} {
 proc ag {target args} {
 	# Turn target name into path-based target, if a relative
 	# state directory was set.
+	$::g_debug "*** request file-normalize-relative by 'ag' for '$target'"
 	set tar [file join $agv::statedir $target]
 	set target [file-normalize-relative $tar]
 	
@@ -780,6 +782,7 @@ proc ProcessSources target {
 				#parray agv::fileinfo
 			}
 		} else {
+			# MAYBE, but so far not seen necessary
 			#dict set agv::fileinfo($s) includes %$depspec
 		}
 	}
@@ -1026,6 +1029,11 @@ proc ProcessCompileLink {type target outfile} {
 	ProcessFlags $target
 	ProcessSources $target
 
+	# XXX BUG DEBUG - still a bug, remove after fixing
+	set prev_outfile [pget agv::target($target).filename]
+	$::g_debug " --**--++-- ProcessCompileLink: using output filename '$outfile' (was $prev_outfile) for $type $target"
+	dict set agv::target($target) filename $outfile
+
 	# If the target is program, then you need
 	# to generate rules that compile all sources
 	# into *.o files, then link them together
@@ -1056,7 +1064,6 @@ proc ProcessCompileLink {type target outfile} {
 		vlog "Adding phony $target -> $outfile (because they differ)"
 		dict set phony $target $outfile
 	}
-	dict set db filename $outfile
 
 	# Ok, ready. Write back to the database
 	dict set db rules $rules
@@ -1516,7 +1523,7 @@ proc agp-prepare-database {target {parent ""}} {
 	# languages, unless particular setting for particular language is already set.
 	# It means that if there was something set for general, it will be returned
 	# also when asking for particular language.
-	set globfw [dict:at $agv::profile($tarlang) frameworks]
+	set globfw [pget agv::profile($tarlang).frameworks]
 	set frameworks [dict:at $agv::target($target) frameworks]
 
 	# Now the trick is how to join elements, make them unique, but preserve the order.
@@ -1534,6 +1541,8 @@ proc agp-prepare-database {target {parent ""}} {
 		return false
 	}
 
+	# XXX HERE PROCESSING SHOULD REGARD THE DEPENDENT TARGETS
+	# (or otherwise some important data required by the parent target will not be generated)
 	vlog " ... Processing '$target' as '$type'"
 	# The 'Process:*' functions are expected to use the existing
 	# data in the target database to define build rules.
@@ -1555,7 +1564,17 @@ proc agp-prepare-database {target {parent ""}} {
 	return true
 }
 
-proc ag-instantiate {source target {varspec @}} {
+proc ag-instantiate {source {target ""} {varspec @}} {
+
+	if { $target == "" } {
+		if { [file extension $source] == ".in" } {
+			set target [file rootname $source]
+		} else {
+			error "ag-instantiate: Can't guess target for '$source', please specify explicitly"
+		}
+	}
+
+
 	set fd [open $source r]
 	set contents [read $fd]
 	close $fd

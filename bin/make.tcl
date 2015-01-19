@@ -1088,6 +1088,17 @@ proc pdefx {name args} {
 	proc $name {} [list return $result]
 }
 
+# This function is directly copied from 'apply' Tcl manpage.
+# Just wanted to be clear about it, although it doesn't kick, but...
+proc pmap {lambda list} {
+	set result {}
+	foreach item $list {
+		lappend result [apply $lambda $item]
+	}
+	return $result
+}
+
+
 
 # utilities (for debug stuff)
 
