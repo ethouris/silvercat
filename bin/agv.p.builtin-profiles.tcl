@@ -1,4 +1,15 @@
 
+set singles {
+	compile
+	compile_oflag
+	link
+	link_oflag
+	linkdl
+	gendep
+	depspec
+	preproc
+}
+
 set profiles {
 
 	# {This is only informative - explains the structure of the profiles.}
@@ -23,10 +34,15 @@ set profiles {
 			# }
 			gendep "Command to generate dependencies
 					(produces a list of all files that can be extracted of a single source file)"
+			depspec "One of: auto, cached, explicit:
+			         auto: dependencies are generated at generation time and stored in Makefile.tcl
+					 cached: dependencies are generated at build time and stored in *.d files
+					 explicit: dependencies must be taken care of manually, nothing is automatically done"
 			preproc "Command to run preprocessor (optional, can be empty if a language doesn't use one)"
 			cflags "Flags passed always to compile command (compile, gendep, preproc)"
 			ldflags "Flags passed to link command"
 		}
+
 	}
 
 	# { Options that apply by default unless overridden in particular profile }
@@ -56,6 +72,7 @@ set profiles {
 			link "g++"
 			linkdl "g++ -dynamic"
 			gendep "g++ -MM"
+			depspec auto
 		}
 
 		c {
@@ -63,6 +80,7 @@ set profiles {
 			link "gcc"
 			linkdl "gcc -dynamic"
 			gendep "gcc -MM"
+			depspec auto
 		}
 	}
 
@@ -72,6 +90,7 @@ set profiles {
 			link "clang++"
 			linkdl "clang++ -dynamic"
 			gendep "clang++ -MM"
+			depspec auto
 		}
 
 		c {
@@ -79,6 +98,7 @@ set profiles {
 			link "clang"
 			linkdl "clang -dynamic"
 			gendep "clang -MM"
+			depspec auto
 		}
 	}
 
