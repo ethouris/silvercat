@@ -911,6 +911,12 @@ proc Process:directory target {
 	# however it's hard to say as to whether anything
 	# has to be done here.
 
+	# XXX Well, there is one thing. The Silverfile that
+	# is found for this directory (it is, right?) should
+	# be loaded here - with changed context, of course -
+	# so that the target types mentioned anywhere in the
+	# dependencies in the current directory can be
+	# properly picked up.
 }
 
 proc Process:custom target {
@@ -1546,6 +1552,19 @@ proc agp-prepare-database {target {parent ""}} {
 	vlog " ... Processing '$target' as '$type'"
 	# The 'Process:*' functions are expected to use the existing
 	# data in the target database to define build rules.
+
+	# This should be broken down into several steps:
+	# 1. For all targets, review the depends and check if there are any
+	#    targets dependent on some targets in another directory. If so, load
+	#    every directory. NOTE: Having "ag-subdir" command may be not necessary.
+	#    Just make any target dependent on a target that is in a subdirectory,
+	#    this will be noted automatically. Every such directory should be "loaded"
+	#    with appropriate context. NOTE: Targets that are in-directories undergo
+	#    basic data completion processing (to extract -output key), but NOT any
+	#    other processing! 
+	# 2. Complete basic data (add keys that should be there and are lacking).
+	#    Generation of C/C++ file dependencies should also happen exactly here.
+	#    
 	Process:$type $target
 	
 	$::g_debug "DATABASE for '$target' AFTER PROCESSING:"
