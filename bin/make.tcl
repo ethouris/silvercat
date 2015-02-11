@@ -431,6 +431,8 @@ proc is_target_stale {target depend} {
 	variable db_phony
 	variable db_depends
 
+	$mkv::debug "Checking if $target is stale against $depend"
+
 	# Check if $depend is phony.
 	# If phony, then just forward the request to its depends.
 	# XXX THIS FEATURE IS SLIGHTLY CONTROVERSIAL.
@@ -438,10 +440,17 @@ proc is_target_stale {target depend} {
 	if { [info exists db_phony($depend)] } {
 		set out false
 		if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
-			vlog "... ... and has deps ..."
-			foreach d [getdeps $target] {
-				vlog "... ... forwarding: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
+			set target_deps [getdeps $depend]
+			vlog "... ... and has deps: $target_deps"
+			foreach d $target_deps {
+				if { $d == $target } {
+					puts stderr "+++ ERROR: recursive dep $target -> $d - DROPPING."
+					continue
+				}
+				vlog "... ... forwarding to dep of $target: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
+				mkv::p::debug_indent+
 				set stale [is_target_stale $target $d]
+				mkv::p::debug_indent-
 				set out [expr {$out || $stale} ]
 				vlog "... stale: $out"
 			}
@@ -550,6 +559,7 @@ proc make target {
 		foreach depend $depends {
 			vlog "Considering $depend as dependency for $target"
 			if { [catch {make $depend} result] } {
+					$mkv::debug "ERROR: '$result' $::errorCode $::errorInfo"
 				set status 0
 				vlog "Making $depend failed, so $target won't be made"
 				if { $mkv::p::keep_going } {
@@ -567,6 +577,7 @@ proc make target {
 			vlog "Considering $p as prerequisite for $target"
 			if { ![file exists $p] } {
 				if { [catch {make $p} result] } {
+					$mkv::debug "ERROR: '$result' $::errorCode $::errorInfo"
 					set status 0
 					vlog "Making $p failed, so $target won't be made"
 					if { $mkv::p::keep_going } {
@@ -1098,6 +1109,28 @@ proc pmap {lambda list} {
 	return $result
 }
 
+proc pfind {args} {
+	# First, test if the last one is a list of directories or a mask
+	set last [lindex $args end]
+	if { [string first * $last] != -1 || [string first "\[" $last] != -1 || [string first ? $last] != -1 } {
+		# This is a mask and it cannot be a directory.
+		set masks $args
+		set directories .
+	} else {
+		set masks [lrange $args 0 end-1]
+		set directories [lindex $args end]
+	}
+
+	set outlist ""
+	foreach d $directories {
+		foreach m $masks {
+			lappend outlist {*}[glob -nocomplain $d/$m]
+		}
+	}
+
+	return $outlist
+}
+
 
 
 # utilities (for debug stuff)
@@ -1140,8 +1173,10 @@ set public_export [puncomment {
 	phas
 	pdef
 	pdefx
-	plist
 	pexpand
+	pfind
+	plist
+	pmap
 	puncomment
 	autoclean
 	autoclean-test
@@ -1267,7 +1302,10 @@ if { !$tcl_interactive } {
 		$mkv::debug "WILL MAKE: $cmd_args STARTING FROM $mkv::p::first_rule"
 		foreach tar $cmd_args {
 			$mkv::debug "Applying make to '$tar'"
-			make $tar
+			if { [catch {make $tar} res1] } {
+				$mkv::debug "FAILURE: $res1 $::errorCode $::errorInfo"
+				error $res1
+			}
 		}
 	} result]] } {
 

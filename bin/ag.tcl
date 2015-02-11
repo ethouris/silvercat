@@ -312,6 +312,7 @@ proc CreateDepGenCommand {lang cflags source} {
 }
 
 proc GenerateDepends {lang cflags source} {
+
 	set cmd [CreateDepGenCommand $lang $cflags $source]
 	vlog "Dep command: $cmd"
 
@@ -498,6 +499,7 @@ proc UnaliasOption alias {
 		o { return output }
 		I { return incdir }
 		D { return defines }
+		L { return libdir }
 	}
 
 	return $alias
@@ -743,7 +745,8 @@ proc ProcessSources target {
 
 	set used_langs ""
 
-	vlog "Performing general processing for program '$target':"
+	vlog "Performing general processing for [dict:at $db type] '$target':"
+	$::g_debug "SOURCES: $sources"
 
 	set hdrs ""
 	foreach s $sources {
@@ -755,6 +758,11 @@ proc ProcessSources target {
 			# Now identify the programming language
 			set lang [IdentifyLanguage $s]
 			$::g_debug " --- Autodetecting language for $s: $lang"
+
+			if { $lang == "" } {
+				error "Can't autodetect language for source named '$s' - please specify!"
+			}
+
 			dict set agv::fileinfo($s) language $lang
 		}
 
@@ -798,7 +806,12 @@ proc ProcessSources target {
 		set lang [dict:at $info language]
 		set depspec [dict:at $agv::profile($lang) depspec]
 
-		set o [file rootname $s].ag.o
+		set rooto [file rootname $s]
+		# XXX This is required just to make things work, but it may be
+		# required that this be optional, and "original directory preserved"
+		# for o-files should be somehow supported.
+		set o [string map {./ {} ../ _ / __} $rooto].ag.o
+
 		$::g_debug " ... processing $s (language $lang) --> $o"
 
 		if { $depspec == "cached" } {
@@ -881,7 +894,11 @@ proc ProcessSources target {
 
 proc Process:program target {
 
-	set outfile $target$agv::exe
+	set outfile [pget agv::target($target).output]
+	if { $outfile == "" } {
+		set outfile $target$agv::exe
+		dict set agv::target($target) output $outfile
+	}
 
 	ProcessCompileLink program $target $outfile
 	Process:phony $target
@@ -891,7 +908,11 @@ proc Process:library target {
 
 	# NOTE: This immediate "archive" should be extracted
 	# from "libtype" key.
-	set outfile [CreateLibraryFilename $target archive]
+	set outfile [pget agv::target($target).output]
+	if { $outfile == "" } {
+		set outfile [CreateLibraryFilename $target archive]
+		dict set agv::target($target) output $outfile
+	}
 
 	ProcessCompileLink library $target $outfile
 	Process:phony $target
@@ -975,7 +996,7 @@ proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 proc GenerateInstallTarget:program {target prefix} {
 
 	set db $agv::target($target)
-	set outfile [dict:at $db filename]
+	set outfile [dict:at $db output]
 	set icmd [GenerateInstallCommand [dict:at $db category] $outfile $prefix]
 	if { $icmd == "" } {
 		return
@@ -991,7 +1012,7 @@ proc GenerateInstallTarget:program {target prefix} {
 proc GenerateInstallTarget:library {target prefix} {
 	set db $agv::target($target)
 
-	set libfile [dict:at $db filename]
+	set libfile [dict:at $db output]
 	set libicmd [GenerateInstallCommand [dict:at $db category] $libfile $prefix]
 
 	set cmds ""
@@ -1024,7 +1045,7 @@ proc ProcessCompileLink {type target outfile} {
 	# XXX BUG DEBUG - still a bug, remove after fixing
 	set prev_outfile [pget agv::target($target).filename]
 	$::g_debug " --**--++-- ProcessCompileLink: using output filename '$outfile' (was $prev_outfile) for $type $target"
-	dict set agv::target($target) filename $outfile
+	dict set agv::target($target) output $outfile
 
 	# If the target is program, then you need
 	# to generate rules that compile all sources
@@ -1064,7 +1085,7 @@ proc ProcessCompileLink {type target outfile} {
 
 	set prefix [pget agv::prefix [dict:at $agv::profile(default) prefix]]
 	if { $prefix == "" } {
-		puts stderr "WARNING: 'prefix' not found - not generating install targets"
+		puts stderr "+++ AG WARNING: 'prefix' not found - not generating install targets"
 	} else {
 		GenerateInstallTarget:$type $target $prefix
 	}
@@ -1077,9 +1098,13 @@ proc Process:phony target {
 	set phony [dict:at $agv::target($target) phony]
 	set deps [dict:at $agv::target($target) depends]
 
-	# XXX Unclear as to why this is done only if phony is not yet set
-	# with dependency
-	if { [dict:at $agv::target($target) phony $target] == "" } {
+	# This sets the 'phony' key for a case when there's no
+	# phony nor rule added for $target yet. Just in a case when
+	# any earlier processing facility didn't set it at all.
+	# Normally a processing facility should set a rule to build the target.
+	set db $agv::target($target)
+	if { [dict:at $db phony $target] == "" && [dict:at $db rules $target] == "" } {
+		vlog "TARGET '$target' has no rule nor phony - setting phony with '$deps'"
 		dict set agv::target($target) phony $target $deps
 	}
 }
@@ -1140,7 +1165,7 @@ proc GenerateCompileRule {db lang objfile source deps} {
 }
 
 proc GetTargetFile target {
-	set filename [dict:at $agv::target($target) filename]
+	set filename [dict:at $agv::target($target) output]
 	if { $filename == "" } {
 		$::g_debug "ERROR: no filename set in this database:"
 		DebugDisplayDatabase agv::target $target
@@ -1239,14 +1264,15 @@ proc ag-do-genrules target {
 	if { $target == "" } {
 		set target all
 	}
+	set makefile [file join $mkv::directory Makefile.tcl]
 
 	# Check existing makefile
-	if { [file exists Makefile.tcl] } {
-		set fd [open Makefile.tcl r]
+	if { [file exists $makefile] } {
+		set fd [open $makefile r]
 		set firstline [string trim [gets $fd]]
 		if { $firstline != [silvercat-recog-line] } {
-			puts stderr "+++ ERROR: The Makefile.tcl file to be generated exists"
-			puts stderr "+++ and it's not a Silvercat-generated file. If this Makefile.tcl"
+			puts stderr "+++ ERROR: The $makefile file to be generated exists"
+			puts stderr "+++ and it's not a Silvercat-generated file. If this '$makefile'"
 			puts stderr "+++ is something you don't need, please delete it first."
 			return 1
 		}
@@ -1254,13 +1280,13 @@ proc ag-do-genrules target {
 
 	# Complete lacking values that have to be generated.
 	if { ![agp-prepare-database $target] } {
-		puts stderr "Failed to prepare database for '$target'"
+		puts stderr "+++ ERROR: Failed to prepare database for '$target'"
 		return 1
 	}
 
 	vlog "Database for '$target' completed. Generating Makefile"
 
-	set fd [open [file join $mkv::directory Makefile.tcl] w]
+	set fd [open $makefile w]
 
 	# Print header
 	# Just don't print this in the sub-calls
@@ -1462,9 +1488,20 @@ proc agp-prepare-database {target {parent ""}} {
 		if { $parent != "" } {
 			set par " (as a dependency of $parent)"
 		}
-		puts stderr "No such target: $target$par"
+		puts stderr "+++ AG ERROR: No such target: $target$par"
 		return false
 	}
+
+	vlog "PROCESSING DEPENDS of $target"
+
+	foreach dep [dict:at $agv::target($target) depends] {
+		vlog " ... DEP OF '$target': '$dep'"
+		if { ![agp-prepare-database $dep $target] } {
+			return false
+		}
+	}
+
+	vlog "END DEPENDS OF $target"
 
 	set type [dict:at $agv::target($target) type]
 	set cat [dict:at $agv::target($target) category]
@@ -1535,16 +1572,6 @@ proc agp-prepare-database {target {parent ""}} {
 	$::g_debug "DATABASE for '$target' AFTER PROCESSING:"
 	DebugDisplayDatabase agv::target $target
 
-	vlog "PROCESSING DEPENDS of $target"
-
-	foreach dep [dict:at $agv::target($target) depends] {
-		vlog " ... DEP OF '$target': '$dep'"
-		if { ![agp-prepare-database $dep $target] } {
-			return false
-		}
-	}
-
-	vlog "END DEPENDS OF $target"
 	return true
 }
 
@@ -1557,7 +1584,6 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 			error "ag-instantiate: Can't guess target for '$source', please specify explicitly"
 		}
 	}
-
 
 	set fd [open $source r]
 	set contents [read $fd]
@@ -1758,24 +1784,59 @@ foreach {name value} $g_variables {
     set $name $value
 }
 
-set wd [pwd]
-set agfiledir [file normalize $agfiledir]
-cd $agfiledir
-
+set agfiledir_a [file normalize $agfiledir]
 
 # Use the previous value, should that be set by option
-set agfile [FindSilverFile $agfile]
+set agfile_path [file dirname $agfile]
+set agfile [FindSilverFile $agfile $agfiledir_a]
+
+if { [file normalize $agfile_path] != [file normalize $agfiledir] } {
+	set agfile_path $agfiledir
+}
+
+#puts stderr "AGFILE FOUND AS: $agfile"
 
 
 set agv::runmode [lindex $g_args 0] ;# != "" because g_args != ""
 
 # XXX This should be somehow modified to support shadow builds
 # 
-set agv::srcdir [file dirname $agfile]
+set agv::srcdir $agfile_path
+
+if { $agfiledir != "." && $agv::srcdir != $agfiledir } {
+	# This can only happen if both -f and -C options were used
+	puts stderr "srcdir=$agv::srcdir agfiledir=$agfiledir"
+	error "Options -C and -f are mutually exclusive"
+} elseif { $agv::srcdir != "." } {
+	set agfiledir $agv::srcdir
+}
+
+set wd [pwd]
+cd $agfiledir
+
+# Set this to current directory because this is the directory
+# where all things happen.
+set agv::srcdir [pwd]
+set agv::builddir $wd
+set agv::toplevel [pwd]
+
+puts stderr "READING DATABASE @[pwd]"
+
+# Do sourcing in the original directory of the file.
+# This is important so that all file references are relative
+# to the directory in which this file resides.
 source $agfile
+cd $wd
+
+puts stderr "PROCESSING TO GENERATE MAKEFILE @[pwd]"
+
+set agv::srcdir [file normalize $agfiledir]
+set mkv::directory .
 
 set exitcode [ag-do-$agv::runmode [lrange $g_args 1 end]]
 
 cd $wd
 exit $exitcode
-}
+
+
+} ;# END OF INTERACTIVE
