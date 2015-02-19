@@ -189,7 +189,7 @@ proc ShellWrapAll arg {
 }
 
 
-proc FindSilverFile {agfile {agdir .}} {
+proc FindSilverFile {agfile {agdir ""}} {
 
 	set possible_agfiles {Makefile.ag.tcl Makefile.ag makefile.ag.tcl makefile.ag Silverball silverball}
 
@@ -363,8 +363,7 @@ proc ExecuteFrameworks {target step args} {
 		vlog "... Found step $step for framework '$frm'"
 
 		if { [catch {$procname $target {*}$args} err] } {
-			puts stderr "Error executing framework '$procname' on '$target':\n$err"
-			return false
+			error "Error executing framework '$procname' on '$target':\n$err"
 		}
 	}
 	return true
@@ -696,12 +695,24 @@ proc AccessDatabase {array target args} {
 	}
 }
 
-proc file-normalize-relative {path} {
-	set norm [file normalize $path]
+proc file-normalize-relative {path {wd .}} {
+
+	if { $wd == "." } {
+		set wd [pwd]
+	}
+
+	if { [file pathtype $path] == "absolute" } {
+		set norm $path
+	} else {
+		set od [pwd]
+		cd $wd
+		set norm [file normalize $path]
+		cd $od
+	}
 
 	set common 0
 	set norm_parts [file split $norm]
-	set b_parts [file split [pwd]]
+	set b_parts [file split $wd]
 	while { [lindex $norm_parts $common] == [lindex $b_parts $common] } {
 		incr common
 	}
@@ -715,7 +726,7 @@ proc file-normalize-relative {path} {
 	set rpath [file join {*}$uppath {*}$shift_norm_parts]
 
 
-	$::g_debug "Norma-localize in '[pwd]' $norm: $rpath"
+	$::g_debug "Norma-localize in '$wd' $norm: $rpath"
 	return $rpath
 }
 
@@ -1558,7 +1569,8 @@ proc agp-prepare-database {target {parent ""}} {
 	# Set precalculated frameworks to the overall target's frameworks
 	dict set agv::target($target) frameworks $frameworks
 
-	if { ![ExecuteFrameworks $target prepare] } {
+	if { [catch {ExecuteFrameworks $target prepare} result] } {
+		puts stderr "Error reported from a framework - can't prepare database"
 		return false
 	}
 
@@ -1677,20 +1689,25 @@ proc ag-subdir1 target {
 
 	set osd $agv::srcdir
 	set od $agv::statedir
+	if { $od == "." } {
+		set od ""
+	}
 	set sd [file join $od $target]
-	if { [file exists $sd] } {
-		if { ![file isdirectory $sd] } {
-			error "File '$sd' is blocking from creating a directory!"
+	set local_builddir [file normalize [file join $agv::builddir $sd]]
+	#puts stderr "SUBDIR: sd=$sd od=$od wd=[pwd] builddir=[pget agv::builddir]"
+	if { [file exists $local_builddir] } {
+		if { ![file isdirectory $local_builddir] } {
+			error "File '$local_builddir' is blocking from creating a directory!"
 		}
 	} else {
-		file mkdir $sd
+		file mkdir $local_builddir
 	}
 
 	set target_dir_abs [file normalize $target_dir]
 
 	# XXX This may need 'mkdir' in case of shadow build
 	set wd [pwd]
-	cd $sd
+	cd $local_builddir
 	set agv::statedir $sd
 
 	vlog "*** Trying $agfile in $target_dir"
@@ -1710,7 +1727,7 @@ proc ag-subdir1 target {
 
 	# Restore environment
 
-	set agv::srcdir $osd
+	#set agv::srcdir $osd
 	cd $wd
 	set agv::statedir $od
 }
@@ -1746,7 +1763,12 @@ set agfile {}
 set help 0
 set ag_debug_on 0
 set g_debug mkv::p::pass
-set agfiledir .
+set agfiledir ""
+
+
+#puts stderr "CURRENT DIR: [pwd]"
+set agv::builddir [pwd]
+
 
 set ag_optargs {
 	-f agfile
@@ -1768,6 +1790,27 @@ if { $help || [string trim $g_args] == "" } {
 	exit 1
 }
 
+# Resolve ambiguous options -C and -f
+
+if { $agfile != "" && $agfiledir != "" } {
+	vlog "Passed both dir '$agfiledir' and file '$agfile'"
+	set f [file join $agfiledir $agfile]
+	set ok [expr {[file isfile $f] && [file isdirectory $agfiledir]}]
+	if { !$ok } {
+		puts stderr "Options -C and -f together provide directory and filename respectively"
+		puts stderr "Using -C dir -f file is the same as using -f dir/file"
+		puts stderr "Path does not lead to an existing file: $f"
+		exit 1
+	}
+} elseif { $agfile != "" } {
+	vlog "Passed only file '$agfile'"
+	set agfiledir [file dirname $agfile]
+	set agfile [file tail $agfile]
+	vlog " -- spread to directory '$agfiledir' and file '$agfile'"
+} else {
+	vlog "Passed only directory: $agfiledir -- file itself will be guessed"
+}
+
 if { $ag_debug_on } {
 	set g_debug mkv::p::debug
 	set mkv::debug mkv::p::debug
@@ -1775,7 +1818,15 @@ if { $ag_debug_on } {
 
 
 set mkv::p::verbose $verbose
-set mkv::directory $agfiledir
+set mkv::directory $agv::builddir
+
+proc got_u_writer args {
+	error "hands off!"
+}
+
+#trace variable mkv::directory w got_u_writer
+
+vlog "Makefile will be generated in $mkv::directory"
 
 # XXX something special about g_debug_on ?
 
@@ -1786,37 +1837,22 @@ foreach {name value} $g_variables {
 
 set agfiledir_a [file normalize $agfiledir]
 
-# Use the previous value, should that be set by option
-set agfile_path [file dirname $agfile]
-set agfile [FindSilverFile $agfile $agfiledir_a]
+set agv::srcdir $agfiledir_a
+#puts stderr "Setting srcdir as '$agv::srcdir'"
 
-if { [file normalize $agfile_path] != [file normalize $agfiledir] } {
-	set agfile_path $agfiledir
-}
+# Use the previous value, should that be set by option
+set agfile [FindSilverFile $agfile $agfiledir_a]
 
 #puts stderr "AGFILE FOUND AS: $agfile"
 
-
 set agv::runmode [lindex $g_args 0] ;# != "" because g_args != ""
-
-# XXX This should be somehow modified to support shadow builds
-# 
-set agv::srcdir $agfile_path
-
-if { $agfiledir != "." && $agv::srcdir != $agfiledir } {
-	# This can only happen if both -f and -C options were used
-	puts stderr "srcdir=$agv::srcdir agfiledir=$agfiledir"
-	error "Options -C and -f are mutually exclusive"
-} elseif { $agv::srcdir != "." } {
-	set agfiledir $agv::srcdir
-}
 
 set wd [pwd]
 cd $agfiledir
 
 # Set this to current directory because this is the directory
 # where all things happen.
-set agv::srcdir [pwd]
+#set agv::srcdir [pwd]
 set agv::builddir $wd
 set agv::toplevel [pwd]
 
@@ -1826,16 +1862,13 @@ puts stderr "READING DATABASE @[pwd]"
 # This is important so that all file references are relative
 # to the directory in which this file resides.
 source $agfile
-cd $wd
 
 puts stderr "PROCESSING TO GENERATE MAKEFILE @[pwd]"
 
-set agv::srcdir [file normalize $agfiledir]
-set mkv::directory .
+#set mkv::directory .
 
 set exitcode [ag-do-$agv::runmode [lrange $g_args 1 end]]
 
-cd $wd
 exit $exitcode
 
 

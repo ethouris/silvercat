@@ -56,12 +56,12 @@ namespace eval fw {
 					set pkgs ""
 					foreach ln $all_pkg_lines {
 						set p [lindex $ln 0]
-						if { [regexp "$name-\[0-9\]" $p } {
+						if { [regexp "$name-\[0-9\]" $p] } {
 							lappend pkgs $p
 						}
 					}
 
-					if { $pkg == "" } {
+					if { $pkgs == "" } {
 						$::g_debug "pkg-config: no package matches $name"
 						return
 					}

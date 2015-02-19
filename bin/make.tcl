@@ -1,6 +1,6 @@
 #!/bin/bash
 # but tcl \
-exec tclsh8.5 "$0" "$@"
+exec tclsh "$0" "$@"
 
 package require Tcl
 
