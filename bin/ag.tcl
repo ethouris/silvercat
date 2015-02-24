@@ -1811,6 +1811,10 @@ if { $agfile != "" && $agfiledir != "" } {
 	vlog "Passed only directory: $agfiledir -- file itself will be guessed"
 }
 
+if { $agfiledir == "" } {
+	set agfiledir .
+}
+
 if { $ag_debug_on } {
 	set g_debug mkv::p::debug
 	set mkv::debug mkv::p::debug
