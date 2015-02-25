@@ -86,7 +86,7 @@ namespace eval agv {
 
 namespace import agv::p::dict:at
 
-proc RealFilePath target {
+proc RealSourcePath target {
 	vlog "*** RESOLVING '$target' in $agv::srcdir"
 	if { [string first / $target] } {
 		set rem [lassign [file split $target] first]
@@ -814,6 +814,11 @@ proc ProcessSources target {
 		
 		vlog "INFO($s): $info"
 
+		# Now that $s is used ONLY AS FILENAME (NOT IDENTIFIER!)
+		# it can be now localized towards build directory
+		
+		set s [file-normalize-relative [RealSourcePath $s] $agv::builddir]
+
 		set lang [dict:at $info language]
 		set depspec [dict:at $agv::profile($lang) depspec]
 
@@ -843,8 +848,14 @@ proc ProcessSources target {
 			$::g_debug "Dependency specification mode: $depspec"
 			# This is for both "auto" and "explicit"
 			# For "explicit" it just requires to be set primarily.
-			set deps [concat $s [dict get $info includes]]
+			set incs [dict get $info includes]
+			set deps $s
+			foreach i $incs {
+				lappend deps [file-normalize-relative [RealSourcePath $i] $agv::builddir]
+			}
 		}
+
+		$::g_debug "DEPS: $deps"
 
 		# Generate rule for the target
 		set rule [GenerateCompileRule $db $lang $o $s $deps]
@@ -950,9 +961,11 @@ proc Process:custom target {
 	set sources [dict:at $db sources]
 	set command [dict:at $db command]
 
+	
+
 	set rsrc ""
 	foreach s $sources {
-		lappend rsrc [RealFilePath $s]
+		lappend rsrc [file-normalize-relative [RealSourcePath $s] $agv::builddir]
 	}
 
 	set rule [list {*}$rsrc "\n\t$command\n"]
@@ -1144,7 +1157,7 @@ proc GenerateCompileRule {db lang objfile source deps} {
 		error "Silvercat doesn't know how to compile '$lang' files.\nPlease select correct profile"
 	}
 
-	$::g_debug "Generating compile rule for '$objfile':"
+	$::g_debug "Generating compile rule for '$objfile' from '$source':"
 
 	set cflags [CompleteCflags $db $lang]
 
@@ -1158,11 +1171,12 @@ proc GenerateCompileRule {db lang objfile source deps} {
 	# Ok, now we need to readjust source and deps to be in
 	# the srcdir
 	$::g_debug "GENERATING FROM $source: $deps"
-	set source [RealFilePath $source]
+	#set source [RealSourcePath $source]
 	set odeps ""
-	foreach d $deps {
-		lappend odeps [RealFilePath $d]
-	}
+# 	foreach d $deps {
+# 		lappend odeps [RealSourcePath $d]
+# 	}
+	set odeps $deps
 	$::g_debug "GENERATING FOR  $source: $odeps"
 
 	set command "$compiler $cflags $source $oflag $objfile"
@@ -1666,7 +1680,7 @@ proc ag-subdir args {
 }
 
 proc ag-subdir1 target {
-	set target_dir [RealFilePath $target]
+	set target_dir [RealSourcePath $target]
 	set ttype [file type $target_dir]
 
 	switch -- $ttype {
