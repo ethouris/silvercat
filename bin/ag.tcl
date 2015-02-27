@@ -998,6 +998,7 @@ proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 	switch -- $cat {
 		noinst {
 			# Nothing.
+			set icmd "# Nothing to install for '$outfile' (noinst)"
 		}
 
 		default {
@@ -1009,7 +1010,7 @@ proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 				}
 				set icmd "\tinstall $outfile $bindir"
 			} else {
-				puts stderr "+++AG WARNING: No installdir for -category $cat - can't install $outfile"
+				puts stderr "+++AG WARNING: No installdir for -install $cat - can't install $outfile"
 			}
 		}
 	}
@@ -1021,7 +1022,7 @@ proc GenerateInstallTarget:program {target prefix} {
 
 	set db $agv::target($target)
 	set outfile [dict:at $db output]
-	set icmd [GenerateInstallCommand [dict:at $db category] $outfile $prefix]
+	set icmd [GenerateInstallCommand [dict:at $db install] $outfile $prefix]
 	if { $icmd == "" } {
 		return
 	}
@@ -1037,7 +1038,7 @@ proc GenerateInstallTarget:library {target prefix} {
 	set db $agv::target($target)
 
 	set libfile [dict:at $db output]
-	set libicmd [GenerateInstallCommand [dict:at $db category] $libfile $prefix]
+	set libicmd [GenerateInstallCommand [dict:at $db install] $libfile $prefix]
 
 	set cmds ""
 
@@ -1055,7 +1056,11 @@ proc GenerateInstallTarget:library {target prefix} {
 	dict set db rules install-$target-headers [list {*}$hdr \n$cmds]
 	dict set db phony install-$target-headers ""
 
-	dict set db phony install-$target [list install-$target-archive install-$target-headers]
+	dict set db phony install-$target-devel [list install-$target-archive install-$target-headers]
+
+	# XXX Check for dynamic library !!!
+	dict set db phony install-$target-runtime ""  ;# XXX Should refer to installing dynamic library
+	dict set db phony install-$target [list install-$target-devel install-$target-runtime]
 
 	# Ok, ready. Write back to the database
 	set agv::target($target) $db
@@ -1107,7 +1112,13 @@ proc ProcessCompileLink {type target outfile} {
 	dict set db phony $phony
 	set agv::target($target) $db
 
-	set prefix [pget agv::prefix [dict:at $agv::profile(default) prefix]]
+	#$::g_debug "DATABASE: agv::profile\[default\]"
+	#DebugDisplayDatabase agv::profile default
+
+	set prefix [pget agv::prefix]
+	if { $prefix == "" } {
+		set prefix [dict:at $agv::profile(default) prefix]
+	}
 	if { $prefix == "" } {
 		puts stderr "+++ AG WARNING: 'prefix' not found - not generating install targets"
 	} else {
@@ -1529,7 +1540,7 @@ proc agp-prepare-database {target {parent ""}} {
 	vlog "END DEPENDS OF $target"
 
 	set type [dict:at $agv::target($target) type]
-	set cat [dict:at $agv::target($target) category]
+	set cat [dict:at $agv::target($target) install]
 
 	if { $type == "" } {
 		set type [DetectType $target]
@@ -1552,9 +1563,9 @@ proc agp-prepare-database {target {parent ""}} {
 
 	# Write back to the database
 	dict set agv::target($target) type $type
-	dict set agv::target($target) category $cat
+	dict set agv::target($target) install $cat
 
-	vlog "Preparing database for '$target' type=$type category=$cat"
+	vlog "Preparing database for '$target' type=$type install=$cat"
 
 	set tarlang [dict:at $agv::target($target) language]
 
