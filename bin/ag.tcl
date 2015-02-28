@@ -1712,7 +1712,7 @@ proc ag-subdir1 target {
 	set agfilepath [prelativize $agfilepath_abs]
 	$::g_debug "AG-SUBDIR: using directory '$sd'. Descending into Silverfile: '$agfilepath'"
 
-	mkv::p::run {*}[agv::AG] $agv::runmode -f $agfilepath
+	mkv::p::run {*}[agv::AG] $agv::runmode -f $agfilepath -t $agv::toplevel
 
 	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Restoring env."
 
@@ -1755,7 +1755,7 @@ set help 0
 set ag_debug_on 0
 set g_debug mkv::p::pass
 set agfiledir ""
-
+set topdir ""
 
 #puts stderr "CURRENT DIR: [pwd]"
 set agv::builddir [pwd]
@@ -1768,6 +1768,7 @@ set ag_optargs {
 	-v *verbose
 	-d *ag_debug_on
 	-C agfiledir
+	-t topdir
 }
 
 lassign [process-options $argv $ag_optargs] g_args g_variables
@@ -1853,7 +1854,24 @@ cd $agfiledir
 # where all things happen.
 #set agv::srcdir [pwd]
 set agv::builddir $wd
-set agv::toplevel [pwd]
+if { $topdir != "" } {
+	# Check if toplevel directory is a parent to [pwd]
+	set topdir [file normalize $topdir]
+	set p1 [file split [pwd]]
+	set p2 [file split $topdir]
+	foreach x $p1 y $p2 {
+		if { $x != $y } {
+			# Check it it's because p2 has expired
+			if { $y != "" } {
+				puts stderr "ERROR: -t: '$topdir' is not a parent for '[pwd]'"
+				exit 1
+			}
+		}
+	}
+	set agv::toplevel $topdir
+} else {
+	set agv::toplevel [pwd]
+}
 
 puts stderr "READING DATABASE @[pwd]"
 
