@@ -259,7 +259,7 @@ proc StableIntersection {l2 l1} {
 			# Add this element only if it wasn't added before.
 			# This can only happen in case when the common elements
 			# weren't in the same order (the order of l2 is actually
-			# preserved).
+					# preserved).
 			if { [lsearch $out $e1] == -1 } {
 				lappend out $e1
 			}
@@ -721,7 +721,7 @@ proc ag {target args} {
 	# state directory was set.
 	set tar [file join $agv::statedir $target]
 	set target [file-normalize-relative $tar]
-	
+
 	return [AccessDatabase agv::target $target {*}$args]
 }
 
@@ -789,7 +789,7 @@ proc ProcessSources target {
 	foreach s $sources {
 
 		set info [pget agv::fileinfo($s)]
-		
+
 		vlog "INFO($s): $info"
 
 		set lang [dict:at $info language]
@@ -1303,7 +1303,7 @@ proc GenerateMakefile {target fd} {
 	}
 
 	# First rules, then phony. Later phonies may override earlier rules.
-    set phony [dict:at $agv::target($target) phony]
+	set phony [dict:at $agv::target($target) phony]
 
 	if { $phony != "" } {
 		foreach {rule deps} $phony {
@@ -1318,11 +1318,11 @@ proc GenerateMakefile {target fd} {
 	# Now generate everything for the dependent targets
 	set deps [dict:at $agv::target($target) depends]
 
-    vlog "Makefile generator: will generate sub-rules for deps: $deps"
-    foreach d $deps {
-    	GenerateMakefile $d $fd
-    }
-    vlog "Makefile generator: finished sub-rules for deps"
+	vlog "Makefile generator: will generate sub-rules for deps: $deps"
+	foreach d $deps {
+		GenerateMakefile $d $fd
+	}
+	vlog "Makefile generator: finished sub-rules for deps"
 
 	# XXX This should be done different way:
 	# 1. This should be removed
@@ -1335,7 +1335,7 @@ proc GenerateMakefile {target fd} {
 		vlog "Makefile generator: NOT generating clean for $target"
 		return true
 	}
-	
+
 	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target'"
 
 	# Clean rule
@@ -1365,7 +1365,7 @@ proc ag-do-make {target} {
 	set rules [dict:at $agv::target($target) rules]
 
 	# Now define the rules according to the 
-    set phony [dict:at $agv::target($target) phony]
+	set phony [dict:at $agv::target($target) phony]
 
 	if { $phony != "" } {
 		foreach {rule deps} $phony {
@@ -1385,7 +1385,7 @@ proc ag-do-make {target} {
 	}
 
 	rule $target-clean "
-		!tcl autoclean $target
+	!tcl autoclean $target
 	"
 
 	make {*}$exp_targets
@@ -1510,7 +1510,7 @@ proc agp-prepare-database {target {parent ""}} {
 	if { $frameworks == "" } {
 		set frameworks pkg-config
 	}
-	
+
 	# Set precalculated frameworks to the overall target's frameworks
 	dict set agv::target($target) frameworks $frameworks
 
@@ -1522,7 +1522,7 @@ proc agp-prepare-database {target {parent ""}} {
 	# The 'Process:*' functions are expected to use the existing
 	# data in the target database to define build rules.
 	Process:$type $target
-	
+
 	$::g_debug "DATABASE for '$target' AFTER PROCESSING:"
 	DebugDisplayDatabase agv::target $target
 
@@ -1573,9 +1573,9 @@ proc ag-instantiate {source target {varspec @}} {
 		set contents [regsub -all $EXPR $contents {${\1}}]
 	}
 
-    #puts stderr "------------ ORIGINAL TEMPLATE --------------"
-    #puts stderr $contents
-    #puts stderr "---------------------------------------------"
+	#puts stderr "------------ ORIGINAL TEMPLATE --------------"
+	#puts stderr $contents
+	#puts stderr "---------------------------------------------"
 
 	# Now instantiate variables - use the environment
 	# from the place where the function was called

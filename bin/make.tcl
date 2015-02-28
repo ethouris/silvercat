@@ -1088,6 +1088,19 @@ proc pdefx {name args} {
 	proc $name {} [list return $result]
 }
 
+proc pwrite {filename contents} {
+	set fd [open $filename w]
+	puts $fd $contents
+	close $fd
+}
+
+proc pcat {filename} {
+	set fd [open $filename r]
+	set con [read $fd]
+	close $fd
+	return $con
+}
+
 
 # utilities (for debug stuff)
 
