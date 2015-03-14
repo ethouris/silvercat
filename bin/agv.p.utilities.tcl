@@ -15,6 +15,12 @@ proc lsuniq {ls} {
 
 namespace export lsuniq
 
+proc GenFileBase srcfile {
+	return [string map {../ _ ./ {} / -} [file rootname $srcfile]]
+}
+
+namespace export GenFileBase
+
 proc dict:at {dic args} {
 	if { [llength $dic]%2 == 1 } {
 		error "This doesn't look like a dictionary: '$dic'"
@@ -165,6 +171,7 @@ proc PrepareGeneralTarget {} {
 			lappend subtargets $t
 		} elseif { $type == "directory" } {
 			vlog " --> Added to 'all' as $t/all (because $type)"
+			CheckDefinedTarget $t/all  ;# Create it lazily
 			lappend subtargets $t/all
 		} else {
 			vlog " --| Not added to 'all' (because $type)"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # but tcl \
-exec tclsh8.5 "$0" "$@"
+exec tclsh "$0" "$@"
 
 package require Tcl
 
@@ -616,7 +616,9 @@ proc check_generic_upd_first {target} {
 	return false
 }
 
-proc gendep {depfile args} {
+proc gendep {srcdir depfile args} {
+	set wd [pwd]
+	cd $srcdir
 	set origdeps [exec {*}$args]
 
 	# First, remove these stupid line breaks
@@ -624,12 +626,11 @@ proc gendep {depfile args} {
 
 	# Second, delete the first word which is the name of the target
 	# (we'll have the name set explicitly)
-	set deps [lrange $deps 1 end]
+	set deps [pmap [list v "return \[prelocate \"\$v\" \"$wd\"\]"] [lrange $deps 1 end]]
 
+	cd $wd
 	# And now write them into the depfile
-	set fd [open $depfile w]
-	puts $fd $deps
-	close $fd
+	pwrite $depfile $deps
 }
 
 proc dep-rule {depfile sourcefile action} {
@@ -753,6 +754,8 @@ proc is_target_stale {target depend} {
 	variable db_phony
 	variable db_depends
 
+	$mkv::debug "Checking if $target is stale against $depend"
+
 	# Check if $depend is phony.
 	# If phony, then just forward the request to its depends.
 	# XXX THIS FEATURE IS SLIGHTLY CONTROVERSIAL.
@@ -760,10 +763,17 @@ proc is_target_stale {target depend} {
 	if { [info exists db_phony($depend)] } {
 		set out false
 		if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
-			vlog "... ... and has deps ..."
-			foreach d [getdeps $target] {
-				vlog "... ... forwarding: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
+			set target_deps [getdeps $depend]
+			vlog "... ... and has deps: $target_deps"
+			foreach d $target_deps {
+				if { $d == $target } {
+					puts stderr "+++ ERROR: recursive dep $target -> $d - DROPPING."
+					continue
+				}
+				vlog "... ... forwarding to dep of $target: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
+				mkv::p::debug_indent+
 				set stale [is_target_stale $target $d]
+				mkv::p::debug_indent-
 				set out [expr {$out || $stale} ]
 				vlog "... stale: $out"
 			}
@@ -872,6 +882,7 @@ proc build_make_tree {target whoneedstarget} {
 		foreach depend $depends {
 			vlog "Considering $depend as dependency for $target"
 			if { [catch {build_make_tree $depend $target} result] } {
+				$mkv::debug "ERROR: '$result' $::errorCode $::errorInfo"
 				set status 0
 				vlog "Making $depend failed, so $target won't be made"
 				if { $mkv::p::keep_going } {
@@ -889,6 +900,7 @@ proc build_make_tree {target whoneedstarget} {
 			vlog "Considering $p as prerequisite for $target"
 			if { ![file exists $p] } {
 				if { [catch {build_make_tree $p $target} result] } {
+					$mkv::debug "ERROR: '$result' $::errorCode $::errorInfo"
 					set status 0
 					vlog "Making $p failed, so $target won't be made"
 					if { $mkv::p::keep_going } {
@@ -1649,6 +1661,93 @@ proc pdefx {name args} {
 	proc $name {} [list return $result]
 }
 
+proc pwrite {filename contents} {
+	set fd [open $filename w]
+	puts $fd $contents
+	close $fd
+}
+
+proc pcat {filename} {
+	set fd [open $filename r]
+	set con [read $fd]
+	close $fd
+	return $con
+}
+
+# This function is directly copied from 'apply' Tcl manpage.
+# Just wanted to be clear about it, although it doesn't kick, but...
+proc pmap {lambda list} {
+	set result {}
+	foreach item $list {
+		lappend result [apply $lambda $item]
+	}
+	return $result
+}
+
+proc pfind {args} {
+	# First, test if the last one is a list of directories or a mask
+	set last [lindex $args end]
+	if { [string first * $last] != -1 || [string first "\[" $last] != -1 || [string first ? $last] != -1 } {
+		# This is a mask and it cannot be a directory.
+		set masks $args
+		set directories .
+	} else {
+		set masks [lrange $args 0 end-1]
+		set directories [lindex $args end]
+	}
+
+	set outlist ""
+	foreach d $directories {
+		foreach m $masks {
+			lappend outlist {*}[glob -nocomplain $d/$m]
+		}
+	}
+
+	return $outlist
+}
+
+proc prelativize {path {wd .}} {
+
+	if { $wd == "." } {
+		set wd [pwd]
+	} else {
+		set wd [file normalize $wd]
+	}
+
+	if { [file pathtype $path] == "absolute" } {
+		set norm $path
+	} else {
+		set od [pwd]
+		cd $wd
+		set norm [file normalize $path]
+		cd $od
+	}
+
+	set common 0
+	set norm_parts [file split $norm]
+	set b_parts [file split $wd]
+	while { [lindex $norm_parts $common] == [lindex $b_parts $common] } {
+		incr common
+	}
+
+	set shift_norm_parts [lrange $norm_parts $common end]
+	set overhead [expr {[llength $b_parts]-$common}]
+	set uppath ""
+	if { $overhead > 0 } {
+		set uppath [lrepeat $overhead ..]
+	}
+	set rpath [file join {*}$uppath {*}$shift_norm_parts]
+
+
+	$mkv::debug "Norma-localize in '$wd' $norm: $rpath"
+	return $rpath
+}
+
+
+proc prelocate {path dir} {
+	set path [file normalize $path]
+	return [prelativize $path $dir]
+}
 
 # utilities (for debug stuff)
 
@@ -1691,8 +1790,14 @@ set public_export [puncomment {
 	phas
 	pdef
 	pdefx
-	plist
+	pwrite
+	pcat
 	pexpand
+	pfind
+	prelativize
+	plist
+	pmap
+	prelocate
 	puncomment
 	autoclean
 	autoclean-test
@@ -1818,7 +1923,10 @@ if { !$tcl_interactive } {
 		$mkv::debug "WILL MAKE: $cmd_args STARTING FROM $mkv::p::first_rule"
 		foreach tar $cmd_args {
 			$mkv::debug "Applying make to '$tar'"
-			make $tar
+			if { [catch {make $tar} res1] } {
+				$mkv::debug "FAILURE: $res1 $::errorCode $::errorInfo"
+				error $res1
+			}
 		}
 	} result]] } {
 
