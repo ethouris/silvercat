@@ -30,6 +30,9 @@ set maxjobs 1
 # structure {actual_target target whoneedstarget}
 variable q_pending
 
+# List of targets that have been scheduled, but haven't been finished
+variable q_running ""
+
 # structure {target status}, where status is
 # 0 - succeeded (dependent targets can be started)
 # 1 - failed first
@@ -284,7 +287,7 @@ proc pprun {tracername channels {vblank {}}} {
 				set code [dict get $copts -code]
 				if { $code != 0 } {
 					append infotext " ***Error "
-					set ec [dict:at $copts -errorcode]
+					set ec [pget $copts.-errorcode]
 					if { [lindex $ec 0] == "CHILDSTATUS" } {
 						set ec [lindex $ec 2]
 						append infotext " $ec"
@@ -298,6 +301,7 @@ proc pprun {tracername channels {vblank {}}} {
 						incr deadcount
 
 						# The command failed, so interrupt the sequence right now.
+						dict set ret $deadkey target [dict get $res $id target]
 						dict set ret $deadkey cmdset [dict get $res $id cmdset]
 						dict set ret $deadkey code $code
 						dict set ret $deadkey error $ec
@@ -324,6 +328,7 @@ proc pprun {tracername channels {vblank {}}} {
 					set deadkey $id.$deadcount
 					incr deadcount
 
+					dict set ret $deadkey target [dict get $res $id target]
 					dict set ret $deadkey cmdset [dict get $res $id cmdset]
 					dict set ret $deadkey code 0
 					dict set ret $deadkey error ""
@@ -919,8 +924,8 @@ proc build_make_tree {target whoneedstarget} {
 	}
 
 	if { $need_build } {
-		vlog "File '$target' $reason - performing action for '$target'"
-		if { ![perform_action $target $target $whoneedstarget] } {
+		vlog "File '$target' $reason - resolving action for '$target'"
+		if { ![resolve_action $target $target $whoneedstarget] } {
             error "Action failure for '$target'"
         }
 	} elseif { $hasdepends } {
@@ -935,8 +940,8 @@ proc build_make_tree {target whoneedstarget} {
 		}
 
 		if { $stale } {
-			vlog "Performing make action for $target"
-			if {![perform_action $target $target $whoneedstarget]} {
+			vlog "Resolving make action for $target (stale against $depend)"
+			if {![resolve_action $target $target $whoneedstarget]} {
 				error "Action failure for $target"
 			}
 		} else {
@@ -965,6 +970,17 @@ proc make target {
 	build_make_tree $target ""
 
 	vlog "--- Target queue prepared - starting action"
+	variable q_pending
+	$mkv::debug "::: Action queue: [llength $q_pending]"
+
+    foreach e $q_pending {
+    	lassign $e target ac need
+    	$mkv::debug "$target:  (need by $need): [string map {"\n" "\\n"} $ac]"
+    }
+
+	variable q_running
+	variable failed
+	variable q_done
 
 	if { $mkv::p::maxjobs == 1 } {
 		# Do normal processing - dequeue always one action
@@ -979,11 +995,63 @@ proc make target {
 			lassign [lindex $target2start 0] target action whoneedstarget
 			vlog "--- TARGET: $target ACTION: $action PARENT: $whoneedstarget"
 
+			# Add this target to the running targets
+			lappend q_running $target
+			vlog "--- CURRENTLY RUNNING: $q_running"
+
 			set channel [list $target [pprepare $action]]
 			lappend channels $channel
-			pprun ::mkv::p::tracer $channels {{res ret} {
-				puts stderr "VBLANK"
+			pprun ::mkv::p::tracer $channels {{r_res r_ret} {
+				upvar ::mkv::p::q_running q_running
+				upvar ::mkv::p::q_done q_done
+				upvar ::mkv::p::failed failed
+				vlog "+++ VBLANK RUNNING: $q_running"
+				upvar $r_res res
+				upvar $r_ret ret
+				puts stderr "VBLANK: res=$res ret=$ret"
+
+				# This is one-shot. Do nothing if no action has been finished.
+				if { $ret == "" } {
+					return
+				}
+
+				# Check which actions have been finished. Remove them from q_running.
+				# We have here just one action
+				lassign $ret deadkey retdb
+				set target [dict get $retdb target]
+				vlog "Found finished target: $target"
+
+				# Remove the target from running
+				set q_running [plremove $q_running $target]
+
+				# Check the status
+				set failed [dict get $retdb failed]
+				if { $failed != "" } {
+					lappend failed $target
+				}
+
+				# Add to done targets (regardless of the status)
+				lappend q_done $target
+
+				# This should remove from ret - but in ret there should be only one
+				set ret ""
+
+				# Get the next action that can be done
+				set target2start [mkv::p::dequeue_action 1]
+				lassign [lindex $target2start 0] target action whoneedstarget
+
+				if { $target != "" } {
+					set channel [list $target [mkv::p::pprepare $action]]
+					# Schedule next action
+					mkv::p::ppupdate res [list $channel]
+				}
+				# Don't schedule anything if empty
+
+				vlog "+++ NOW RUNNING: $q_running"
+
 			}}
+
+			#error "NOT CONTINUING INFINITE LOOP"
 		}
 
 		return
@@ -1169,6 +1237,7 @@ proc dequeue_action {nrequired} {
 	set nqueued 0
 	variable q_done
 	variable q_pending
+	variable q_running
 	variable failed
 	variable keep_going
 
@@ -1178,11 +1247,37 @@ proc dequeue_action {nrequired} {
 	# depend on already failed targets, or return empty list
 	# immediately.
 
+	# Review the list of q_pending.
+	# Split the iterated targets into two lists:
+	# - ready: those that can be sent to building now
+	# - stalled: those that need dependent targets to be finished
+	# Roll until the end or until the number of 'ready' targets
+	# is equal to the $nrequired.
+	# At the end, do: 
+	#
+	# set q_pending [concat $stalled [lrange $q_pending $pos end]]
+	# (in case when $pos reached $size, the second list will be empty)
+	#
+	# and return $ready
+	#
+	# If you find any dependency failed, mark the dependent target failed, too.
+	# If this was found in case when !$keep_going,
+	#     CLEAR THE q_pending and return nothing.
+	#
+	# It's expected that the scheduling machine roll until the q_pending
+	# list becomes empty - even if this function return an empty string
+	# (it may happen that all targets in q_pending depend on some target
+	# that is still building).
+
 	set faildep ""
 	set size [llength $q_pending]
 	for {set pos 0} {$pos < $size} {incr pos} {
 		set pend [lindex $q_pending $pos]
 		lassign $pend target action whoneedstarget
+
+		vlog "+++Considering target: $target"
+		vlog "+++Running now: $q_running"
+		vlog "+++Done targets: $q_done"
 
 		if { $target in $q_done } {
 			if { $target in $failed } {
@@ -1194,13 +1289,18 @@ proc dequeue_action {nrequired} {
 			continue
 		}
 
+		if { $target in $q_running } {
+			vlog " --- already scheduled '$target', try another one"
+			continue
+		}
+
 		# Now check dependent targets if they are declared as failed
 		if { [info exists db_depends($target)] } {
 			foreach d [getdeps $target] {
 				if { $d in $failed } {
 					vlog " --- Not making $target - dependency $d failed"
 					lappend q_done [list $target 2]
-					return fail
+					return ""
 				}
 			}
 		}
@@ -1216,6 +1316,8 @@ proc dequeue_action {nrequired} {
 
 	# May happen that nothing has been extracted or less have been
 	# extracted than it was requested.
+
+	$mkv::debug "DEQUEUED TO RUN: $out"
 	return $out
 }
 
@@ -1228,7 +1330,7 @@ proc dequeue_action {nrequired} {
 # If action is taken as a link to another target, second argument
 # is the target actually built; first is only the indetifier of
 # the action, which should be taken.
-proc perform_action {actual_target target whoneedstarget} {
+proc resolve_action {actual_target target whoneedstarget} {
 
 	variable db_depends
 	variable db_generic
@@ -1240,7 +1342,7 @@ proc perform_action {actual_target target whoneedstarget} {
 		set sake " for the sake of '$actual_target'"
 	}
 
-    vlog "Performing action defined for '$target'$sake"
+    vlog "Resolving action defined for '$target'$sake"
 	set generic ""
 	
 	if { ![info exists db_actions($target)] } {
@@ -1258,11 +1360,11 @@ proc perform_action {actual_target target whoneedstarget} {
 	set actions ""
 	set depends ""
 	if { $generic == "" } {
-		vlog "Performing action (direct):\n>>> $db_actions($target)"
+		vlog "Resolving action (direct):\n>>> $db_actions($target)"
 		set depends $db_depends($actual_target)
 		set actions [apply_special_variables $db_actions($target) $actual_target]
 	} else {
-		vlog "Performing action (generic):\n>>> $db_actions($generic)"
+		vlog "Resolving action (generic):\n>>> $db_actions($generic)"
 		set depends [generate_depends $actual_target $generic $db_depends($generic)]
 
 		# Update dependencies for generated generic target
@@ -1305,7 +1407,7 @@ proc perform_action {actual_target target whoneedstarget} {
 					}
 
 					# Do substitution before altering target
-					if { ![perform_action $target $linked_target $whoneedstarget] } {
+					if { ![resolve_action $target $linked_target $whoneedstarget] } {
 						lappend mkv::p::failed $target
 						return false
 					}
@@ -1325,6 +1427,8 @@ proc perform_action {actual_target target whoneedstarget} {
 
 		# The remaining 'action' is the extracted commandset.
 		# Now enqueue the action.
+		$mkv::debug "ENQUEUING $actual_target with ACTION: $action"
+	
 		if { [catch {enqueue_action $actual_target $action $whoneedstarget} error] } {
 			puts stderr "ERROR ENQUEUING: $error"
 		}
@@ -1463,6 +1567,10 @@ proc pset {name arg1 args} {
     }
 }
 
+proc plremove {list item} {
+	return [lsearch -not -exact -all -inline $list $item]
+}
+
 proc pset+ {name arg1 args} {
     upvar $name var
     append var " [pexpand $arg1]"
@@ -1576,6 +1684,7 @@ set public_export [puncomment {
 	vlog
 
 	# Utility functions
+	plremove
 	pset
 	pset+
 	pget
@@ -1714,7 +1823,7 @@ if { !$tcl_interactive } {
 	} result]] } {
 
 		puts stderr $result
-		puts stderr "+++ Target '$tar' failed"
+		puts stderr "+++ Target '$tar' failed: $result"
 		return 1
 	}
 
