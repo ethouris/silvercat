@@ -260,7 +260,7 @@ proc StableIntersection {l2 l1} {
 			# Add this element only if it wasn't added before.
 			# This can only happen in case when the common elements
 			# weren't in the same order (the order of l2 is actually
-					# preserved).
+			# preserved).
 			if { [lsearch $out $e1] == -1 } {
 				lappend out $e1
 			}
@@ -383,7 +383,7 @@ proc IdentifyLanguage sourcefile {
 
 proc DetectType target {
 	# If any dot is found, try to determine by extension.
-	# If no dot found, return empty string.
+	# If no dot found, return "phony".
 	# (program may be good, but it's not a good default)
 
 	# XXX This is true only on POSIX.
@@ -796,6 +796,14 @@ proc ProcessSources target {
 
 		$::g_debug " ... processing $s (language $lang) --> $o"
 
+		# XXX The convention of dependency files may be generator dependent.
+		# Currently the Makefile.tcl generator is used, so the dependency file
+		# has *.ag.dep suffix and doesn't contain the *.o file spec. For Makefile
+		# it should contain the *.o: statement. For other generators it may be
+		# required to be even different. Also the structure is different. The
+		# syntax for Makefile.tcl is: rule TARGET <DEPFILE { ... } and so it is
+		# defined here. For Makefile it would have to be 'include(DEPFILE)' followed
+		# by the build command line.
 		if { $depspec == "cached" } {
 			set depfile [GenFileBase $s].ag.dep
 			$::g_debug " ... generating rule for dependency file $depfile"
@@ -912,6 +920,12 @@ proc Process:directory target {
 	# however it's hard to say as to whether anything
 	# has to be done here.
 
+	# XXX Well, there is one thing. The Silverfile that
+	# is found for this directory (it is, right?) should
+	# be loaded here - with changed context, of course -
+	# so that the target types mentioned anywhere in the
+	# dependencies in the current directory can be
+	# properly picked up.
 }
 
 proc Process:custom target {
@@ -1513,6 +1527,14 @@ proc agp-prepare-database {target {parent ""}} {
 		if { $type == "" } {
 			error "Can't recognize target type for '$target' - please declare explicitly"
 		}
+
+		# If the target type had to be autodetected, change it to
+		# phony if command key is also defined. This is only in case
+		# when the type is not set - if the type was explicitly set
+		# as phony, leave it as is.
+		if { $type == "phony" && [dict exists $agv::target($target) command] } {
+			set type custom
+		}
 	} else {
 		lassign [split $type .] ncat ntype
 		if { $ntype != "" } {
@@ -1570,6 +1592,19 @@ proc agp-prepare-database {target {parent ""}} {
 	vlog " ... Processing '$target' as '$type'"
 	# The 'Process:*' functions are expected to use the existing
 	# data in the target database to define build rules.
+
+	# This should be broken down into several steps: XXX
+	# 1. For all targets, review the depends and check if there are any
+	#    targets dependent on some targets in another directory. If so, load
+	#    every directory. NOTE: Having "ag-subdir" command may be not necessary.
+	#    Just make any target dependent on a target that is in a subdirectory,
+	#    this will be noted automatically. Every such directory should be "loaded"
+	#    with appropriate context. NOTE: Targets that are in-directories undergo
+	#    basic data completion processing (to extract -output key), but NOT any
+	#    other processing! 
+	# 2. Complete basic data (add keys that should be there and are lacking).
+	#    Generation of C/C++ file dependencies should also happen exactly here.
+	#    
 	Process:$type $target
 
 	$::g_debug "DATABASE for '$target' AFTER PROCESSING:"
@@ -1747,6 +1782,8 @@ proc ag-export names {
 }
 
 package provide ag 0.8
+set g_debug mkv::p::pass
+set ag_debug_on 0
 
 if { !$tcl_interactive } {
 
