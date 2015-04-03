@@ -24,6 +24,7 @@ variable db_depends
 variable db_actions
 variable db_generic
 variable db_phony
+variable db_need
 
 set maxjobs 1
 
@@ -839,8 +840,9 @@ proc build_make_tree {target whoneedstarget} {
 	variable db_phony
 	variable db_actions
 	variable db_prereq
+	variable depth
 	
-	vlog "--- make $target ---"
+	vlog "--- building tree for $target ---"
 
 	# Deny making targets, which already failed
 	if { [lsearch $mkv::p::failed $target] != -1 } {
@@ -856,12 +858,16 @@ proc build_make_tree {target whoneedstarget} {
 		vlog "No direct depends, checking for generic depends"
         set generic [find_generic $target]
         if { $generic != "" } {
+			incr depth
             set depnames [generate_depends $target $generic $db_depends($generic)]
+			incr depth -1
             if { $depnames != "" } {
                 set hasdepends 1
             }
 			if { [info exists db_prereq($generic)] } {
+				incr depth
 				set prereq [generate_depends $target $generic $db_prereq($generic)]
+				incr depth -1
 			}
 			vlog "Found generic '$generic' with deps: '$depnames' and prereq '$prereq'"
         }
@@ -874,7 +880,7 @@ proc build_make_tree {target whoneedstarget} {
 
 	set result "(reason unknown)"
 	if { $hasdepends } {
-		vlog "Has dependencies: $depnames"
+		vlog "($target) Has dependencies: $depnames"
 
 		# Resolve possible file-contained dependencies
 
@@ -893,13 +899,16 @@ proc build_make_tree {target whoneedstarget} {
 			}
 		}
 
-		vlog "Has prerequisites: $prereq"
+		vlog "($target) Has prerequisites: $prereq"
 
 		# For prereq, just make sure that they exist.
 		foreach p $prereq {
 			vlog "Considering $p as prerequisite for $target"
 			if { ![file exists $p] } {
-				if { [catch {build_make_tree $p $target} result] } {
+				incr depth
+				set res [catch {build_make_tree $p $target} result]
+				incr depth -1
+				if { $res } {
 					$mkv::debug "ERROR: '$result' $::errorCode $::errorInfo"
 					set status 0
 					vlog "Making $p failed, so $target won't be made"
@@ -981,57 +990,63 @@ proc make target {
 
 	build_make_tree $target ""
 
-	vlog "--- Target queue prepared - starting action"
+	vlog "------ Target queue prepared ---- starting action ------"
 	variable q_pending
-	$mkv::debug "::: Action queue: [llength $q_pending]"
+	$mkv::debug "::: Action queue: [llength $q_pending] pending actions :::"
 
-    foreach e $q_pending {
-    	lassign $e target ac need
-    	$mkv::debug "$target:  (need by $need): [string map {"\n" "\\n"} $ac]"
-    }
+	foreach e $q_pending {
+		lassign $e target ac need
+		$mkv::debug " -::- $target:  (need by $need): [string map {"\n" "\\n"} $ac]"
+	}
+	vlog "--------------------------------------------------------"
 
 	variable q_running
 	variable failed
 	variable q_done
 
-	if { $mkv::p::maxjobs == 1 } {
-		# Do normal processing - dequeue always one action
 
-		while 1 {
-			set target2start [dequeue_action 1]
-			vlog "--- DEQUEUED: $target2start"
-			if { $target2start == "" } {
-				break
+	while 1 {
+		set target2start [dequeue_action $mkv::p::maxjobs]
+		vlog "--- DEQUEUED: $target2start"
+		if { $target2start == "" } {
+			break
+		}
+		# There's only one, so extract always the first element
+		lassign [lindex $target2start 0] target action whoneedstarget
+		vlog "--- TARGET: $target ACTION: $action PARENT: $whoneedstarget"
+
+		# Add this target to the running targets
+		lappend q_running $target
+		vlog "--- CURRENTLY RUNNING: $q_running"
+
+		set channel [list $target [pprepare $action]]
+		lappend channels $channel
+		pprun ::mkv::p::tracer $channels {{r_res r_ret} {
+			upvar ::mkv::p::q_running q_running
+			upvar ::mkv::p::q_done q_done
+			upvar ::mkv::p::failed failed
+			vlog "+++ VBLANK RUNNING: $q_running"
+			upvar $r_res res
+			upvar $r_ret ret
+			puts stderr "VBLANK: res=$res ret=$ret"
+			set lres [expr [llength $res]/2]
+			set lremain [expr $mkv::p::maxjobs-$lres]
+			puts "+++ Channels used: $lres remaining: $lremain"
+			if { $lremain < 0 } {
+				error "INTERNAL ERROR!"
 			}
-			# There's only one, so extract always the first element
-			lassign [lindex $target2start 0] target action whoneedstarget
-			vlog "--- TARGET: $target ACTION: $action PARENT: $whoneedstarget"
 
-			# Add this target to the running targets
-			lappend q_running $target
-			vlog "--- CURRENTLY RUNNING: $q_running"
+			# If there are no free channels, do nothing.
+			if { $lremain == 0 } {
+				return
+			}
 
-			set channel [list $target [pprepare $action]]
-			lappend channels $channel
-			pprun ::mkv::p::tracer $channels {{r_res r_ret} {
-				upvar ::mkv::p::q_running q_running
-				upvar ::mkv::p::q_done q_done
-				upvar ::mkv::p::failed failed
-				vlog "+++ VBLANK RUNNING: $q_running"
-				upvar $r_res res
-				upvar $r_ret ret
-				puts stderr "VBLANK: res=$res ret=$ret"
-
-				# This is one-shot. Do nothing if no action has been finished.
-				if { $ret == "" } {
-					return
-				}
-
-				# Check which actions have been finished. Remove them from q_running.
-				# We have here just one action
-				lassign $ret deadkey retdb
+			# Check which actions have been finished. Remove them from q_running.
+			# We have here just one action
+			lassign $ret deadkey retdb
+			if { $retdb != "" } {
 				set target [dict get $retdb target]
-				vlog "Found finished target: $target"
+				vlog "+++ Found finished target: $target"
 
 				# Remove the target from running
 				set q_running [plremove $q_running $target]
@@ -1044,33 +1059,33 @@ proc make target {
 
 				# Add to done targets (regardless of the status)
 				lappend q_done $target
+			}
 
-				# This should remove from ret - but in ret there should be only one
-				set ret ""
+			# This should remove from ret - but in ret there should be only one
+			set ret ""
 
-				# Get the next action that can be done
-				set target2start [mkv::p::dequeue_action 1]
-				lassign [lindex $target2start 0] target action whoneedstarget
+			# Get the next action that can be done
+			set channels ""
+			foreach target2start [mkv::p::dequeue_action $lremain] {
+				lassign $target2start target action whoneedstarget
+				lappend channels [list $target [mkv::p::pprepare $action]]
+			}
+			# Don't schedule anything if empty
+			if { $channels != "" } {
+				mkv::p::ppupdate res $channels
+			}
 
-				if { $target != "" } {
-					set channel [list $target [mkv::p::pprepare $action]]
-					# Schedule next action
-					mkv::p::ppupdate res [list $channel]
-				}
-				# Don't schedule anything if empty
+			vlog "+++ NOW RUNNING: $q_running"
 
-				vlog "+++ NOW RUNNING: $q_running"
+		}}
 
-			}}
-
-			#error "NOT CONTINUING INFINITE LOOP"
+		if { $q_pending == "" } {
+			break
 		}
 
-		return
+		vlog "+++ ALL CHANNELS FREE (occasionally at once) -- repeating the make loop."
 	}
 
-	# Go parallel
-	error "Parallel not yet supported"
 }
 
 proc apply_action_options action {
@@ -1221,11 +1236,13 @@ proc generate_depends {target template depends} {
 proc enqueue_action {target action whoneedstarget} {
 	variable q_done
 	variable q_pending
+	variable db_need
+
+	# Update need information (regardless if the target is done or not)
+	set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
 
 	# Check if the target is already done
-	set p [lsearch -index 0 $q_done $target]
-
-	if { $p != -1 } {
+	if { $target in $q_done } {
 		# It's done, so don't try to do it again.
 		$mkv::debug "Not enqueuing $target - already done"
 		return pass
@@ -1236,6 +1253,13 @@ proc enqueue_action {target action whoneedstarget} {
 	if { $p != -1 } {
 		# Already enqueued, so don't enqueue it again
 		$mkv::debug "Not enqueuing $target - already enqueued"
+		# However, check if $whoneedstarget is among requirers. If not, add it.
+		set current_need [lindex $q_pending $p 2]
+		if { $whoneedstarget ni $current_need } {
+			$mkv::debug " --- but updating requestors by $whoneedstarget"
+			lappend current_need $whoneedstarget
+			lset q_pending $p 2 $current_need
+		}
 		return pass
 	}
 
@@ -1245,13 +1269,14 @@ proc enqueue_action {target action whoneedstarget} {
 }
 
 proc dequeue_action {nrequired} {
-	set out ""
+	set schedule ""
 	set nqueued 0
 	variable q_done
 	variable q_pending
 	variable q_running
 	variable failed
 	variable keep_going
+	variable db_need
 
 	# Pick up at most $nrequired actions from the pending queue.
 	# Detect if $whoneedstarget is already in 'failed'. If so, then
@@ -1281,13 +1306,16 @@ proc dequeue_action {nrequired} {
 	# (it may happen that all targets in q_pending depend on some target
 	# that is still building).
 
-	set faildep ""
+	# here will be queue items from q_pending that should land in this
+	# queue back (should be retried at the next try).
+	set stalled ""
+
 	set size [llength $q_pending]
 	for {set pos 0} {$pos < $size} {incr pos} {
 		set pend [lindex $q_pending $pos]
 		lassign $pend target action whoneedstarget
 
-		vlog "+++Considering target: $target"
+		vlog "+++Dequeue: Considering target: $target"
 		vlog "+++Running now: $q_running"
 		vlog "+++Done targets: $q_done"
 
@@ -1306,31 +1334,66 @@ proc dequeue_action {nrequired} {
 			continue
 		}
 
-		# Now check dependent targets if they are declared as failed
-		if { [info exists db_depends($target)] } {
-			foreach d [getdeps $target] {
-				if { $d in $failed } {
-					vlog " --- Not making $target - dependency $d failed"
-					lappend q_done [list $target 2]
+		set need [pget db_need($target)]
+		set alldone 1
+		vlog " --- checking if needs are satisfied: $need"
+		foreach n $need {
+			# Check if all "needs" are already done
+			if { $n in $q_done } {
+				continue
+			}
+
+			# Check also if it's failed. If so, move this target also to fail
+			if { $n in $failed } {
+				if { !$keep_going } {
+					vlog " --- found failed target, no -k option -- bailing out"
 					return ""
 				}
+
+				# Otherwise just mark this target as failed by dependency
+				vlog " --- Marking target '$target' failed."
+				lappend failed $target
 			}
+
+			set alldone 0
+			break
 		}
 
-		lappend out [list $target $action $whoneedstarget]
+		if { !$alldone } {
+			vlog " --- requires '$n' which is not yet done."
+			# but the target should be considered next time!
+			lappend stalled [list $target $action $whoneedstarget]
+			continue
+		}
+
+		vlog " --- adding '$target' to schedule"
+
+		lappend schedule [list $target $action $whoneedstarget]
 		incr nqueued
 		if { $nqueued == $nrequired } {
+			vlog " --- added all $nrequired targets to schedule"
 			break
+		} else {
+			vlog " --- STILL [expr $nrequired-$nqueued] free channels"
 		}
 	}
 
-	set q_pending [lrange $q_pending $pos end]
+	set q_pending [concat $stalled [lrange $q_pending [expr {$pos+1}] end]]
 
 	# May happen that nothing has been extracted or less have been
 	# extracted than it was requested.
 
-	$mkv::debug "DEQUEUED TO RUN: $out"
-	return $out
+	vlog " --- scheduled $nqueued of required $nrequired"
+	$mkv::debug "DEQUEUED TO RUN: $schedule"
+
+	$mkv::debug "::: UPDATED Action queue: [llength $q_pending] pending actions :::"
+
+	foreach e $q_pending {
+		lassign $e target ac need
+		$mkv::debug " -::- $target:  (need by $need): [string map {"\n" "\\n"} $ac]"
+	}
+
+	return $schedule
 }
 
 # Arguments:
@@ -1439,7 +1502,7 @@ proc resolve_action {actual_target target whoneedstarget} {
 
 		# The remaining 'action' is the extracted commandset.
 		# Now enqueue the action.
-		$mkv::debug "ENQUEUING $actual_target with ACTION: $action"
+		$mkv::debug "ENQUEUING $actual_target with ACTION: {$action} NEEDED BY: $whoneedstarget"
 	
 		if { [catch {enqueue_action $actual_target $action $whoneedstarget} error] } {
 			puts stderr "ERROR ENQUEUING: $error"
@@ -1535,7 +1598,7 @@ proc rolling_autoclean {rule debug} {
 		lappend autoclean_candidates {*}[rolling_autoclean $dep $debug]
 	}
 	incr ::gg_debug_indent -1
-	return $autoclean_candidates
+	return [lsort -decreasing -unique $autoclean_candidates]
 }
 
 proc autoclean {rule} {
@@ -1543,7 +1606,9 @@ proc autoclean {rule} {
 	set ac [rolling_autoclean $rule $mkv::debug]
 	if { $ac != "" } {
 		puts stderr "Autoclean deletes: $ac"
-		file delete {*}$ac
+		if { [catch {file delete {*}$ac} result] } {
+			puts stderr "*** ERROR: can't delete '$ac'"
+		}
 	}
 }
 
@@ -1769,6 +1834,34 @@ proc tribool_logical in {
 	return indeterminate
 }
 
+proc number_cores {} {
+	# This should return some system-dependent number
+	# of cores. This should be done some system-dependent
+	# way, so far we'll just use
+	# - on Linux-compliant systems (including Cygwin), use /proc/cpuinfo
+	# - on others, return 2.
+
+	switch -glob -- $tcl_platform(os) {
+		CYGWIN* - Linux {
+			set nc [exec grep "^processor\[ \t\]:" /proc/cpuinfo | wc -l]
+		}
+
+		Darwin {
+			set nr [exec sysctl hw.ncpu]
+			set nc [string trim [lindex [split $nr :] 1]]
+		}
+
+		default {
+			set nc 2
+		}
+	}
+
+	if { ![string is integer $nc] || $nc < 2 } {
+		return 2
+	}
+	return $nc
+}
+
 set public_export [puncomment {
 
 	# Main make facilities
@@ -1855,6 +1948,7 @@ if { !$tcl_interactive } {
 		-d *display_debug
 		-v *verbose
 		-C makefiledir
+		-j jobs
 	}
 
 	set keep_going 0
@@ -1863,6 +1957,7 @@ if { !$tcl_interactive } {
 	set makefile {}
 	set help 0
 	set makefiledir .
+	set jobs 1
 
 	lassign [process-options $argv $g_optargs] cmd_args cmd_variables
 
@@ -1880,6 +1975,16 @@ if { !$tcl_interactive } {
 	set mkv::debug_on $display_debug
 	set mkv::p::verbose $verbose
 	set mkv::directory $makefiledir
+
+	if { $jobs == "j" } {
+		set jobs [mkv::p::number_cores]
+	}
+
+	if { ![string is integer $jobs] || $jobs < 1 } {
+		error "Invalid value for -j '$jobs': allowed is 'j' or positive integer"
+	}
+
+	set mkv::p::maxjobs $jobs
 
 	if { $display_debug } {
 		set mkv::debug mkv::p::debug
