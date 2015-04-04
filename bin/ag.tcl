@@ -324,10 +324,19 @@ proc GenerateDepends {lang cflags source} {
 #	}
 
 	# The command should be run originally in the source directory
-	set wd [pwd]
-	cd $agv::srcdir
-	set deps [exec {*}$cmd]
-	cd $wd
+	if { [catch {
+				set wd [pwd]
+				cd $agv::srcdir
+				set deps [exec {*}$cmd]
+				cd $wd
+			} error] } {
+		puts stderr "ERROR: dependency generation command failed:\n$error"
+		puts stderr "If this is because of nonexistent file, use:\n"
+		puts stderr "\tag-info <cfile> -includes <hfile>'\n"
+		puts stderr "to prevent autogeneration, or use -depspec cached."
+		error "Command failed: $cmd"
+	}
+
 
 	# Rules are generated in the convention of "make".
 	# Make them a plain list, as needed for "make.tcl"
@@ -1331,7 +1340,7 @@ proc GenerateMakefile {target fd} {
 	# Put exported variables and procedures into the script
 	foreach vv $agv::p::exported_var {
 		lassign $vv v a
-		puts $fd "set $v \"$a\""
+		puts $fd "set $v {$a}"
 	}
 	foreach vv $agv::p::exported_proc {
 		lassign $vv n a b
