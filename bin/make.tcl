@@ -741,18 +741,23 @@ proc subst_action action {
 	foreach action $lines {
 		set action [string trim $action]
 		if { $action == "" } continue
-
-		set target {}
-		foreach element $action {
-			append target "$element "
-		}
-		lappend lines_target $target
+	    #$mkv::debug " ... action line: $action"
+	    #set al [lrange $action 0 end]
+	    #$mkv::debug " ... as list: $al"
+        #
+	    #set target {}
+	    #foreach element $action {
+	    #	$mkv::debug " ... ELEMENT: $element"
+	    #	append target "$element "
+	    #}
+	    #lappend lines_target $target
+		lappend lines_target $action
 	}
 
 	$mkv::debug "Substituting: $lines_target"
 
 	set o [catch {
-	set target [uplevel #0 subst [list $lines_target]]
+	set target [uplevel #0 subst -nobackslashes [list $lines_target]]
 	}]
 	if { $o } {
 		vlog ERROR:$::errorInfo
