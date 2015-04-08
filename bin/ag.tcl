@@ -315,6 +315,7 @@ proc CreateDepGenCommand {lang cflags source} {
 proc GenerateDepends {lang cflags source} {
 
 	set cmd [CreateDepGenCommand $lang $cflags $source]
+	puts stderr "Generating dependencies for: $source"
 	vlog "Dep command: $cmd"
 
 	# Run the command to generate deps

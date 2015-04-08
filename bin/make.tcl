@@ -204,6 +204,8 @@ proc pprun {tracername channels {vblank {}}} {
 	set ret ""
 	set njobs [llength $channels]
 
+	$mkv::debug "INITIAL CHANNELS: $channels"
+
 	# Prepare initial running process database
 	ppupdate res $channels
 
@@ -260,18 +262,18 @@ proc pprun {tracername channels {vblank {}}} {
 					continue
 				}
 
-				if { !$mkv::p::quiet && "silent" ni $flags } {
-					set pfx ""
-					if { $njobs > 1 } {
-						set pfx "\[$id\]  "
-					}
+				set pfx ""
+				if { $njobs > 1 } {
+					set pfx "\[$id\]  "
+				}
 
+				if { !$mkv::p::quiet && "silent" ni $flags } {
 					$mkv::debug "$pfx<[pwd]>"
 					puts stderr "$pfx$cmd"
 				}
 
 				set external "$mkv::p::shell $mkv::p::shellcmdopt {$cmd} 2>@stderr"
-				$mkv::debug "RUNNING: {$external}"
+				$mkv::debug "RUNNING: {$external} NUMBER OF JOBS: $njobs"
 
 				set fd [open "|$external"]
 				dict set res $id fd $fd
@@ -295,7 +297,7 @@ proc pprun {tracername channels {vblank {}}} {
 				set code [dict get $copts -code]
 				if { $code != 0 } {
 					append infotext " ***Error "
-					set ec [pget $copts.-errorcode]
+					set ec [pget copts.-errorcode]
 					if { [lindex $ec 0] == "CHILDSTATUS" } {
 						set ec [lindex $ec 2]
 						append infotext " $ec"
@@ -319,7 +321,9 @@ proc pprun {tracername channels {vblank {}}} {
 
 						# and remove the channel from the res list
 						set res [dict remove $res $id]
-						puts stderr "$infotext: $cmd"
+						if { $njobs > 1 } {
+							puts stderr "$infotext: $cmd"
+						}
 						continue
 					}
 
@@ -1013,23 +1017,26 @@ proc make target {
 
 
 	while 1 {
-		set target2start [dequeue_action $mkv::p::maxjobs]
-		vlog "--- DEQUEUED: $target2start"
-		if { $target2start == "" } {
-			break
-		}
-		# There's only one, so extract always the first element
-		lassign [lindex $target2start 0] target action whoneedstarget
-		vlog "--- TARGET: $target ACTION: $action PARENT: $whoneedstarget"
 
-		# Add this target to the running targets
-		lappend q_running $target
+		set channels ""
+		foreach target2start [mkv::p::dequeue_action $mkv::p::maxjobs] {
+			vlog "--- DEQUEUED: $target2start"
+			lassign $target2start target action whoneedstarget
+			vlog "--- TARGET: $target ACTION: $action PARENT: $whoneedstarget"
+
+			# Add this target to the running targets
+			lappend q_running $target
+			lappend channels [list $target [mkv::p::pprepare $action]]
+		}
 		vlog "--- CURRENTLY RUNNING: $q_running"
 
-		set channel [list $target [pprepare $action]]
-		lappend channels $channel
+		if { $channels == "" } {
+			break
+		}
+
 		pprun ::mkv::p::tracer $channels {{r_res r_ret} {
 			upvar ::mkv::p::q_running q_running
+			upvar ::mkv::p::q_pending q_pending
 			upvar ::mkv::p::q_done q_done
 			upvar ::mkv::p::failed failed
 			vlog "+++ VBLANK RUNNING: $q_running"
@@ -1040,13 +1047,15 @@ proc make target {
 			set lremain [expr $mkv::p::maxjobs-$lres]
 			$mkv::debug "+++ Channels used: $lres remaining: $lremain"
 			if { $lremain < 0 } {
-				error "INTERNAL ERROR!"
+				error "INTERNAL ERROR! (lres $lres > maxjobs $mkv::p::maxjobs, res.size = [llength $res])"
 			}
 
 			# If there are no free channels, do nothing.
 			if { $lremain == 0 } {
 				return
 			}
+
+			set exit_on_failure 0
 
 			# Check which actions have been finished. Remove them from q_running.
 			# We have here just one action
@@ -1061,11 +1070,26 @@ proc make target {
 				# Check the status
 				set failed [dict get $retdb failed]
 				if { $failed != "" } {
+					vlog "+++ Target '$target' failed on: $failed"
+
 					lappend failed $target
+					if { $mkv::p::keep_going } {
+						vlog "+++ ... although continuing on other targets"
+					} else {
+						set exit_on_failure 1
+					}
 				}
 
 				# Add to done targets (regardless of the status)
 				lappend q_done $target
+			}
+
+			# Don't schedule anything if requested to exit on failure.
+			if { $exit_on_failure } {
+				vlog "+++ NOT SCHEDULING any other targets due to exitting on failure"
+				# Clear the pending queue so that the machine stops by starving.
+				set q_pending ""
+				return
 			}
 
 			# This should remove from ret - but in ret there should be only one
