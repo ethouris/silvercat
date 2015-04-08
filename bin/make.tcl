@@ -202,6 +202,7 @@ proc pprun {tracername channels {vblank {}}} {
 	set res ""
 	set deadcount 0
 	set ret ""
+	set njobs [llength $channels]
 
 	# Prepare initial running process database
 	ppupdate res $channels
@@ -260,11 +261,17 @@ proc pprun {tracername channels {vblank {}}} {
 				}
 
 				if { !$mkv::p::quiet && "silent" ni $flags } {
-					puts stderr "\[$id\]> $cmd"
+					set pfx ""
+					if { $njobs > 1 } {
+						set pfx "\[$id\]  "
+					}
+
+					$mkv::debug "$pfx<[pwd]>"
+					puts stderr "$pfx$cmd"
 				}
 
 				set external "$mkv::p::shell $mkv::p::shellcmdopt {$cmd} 2>@stderr"
-				puts "RUNNING: {$external}"
+				$mkv::debug "RUNNING: {$external}"
 
 				set fd [open "|$external"]
 				dict set res $id fd $fd
@@ -784,7 +791,7 @@ proc is_target_stale {target depend} {
 		}
 		return $out
 	}
-	if { [catch {set stale [expr {![file exists $target]
+	if { [catch {set stale [expr {![file exists $target] || ![file exists $depend]
 		        || [file mtime $depend] > [file mtime $target]} ]}] } {
 		puts stderr "MTIME checked on nonexistent '$depend'"
 		return false
@@ -1028,10 +1035,10 @@ proc make target {
 			vlog "+++ VBLANK RUNNING: $q_running"
 			upvar $r_res res
 			upvar $r_ret ret
-			puts stderr "VBLANK: res=$res ret=$ret"
+			$mkv::debug "VBLANK: res=$res ret=$ret"
 			set lres [expr [llength $res]/2]
 			set lremain [expr $mkv::p::maxjobs-$lres]
-			puts "+++ Channels used: $lres remaining: $lremain"
+			$mkv::debug "+++ Channels used: $lres remaining: $lremain"
 			if { $lremain < 0 } {
 				error "INTERNAL ERROR!"
 			}

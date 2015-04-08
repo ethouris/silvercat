@@ -331,7 +331,7 @@ proc GenerateDepends {lang cflags source} {
 				cd $wd
 			} error] } {
 		puts stderr "ERROR: dependency generation command failed:\n$error"
-		puts stderr "If this is because of nonexistent file, use:\n"
+		puts stderr "If this is because of nonexistent HEADER file, use:\n"
 		puts stderr "\tag-info <cfile> -includes <hfile>'\n"
 		puts stderr "to prevent autogeneration, or use -depspec cached."
 		error "Command failed: $cmd"
