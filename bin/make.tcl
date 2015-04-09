@@ -1678,6 +1678,7 @@ proc pset {name arg1 args} {
     foreach a $args {
         append var " $a"
     }
+	return $var
 }
 
 proc plremove {list item} {
@@ -1689,7 +1690,19 @@ proc pset+ {name arg1 args} {
     append var " [pexpand $arg1]"
     foreach a $args {
         append var " $a"
-    }
+ 	}
+	return $var
+}
+
+proc pinit {name args} {
+	upvar $name var
+	if { [info exists var] } {
+		return $var
+	}
+
+	uplevel pset $name {*}$args
+	
+	return $var
 }
 
 proc phas {name} {
@@ -1753,13 +1766,17 @@ proc pdef {name args} {
 	namespace inscope :: proc $name {} "return \[uplevel concat $args\]"
 }
 
-proc pdefx {name args} {
+proc pdefv {name args} {
 	set e [catch {expr $args} result]
 	if { $e } {
 		puts stderr "NOTE: '$args' can't be evaluated: $result"
 		set result $args
 	} 
-	proc $name {} [list return $result]
+	namespace inscope :: proc $name {} [list return $result]
+}
+
+proc pdefx {name arg} {
+	namespace inscope :: proc $name {} "return \[uplevel expr {$arg}\]"
 }
 
 proc pwrite {filename contents} {
@@ -1768,7 +1785,7 @@ proc pwrite {filename contents} {
 	close $fd
 }
 
-proc pcat {filename} {
+proc pread {filename} {
 	set fd [open $filename r]
 	set con [read $fd]
 	close $fd
@@ -1779,8 +1796,15 @@ proc pcat {filename} {
 # Just wanted to be clear about it, although it doesn't kick, but...
 proc pmap {lambda list} {
 	set result {}
-	foreach item $list {
-		lappend result [apply $lambda $item]
+	if { [llength $lambda] == 1 } {
+		# Then it's a command name
+		foreach item $list {
+			lappend result [$lambda $item]
+		}
+	} else {
+		foreach item $list {
+			lappend result [apply $lambda $item]
+		}
 	}
 	return $result
 }
@@ -1915,12 +1939,14 @@ set public_export [puncomment {
 	plremove
 	pset
 	pset+
+	pinit
 	pget
 	phas
 	pdef
+	pdefv
 	pdefx
 	pwrite
-	pcat
+	pread
 	pexpand
 	pfind
 	prelativize
