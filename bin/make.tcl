@@ -470,25 +470,43 @@ proc process-options {argv optargd} {
 	return [list $args $variables]
 }
 
+proc InterpretDepends { rule deps } {
+	set od ""
+	foreach dep $deps {
+		if { [string index $dep 0] == "<" } {
+			set rf [string range $dep 1 end]
+			set dp [load-rule $rule $rf $od]
+
+			foreach d $dp {
+				if { $d ni $od } {
+					lappend od $d
+				}
+			}
+
+			# Add the dependency file itself to the dependencies,
+			# but ONLY IF THE RULE FOR BUILDING IT EXISTS, OR
+			# if this is so far the only rule. In other words,
+			# don't make the depfile itself a dependency, if the
+			# depfile doesn't exist and it's expected to be generated
+			# together with *.o file (in which case we must have at
+			# least the source file itself already in $od).
+			variable db_actions
+			if { [info exists db_actions($rf)] || $od == "" } {
+				lappend od $rf
+			}
+		} else {
+			lappend od $dep
+		}
+	}
+	return $od
+}
+
 proc getdeps { target {depnames {}} } {
-	set depends ""
 	if { $depnames == "" } {
 		variable db_depends
 		set depnames $db_depends($target)
 	}
-	foreach d $depnames {
-		if { [string index $d 0] == "<" } {
-			set rf [string range $d 1 end]
-			set rule [load-rule $target $rf]
-			lappend depends {*}$rule $rf
-
-			# Here you can handle other cases of special characters
-			# Except @ of course.
-		} else {
-			lappend depends $d
-		}
-	}
-	return $depends
+	return [InterpretDepends $target $depnames]
 }
 
 # Provide expansion in style of {*} in tcl 8.5
@@ -507,7 +525,7 @@ proc expandif {ch ls} {
 	return $final
 }
 
-proc load-rule {target rulefile} {
+proc load-rule {target rulefile others} {
 	variable db_actions
 
 	vlog " --- Expecting that ingredients for $target are found in $rulefile"
@@ -516,16 +534,20 @@ proc load-rule {target rulefile} {
 		# May need to be refreshed.
 		vlog " -- Executing rules to make '$rulefile'"
 		make $rulefile
-	} else {
-		vlog " ??? NO RULES to make '$rulefile' - expecting that it just exists..."
 	}
 
 	if { ![file exists $rulefile] } {
-		error "*** No rule to make dependency file '$rulefile' for target '$target'"
+		if { $others == "" } {
+			puts stderr "*** NOTE: if depfile is the only depspec, then it must exist or be make-able"
+			error "*** Depfile '$rulefile' for target '$target' not found and there's no rule to make it"
+		}
+
+		# We have other rules, so just pretend as if there are no more ingredients.
+		return ""
 	}
 
 	set fd [open $rulefile r]
-	set rule [read $fd]
+	set rule [TranslateDeps [read $fd]]
 	close $fd
 
 	$mkv::debug "RULE FROM FILE '$rulefile': ingredients: $rule"
@@ -628,21 +650,35 @@ proc check_generic_upd_first {target} {
 	return false
 }
 
-proc gendep {srcdir depfile args} {
-	set wd [pwd]
-	cd $srcdir
-	set origdeps [exec {*}$args]
+# This function recognizes if the dependency specification is in the
+# "make" format or in "Tclmake" format (only the source files and include
+# files in one line). If "make" format is found, translate it to Tclmake format.
+proc TranslateDeps {indeps} {
+	# deps that don't have : at the end of the first word
+	set first [lindex [split $indeps " "] 0]
+	if { [string index $first end] != ":" } {
+		return $indeps
+	}
 
 	# First, remove these stupid line breaks
-	set deps [string map {"\\\n" " "} $origdeps]
+	set deps [string map {"\\\n" " "} $indeps]
 
 	# Second, delete the first word which is the name of the target
 	# (we'll have the name set explicitly)
-	set deps [pmap [list v "return \[prelocate \"\$v\" \"$wd\"\]"] [lrange $deps 1 end]]
+	return [lrange $deps 1 end]
+}
+
+proc gendep {srcdir depfile args} {
+	set wd [pwd]
+	cd $srcdir
+	set indeps [exec {*}$args]
+	set deps [TranslateDeps $indeps]
+
+	set deps [pmap [list v "return \[prelocate \"\$v\" \"$wd\"\]"] $deps]
 
 	cd $wd
 	# And now write them into the depfile
-	pwrite $depfile $deps
+	pupdate $depfile $deps
 }
 
 proc dep-rule {depfile sourcefile action} {
@@ -871,7 +907,7 @@ proc build_make_tree {target whoneedstarget} {
 	set prereq ""
 
     if { !$hasdepends } {
-		vlog "No direct depends, checking for generic depends"
+		vlog "No direct depends for '$target', checking for generic depends"
         set generic [find_generic $target]
         if { $generic != "" } {
 			incr depth
@@ -1073,9 +1109,9 @@ proc make target {
 				set q_running [plremove $q_running $target]
 
 				# Check the status
-				set failed [dict get $retdb failed]
-				if { $failed != "" } {
-					vlog "+++ Target '$target' failed on: $failed"
+				set failedcmd [dict get $retdb failed]
+				if { $failedcmd != "" } {
+					vlog "+++ Target '$target' failed on: $failedcmd"
 
 					lappend failed $target
 					if { $mkv::p::keep_going } {
@@ -1116,12 +1152,36 @@ proc make target {
 		}}
 
 		if { $q_pending == "" } {
+			vlog "+++ No more pending after all running finished - breaking"
 			break
 		}
 
 		vlog "+++ ALL CHANNELS FREE (occasionally at once) -- repeating the make loop."
 	}
 
+	if { $failed != "" } {
+		puts stderr "+++ Failed: $failed"
+		return false
+	}
+
+	return true
+}
+
+proc submake args {
+	set makeexec [mkv::MAKE]
+
+	set opt ""
+	if { $mkv::p::keep_going } {
+		lappend opt -k
+	}
+
+	if { $mkv::p::maxjobs > 1 } {
+		lappend opt {*}[list -j $mkv::p::maxjobs]
+	}
+	
+	lappend opt {*}$args
+
+	run {*}$makeexec {*}$opt
 }
 
 proc apply_action_options action {
@@ -1617,17 +1677,7 @@ proc rolling_autoclean {rule debug} {
 	}
 
 	# Extract and filter out dependency files
-	set od ""
-	foreach dep $deps {
-		if { [string index $dep 0] == "<" } {
-			set rf [string range $dep 1 end]
-			set dp [load-rule $rule $rf]
-			lappend od {*}$dp $rf
-		} else {
-			lappend od $dep
-		}
-	}
-	set deps $od
+	set deps [InterpretDepends $rule $deps]
 
 	incr ::gg_debug_indent
 	foreach dep $deps {
@@ -1792,6 +1842,17 @@ proc pread {filename} {
 	return $con
 }
 
+proc pupdate {filename contents} {
+	if { [file exists $filename] } {
+		set oldcon [pcat $filename]
+		if { [string trim $oldcon] == [string trim $contents] } {
+			return 0
+		}
+	}
+	pwrite $filename $contents
+	return 1
+}
+
 # This function is directly copied from 'apply' Tcl manpage.
 # Just wanted to be clear about it, although it doesn't kick, but...
 proc pmap {lambda list} {
@@ -1824,7 +1885,12 @@ proc pfind {args} {
 	set outlist ""
 	foreach d $directories {
 		foreach m $masks {
-			lappend outlist {*}[glob -nocomplain $d/$m]
+			if { $d == "." } {
+				set p $m
+			} else {
+				set p $d/$m
+			}
+			lappend outlist {*}[glob -nocomplain $p]
 		}
 	}
 
@@ -1870,8 +1936,9 @@ proc prelativize {path {wd .}} {
 
 
 proc prelocate {path dir} {
-	set path [file normalize $path]
-	return [prelativize $path $dir]
+	set apath [file normalize $path]
+	$mkv::debug "Prelocate: '$path' in '[pwd]' to '$dir': $apath"
+	return [prelativize $apath $dir]
 }
 
 # utilities (for debug stuff)
@@ -1931,6 +1998,7 @@ set public_export [puncomment {
 	gendep
 	dep-rule
 	make
+	submake
 
 	# Logging
 	vlog
@@ -2086,6 +2154,7 @@ if { !$tcl_interactive } {
 
 	if {$cmd_args == ""} {set cmd_args $mkv::p::first_rule}
 
+	set res1 true
 	if { [set xc [catch {
 		$mkv::debug "WILL MAKE: $cmd_args STARTING FROM $mkv::p::first_rule"
 		foreach tar $cmd_args {
@@ -2093,13 +2162,15 @@ if { !$tcl_interactive } {
 			if { [catch {make $tar} res1] } {
 				$mkv::debug "FAILURE: $res1 $::errorCode $::errorInfo"
 				error $res1
+			} elseif { !$res1 } {
+				error "Stopped on $tar"
 			}
-		}
-	} result]] } {
 
-		puts stderr $result
+		}
+	} result]] || !$res1} {
+
 		puts stderr "+++ Target '$tar' failed: $result"
-		return 1
+		exit 1
 	}
 
 	if { !$mkv::p::action_performed } {

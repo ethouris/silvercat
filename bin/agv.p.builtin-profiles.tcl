@@ -67,12 +67,15 @@ set profiles {
 	}
 
 	gcc-native {
+		default {
+			depspec auto
+			depopt "-MMD -MF "
+		}
 		c++ {
 			compile "g++ -c"
 			link "g++"
 			linkdl "g++ -dynamic"
 			gendep "g++ -MM"
-			depspec auto
 		}
 
 		c {
@@ -80,11 +83,14 @@ set profiles {
 			link "gcc"
 			linkdl "gcc -dynamic"
 			gendep "gcc -MM"
-			depspec auto
 		}
 	}
 
 	clang-native {
+		default {
+			depspec auto
+			depopt "-MMD -MF "
+		}
 		c++ {
 			compile "clang++ -c"
 			link "clang++"

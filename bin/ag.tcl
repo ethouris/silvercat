@@ -89,11 +89,13 @@ namespace import agv::p::GenFileBase
 
 proc RealSourcePath target {
 	vlog "*** RESOLVING '$target' in $agv::srcdir"
-	if { [string first / $target] } {
+	while { [string first / $target] } {
 		set rem [lassign [file split $target] first]
 		if { $first == "." } {
+			vlog " ... explicit current directory: $target -- cutting off dir and repeating"
+			set target [file join {*}$rem]
+			continue
 			# We have a ./FILENAME
-			vlog " ... explicit current directory: $target"
 			return $target
 		}
 
@@ -103,6 +105,8 @@ proc RealSourcePath target {
 			vlog " ... explicit absolute directory: $target"
 			return $target
 		}
+
+		break ;# should be a repeatable if-condition
 	}
 
 	set dir $agv::srcdir
@@ -338,12 +342,13 @@ proc GenerateDepends {lang cflags source} {
 		error "Command failed: $cmd"
 	}
 
+	set deps [mkv::p::TranslateDeps $deps]
 
 	# Rules are generated in the convention of "make".
 	# Make them a plain list, as needed for "make.tcl"
-	set deps [string map { "\\\n" " " } $deps]
+	#set deps [string map { "\\\n" " " } $deps]
 	# Drop the *.o target, we don't need it.
-	set deps [lrange $deps 1 end]
+	#set deps [lrange $deps 1 end]
 	$::g_debug "Resulting deps: $deps"
 
 	return $deps
@@ -471,8 +476,23 @@ proc InstallProfile {name} {
 	set prof ""
 	if { ![array exists agv::profile] } {
 		set prof [dict get $agv::p::profiles default]
+		$::g_debug "FRESH PROFILE: adding defaults: $prof"
+	} else {
+		$::g_debug "EXISTING PROFILE: [array get agv::profile]"
 	}
-	set prof [dict merge $prof [dict get $agv::p::profiles $name]]
+	set newprof [dict get $agv::p::profiles $name]
+	$::g_debug "ADDING PROFILE CONTENTS: $newprof"
+
+	# Merge manually - official merging would overwrite keys and therefore
+	# possibly delete sub-keys, while we want
+	# to merge sub-keys.
+	array set tmp_prof $prof
+	foreach {key val} $newprof {
+		set tmp_prof($key) [dict merge [pget tmp_prof($key)] $val]
+	}
+
+	set prof [array get tmp_prof]
+	$::g_debug "MERGED: $prof"
 
 	# Remove any "comments" that might have been put there :)
 	set prof [dict remove $prof #]
@@ -667,7 +687,9 @@ proc AccessDatabase {array target args} {
 			if { $push_front } {
 				set options($lastopt) [concat $o $options($lastopt)]
 			} elseif { $lastopt in $singles } {
-				puts stderr " +++ $lastopt is expected as single - OVERRIDING existing value with $o"
+				if { [info exists options($lastopt)] } {
+					vlog " +++ $lastopt is expected as single - OVERRIDING existing value '$options($lastopt)' with $o"
+				}
 				set options($lastopt) $o
 			} else {
 				lappend options($lastopt) {*}$o
@@ -762,6 +784,7 @@ proc ProcessSources target {
 		dict lappend used_langs $lang $s
 
 		set depspec [dict:at $agv::profile($lang) depspec]
+		$::g_debug "DEPSPEC: $depspec"
 		if { $depspec == "auto" } {
 			# Check if you have depends declared explicitly. If so, use them.
 			set info [pget agv::fileinfo($s)]
@@ -798,6 +821,7 @@ proc ProcessSources target {
 
 		set lang [dict:at $info language]
 		set depspec [dict:at $agv::profile($lang) depspec]
+		set depopt [dict:at $agv::profile($lang) depopt]
 
 		# XXX This is required just to make things work, but it may be
 		# required that this be optional, and "original directory preserved"
@@ -816,13 +840,22 @@ proc ProcessSources target {
 		# by the build command line.
 		if { $depspec == "cached" } {
 			set depfile [GenFileBase $s].ag.dep
-			$::g_debug " ... generating rule for dependency file $depfile"
-			if { ![dict exists $rules $depfile] } {
-				set cflags [CompleteCflags $db $lang]
-				set depcmd [CreateDepGenCommand $lang $cflags [prelocate $s_abs $agv::srcdir]]
-				set rule "$s {\n\t!tcl gendep $agv::srcdir $depfile $depcmd\n}"
-				dict set rules $depfile $rule
+
+			# If there are no options, then add depfile generation rules.
+			if { $depopt == "" } {
+
+				# The separate-generation version. Used only when a compiler
+				# does not support file generation simultaneously with the object file.
+				$::g_debug " ... generating rule for dependency file $depfile"
+				if { ![dict exists $rules $depfile] } {
+					set cflags [CompleteCflags $db $lang]
+					set depcmd [CreateDepGenCommand $lang $cflags [prelocate $s_abs $agv::srcdir]]
+					set rule "$s {\n\t!tcl gendep $agv::srcdir $depfile $depcmd\n}"
+					dict set rules $depfile $rule
+				}
 			}
+			# Otherwise (if $depopt is nonempty), there will be a compile command
+			# generated that generates the depfile in place.
 
 			# Set "dependency list" as "please use deps saved in a file"
 			# the info.include is unavailable in this mode.
@@ -947,7 +980,7 @@ proc Process:custom target {
 
 	set rules [dict:at $db rules]
 	set phony [dict:at $db phony]
-	set outfile [dict:at $db output]
+	set outfile [ResolveOutput [dict:at $db output]]
 	set sources [dict:at $db sources]
 	set command [dict:at $db command]
 
@@ -1011,7 +1044,7 @@ proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 proc GenerateInstallTarget:program {target prefix} {
 
 	set db $agv::target($target)
-	set outfile [dict:at $db output]
+	set outfile [ResolveOutput [dict:at $db output]]
 	set icmd [GenerateInstallCommand [dict:at $db install] $outfile $prefix]
 	if { $icmd == "" } {
 		return
@@ -1027,7 +1060,7 @@ proc GenerateInstallTarget:program {target prefix} {
 proc GenerateInstallTarget:library {target prefix} {
 	set db $agv::target($target)
 
-	set libfile [dict:at $db output]
+	set libfile [ResolveOutput [dict:at $db output]]
 	set libicmd [GenerateInstallCommand [dict:at $db install] $libfile $prefix]
 
 	set cmds ""
@@ -1169,21 +1202,26 @@ proc GenerateCompileRule {db lang objfile source deps} {
 	set compiler [dict get $agv::profile($lang) compile]
 	set oflag [dict get $agv::profile($lang) compile_oflag]
 
+	set depflags ""
+	set depopt [dict:at $agv::profile($lang) depopt]
+	if { [string index $deps 0] == "<" && $depopt != "" } {
+		# Rule for deps wasn't generated then, although mentioned here.
+		# It's predicted to generate depfile and object file in one step
+		set depfile [string range $deps 1 end]
+		set depflags "${depopt}$depfile"
+		set deps "$source $deps"
+
+		$::g_debug "ONESTEP dep for '$source': $deps ($source from $agv::srcdir relative to $agv::builddir)"
+	}
+
 	# Ok, now we need to readjust source and deps to be in
 	# the srcdir
-	$::g_debug "GENERATING FROM $source: $deps"
-	#set source [RealSourcePath $source]
-	set odeps ""
-# 	foreach d $deps {
-# 		lappend odeps [RealSourcePath $d]
-# 	}
-	set odeps $deps
-	$::g_debug "GENERATING FOR  $source: $odeps"
+	$::g_debug "GENERATING FOR  $source: $deps"
 
-	set command "$compiler $cflags $source $oflag $objfile"
+	set command "$compiler $cflags $depflags $source $oflag $objfile"
 	$::g_debug "... Command: $command"
 
-	set rule "$odeps {\n\t$command\n}"
+	set rule "$deps {\n\t$command\n}"
 
 	$::g_debug "... Generated rule: $rule"
 
@@ -1191,15 +1229,70 @@ proc GenerateCompileRule {db lang objfile source deps} {
 }
 
 proc GetTargetFile target {
-	set filename [dict:at $agv::target($target) output]
+	set filename [ResolveOutput1 [dict:at $agv::target($target) output]]
 	if { $filename == "" } {
 		$::g_debug "ERROR: no filename set in this database:"
 		DebugDisplayDatabase agv::target $target
-		error "Filename not defined for $target"
+		error "Output file not defined for $target"
 	}
 
 	set dir [file dirname $target]
 	return [file join $dir $filename]
+}
+
+proc ResolveOutput1 o {
+	# Output files are expected to be:
+	# - relative path: should be relative to builddir, keep it as is
+	# - absolute path: keep it as is
+	# - -- exception: path started with // is special!
+	if { [string range $o 0 1] != "//" } {
+		return $o
+	}
+
+	set rest [string range $o 2 end]
+	lassign [split $rest :] prefix file
+	if { $prefix == "" } {
+		return ""
+	} elseif { $file == "" } {
+		set file $prefix
+		set prefix "s"
+	}
+
+	set apath ""
+
+	switch -- [string index $prefix 0] {
+		s {
+			set apath $agv::srcdir
+		}
+
+		b {
+			set apath $agv::builddir
+		}
+
+		default {
+			set var "agv::${prefix}dir"
+			if { [info exists $var] } {
+				set apath [set $var]
+			}
+		}
+	}
+
+	if { $apath == "" } {
+		error "Invalid special-path specification: $prefix (in $o) - use 's:' or 'b:'"
+	}
+
+	set abspath [file join $apath $file]
+	set relpath [prelativize $abspath $agv::builddir]
+
+	return $relpath
+}
+
+proc ResolveOutput output {
+	set out ""
+	foreach o $output {
+		lappend out [ResolveOutput1 $o]
+	}
+	return $out
 }
 
 proc GetDependentLibraryTargets target {
@@ -1488,7 +1581,7 @@ proc CheckDefinedTarget target {
 	set agv::target($target) [plist {
 		name $target
 		type custom
-		command "\[mkv::MAKE\] -C $dir $subtarget"
+		command "!tcl submake -C $dir $subtarget"
 	}]
 	return true
 }
