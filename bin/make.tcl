@@ -16,7 +16,7 @@ namespace eval p {
 
 # Forwarder for standard-method running cmdline app
 proc run args {
-	puts stderr "+run: $args"
+	vlog "+run: $args"
 	exec 2>@stderr >@stdout {*}$args
 }
 
@@ -1170,7 +1170,7 @@ proc make target {
 proc submake args {
 	set makeexec [mkv::MAKE]
 
-	set opt ""
+	set opt [list --submake-parentdir [pwd]]
 	if { $mkv::p::keep_going } {
 		lappend opt -k
 	}
@@ -1844,7 +1844,7 @@ proc pread {filename} {
 
 proc pupdate {filename contents} {
 	if { [file exists $filename] } {
-		set oldcon [pcat $filename]
+		set oldcon [pread $filename]
 		if { [string trim $oldcon] == [string trim $contents] } {
 			return 0
 		}
@@ -1989,6 +1989,10 @@ proc number_cores {} {
 	return $nc
 }
 
+proc finished_program {var ix op} {
+	puts stderr "+++ Leaving '[file normalize $::mkv::directory]'"
+}
+
 set public_export [puncomment {
 
 	# Main make facilities
@@ -2015,6 +2019,7 @@ set public_export [puncomment {
 	pdefx
 	pwrite
 	pread
+	pupdate
 	pexpand
 	pfind
 	prelativize
@@ -2064,9 +2069,8 @@ package provide make 0.5
 namespace import {*}$mkv::p::public_import
 
 # Rest of the file is interactive.
-if { !$tcl_interactive } {
 
-
+proc main argv {
 
 	set help 0
 
@@ -2079,6 +2083,7 @@ if { !$tcl_interactive } {
 		-v *verbose
 		-C makefiledir
 		-j jobs
+		--submake-parentdir parentdir
 	}
 
 	set keep_going 0
@@ -2088,6 +2093,7 @@ if { !$tcl_interactive } {
 	set help 0
 	set makefiledir .
 	set jobs 1
+	set parentdir ""
 
 	lassign [process-options $argv $g_optargs] cmd_args cmd_variables
 
@@ -2096,7 +2102,7 @@ if { !$tcl_interactive } {
 		foreach {opt arg} $g_optargs {
 			puts stderr [format "  %-8s %s" $opt: $arg]
 		}
-		exit 1
+		return 1
 	}
 
 	unset help
@@ -2128,6 +2134,10 @@ if { !$tcl_interactive } {
 # --- SET DIRECTORY - before looking for makefile ---
 	set wd [pwd]
 	set makefiledir [file normalize $makefiledir]
+	if { $parentdir != "" } {
+		puts stderr "+++ Entering '$makefiledir'"
+		trace variable parentdir u ::mkv::p::finished_program
+	}
 	cd $makefiledir
 
 	if { $mkv::makefile == "" } {
@@ -2143,7 +2153,7 @@ if { !$tcl_interactive } {
 	}
 
 	$mkv::debug "Sourcing makefile"
-	source $mkv::makefile
+	uplevel #0 source $mkv::makefile
 
 	$mkv::debug "SUMMARY DATABASE (direct targets):"
 	foreach n [array names mkv::p::db_depends] {
@@ -2170,7 +2180,7 @@ if { !$tcl_interactive } {
 	} result]] || !$res1} {
 
 		puts stderr "+++ Target '$tar' failed: $result"
-		exit 1
+		return 1
 	}
 
 	if { !$mkv::p::action_performed } {
@@ -2179,6 +2189,23 @@ if { !$tcl_interactive } {
 
 	cd $wd
 
+	return 0
+}
 
+if { !$tcl_interactive } {
+	set er [catch {main $argv} result]
+	#puts stderr "--- Interactive run finished: exception: $er result: $result"
+	if { $er } {
+		puts stderr "+++ERROR: $result"
+		exit 1
+	}
+	# Whenever result isn't translateable to a nonzero integer, coerce it to 0.
+	if { ![string is integer $result] } {
+		puts stderr "+++ (weird result: $result)"
+		set result 0
+	}
 
-} ;# end of interactive actions
+	exit $result
+}
+
+;# end of interactive actions

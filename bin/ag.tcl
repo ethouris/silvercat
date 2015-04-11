@@ -805,7 +805,19 @@ proc ProcessSources target {
 		}
 	}
 
+	set lang [dict:at $db language]
+	if { $lang == "" } {
+		set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
+		dict set db language $lang
+	}
+
+	# Write the database before running framework's hook
+	set agv::target($target) $db
+
 	ExecuteFrameworks $target compile-pre $sources
+
+	# Re-read cache after possible changes were applied by the fw.
+	set db $agv::target($target)
 
 	foreach s $sources {
 
@@ -913,13 +925,6 @@ proc ProcessSources target {
 		}
 	}
 	dict set db noinst-headers $tnh
-
-
-	set lang [dict:at $db language]
-	if { $lang == "" } {
-		set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
-		dict set db language $lang
-	}
 
 	# Write back the database
 	dict set db sources $sources
