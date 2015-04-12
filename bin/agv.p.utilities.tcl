@@ -191,7 +191,8 @@ proc PrepareGeneralTarget {} {
 			if { $t == $d } {
 				continue
 			}
-			set tdep [pget agv::target($d) depends]
+			set tdep [pget agv::target($d).depends]
+			vlog " -- CHECKING $d's depends: $tdep"
 			if {$t in $tdep} {
 				set any 1
 				vlog " -- REMOVED $t because it's a dependency of $d"

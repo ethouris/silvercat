@@ -88,11 +88,11 @@ namespace import agv::p::dict:at
 namespace import agv::p::GenFileBase
 
 proc RealSourcePath target {
-	vlog "*** RESOLVING '$target' in $agv::srcdir"
+	#vlog "*** RESOLVING '$target' in $agv::srcdir"
 	while { [string first / $target] } {
 		set rem [lassign [file split $target] first]
 		if { $first == "." } {
-			vlog " ... explicit current directory: $target -- cutting off dir and repeating"
+			#vlog " ... explicit current directory: $target -- cutting off dir and repeating"
 			set target [file join {*}$rem]
 			continue
 			# We have a ./FILENAME
@@ -102,7 +102,7 @@ proc RealSourcePath target {
 		# Check if the path is absolute already
 		# If so, return it as is
 		if { [file normalize $target] == $target } {
-			vlog " ... explicit absolute directory: $target"
+			#vlog " ... explicit absolute directory: $target"
 			return $target
 		}
 
@@ -117,7 +117,7 @@ proc RealSourcePath target {
 	# In all other cases, return the path
 	# readjusted to srcdir
 	set out [file join $dir $target]
-	vlog " ... readjusted: $out"
+	#vlog " ... readjusted: $out"
 	return $out
 }
 
@@ -530,6 +530,8 @@ proc UnaliasOption alias {
 		I { return incdir }
 		D { return defines }
 		L { return libdir }
+		libs { return ldflags }
+		lflags { return ldflags }
 	}
 
 	return $alias

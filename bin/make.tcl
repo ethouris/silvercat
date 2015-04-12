@@ -1662,8 +1662,12 @@ proc rolling_autoclean {rule debug} {
 
 	if { $deps == "" } {
 		if { [info exists db_depends($rule)] && [info exists db_actions($rule)] } {
-			$debug "WILL DELETE: $rule - no dependencies, but has a build rule"
-			lappend autoclean_candidates $rule
+			if { [info exists db_phony($rule)] } {
+				$debug "WON'T DELETE $rule - phony target not being a file"
+			} else {
+				$debug "WILL DELETE: $rule - no dependencies, but has a build rule"
+				lappend autoclean_candidates $rule
+			}
 		} else {
 			$debug "WON'T DELETE: $rule - no dependencies (generics: $generic)"
 		}
@@ -2075,14 +2079,15 @@ proc main argv {
 	set help 0
 
 	set g_optargs {
-		-k *keep_going
-		-f makefile
 		--help *help
 		-help *help
-		-d *display_debug
-		-v *verbose
 		-C makefiledir
+		-d *display_debug
+		-f makefile
+		-k *keep_going
 		-j jobs
+		-x tcl_command
+		-v *verbose
 		--submake-parentdir parentdir
 	}
 
@@ -2094,6 +2099,7 @@ proc main argv {
 	set makefiledir .
 	set jobs 1
 	set parentdir ""
+	set tcl_command ""
 
 	lassign [process-options $argv $g_optargs] cmd_args cmd_variables
 
@@ -2162,25 +2168,36 @@ proc main argv {
 
 	$mkv::debug "Executing statements"
 
-	if {$cmd_args == ""} {set cmd_args $mkv::p::first_rule}
+	if { $tcl_command != "" } {
+		# There's just a Tcl command to execute.
+		# Execute it and say it's done.
+		set mkv::p::action_performed 1
+		uplevel #0 $tcl_command
+	} elseif {$cmd_args == ""} {
+		set cmd_args $mkv::p::first_rule
+	}
 
-	set res1 true
-	if { [set xc [catch {
-		$mkv::debug "WILL MAKE: $cmd_args STARTING FROM $mkv::p::first_rule"
-		foreach tar $cmd_args {
-			$mkv::debug "Applying make to '$tar'"
-			if { [catch {make $tar} res1] } {
-				$mkv::debug "FAILURE: $res1 $::errorCode $::errorInfo"
-				error $res1
-			} elseif { !$res1 } {
-				error "Stopped on $tar"
+	# Here cmd_args can only be empty if there was an -x command.
+	# So, with -x "some tcl command" and no target will result in cmd_args == "".
+	if { $cmd_args != "" } {
+		set res1 true
+		if { [set xc [catch {
+			$mkv::debug "WILL MAKE: $cmd_args STARTING FROM $mkv::p::first_rule"
+			foreach tar $cmd_args {
+				$mkv::debug "Applying make to '$tar'"
+				if { [catch {make $tar} res1] } {
+					$mkv::debug "FAILURE: $res1 $::errorCode $::errorInfo"
+					error $res1
+				} elseif { !$res1 } {
+					error "Stopped on $tar"
+				}
+
 			}
+		} result]] || !$res1} {
 
+			puts stderr "+++ Target '$tar' failed: $result"
+			return 1
 		}
-	} result]] || !$res1} {
-
-		puts stderr "+++ Target '$tar' failed: $result"
-		return 1
 	}
 
 	if { !$mkv::p::action_performed } {
