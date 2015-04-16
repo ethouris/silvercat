@@ -2,7 +2,7 @@
 # but tcl \
 exec tclsh "$0" "$@"
 
-package require Tcl
+package require Tcl 8.5
 
 # Debug
 #package require Itcl
@@ -892,6 +892,7 @@ proc build_make_tree {target whoneedstarget} {
 	variable db_phony
 	variable db_actions
 	variable db_prereq
+	variable db_need
 	variable depth
 	
 	vlog "--- building tree for $target ---"
@@ -981,6 +982,11 @@ proc build_make_tree {target whoneedstarget} {
 	# If a phony target doesn't have action, it won't be checked for generic action, too.
 	if { [info exists db_phony($target)] && ![info exists db_actions($target)] } {
 		vlog "Target '$target' is phony and has no action - skipping"
+
+		# Update the need database HERE because pure phony target will be no longer
+		# processed. Not doing it for normal target because this will undergo
+		# further processing.
+		set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
 		return
 	}
 
@@ -1040,10 +1046,15 @@ proc make target {
 	# If the command failed, it's done after the failed command,
 	# although it's moved to q_done with status = 1.
 
+	variable q_pending
+	variable q_running
+	variable failed
+	variable q_done
+
+
 	build_make_tree $target ""
 
 	vlog "------ Target queue prepared ---- starting action ------"
-	variable q_pending
 	$mkv::debug "::: Action queue: [llength $q_pending] pending actions :::"
 
 	foreach e $q_pending {
@@ -1051,10 +1062,6 @@ proc make target {
 		$mkv::debug " -::- $target:  (need by $need): [string map {"\n" "\\n"} $ac]"
 	}
 	vlog "--------------------------------------------------------"
-
-	variable q_running
-	variable failed
-	variable q_done
 
 
 	while 1 {
@@ -1164,6 +1171,15 @@ proc make target {
 		return false
 	}
 
+	if { $q_pending != "" } {
+		vlog "--- Q STILL NOT EMPTY: $q_pending"
+		puts stderr "+++ Impossible targets:"
+		foreach p $q_pending {
+			puts stderr "    [lindex $p 0]"
+		}
+		return false
+	}
+
 	return true
 }
 
@@ -1202,6 +1218,27 @@ proc apply_action_options action {
 		set action [string range $action 1 end]
 	}
 	return $action
+}
+
+# This function checks if the given target is pure phony.
+# If not, it just returns it. Otherwise it takes its
+# dependencies and returns them filtered by this function.
+# This function returns a list, possibly also empty!
+proc resolve_pure_phony {target} {
+	variable db_phony
+	variable db_actions
+	variable db_depends
+
+	if { [info exists db_phony($target)] && ![info exists db_actions($target)] } {
+		set deplist [pget db_depends($target)]
+		set deps ""
+		foreach d $deplist {
+			lappend deps {*}[resolve_pure_phony $d]
+		}
+		return $deps
+	}
+
+	return $target
 }
 
 proc fresher_depends {target depends} {
@@ -1337,6 +1374,8 @@ proc enqueue_action {target action whoneedstarget} {
 	# Update need information (regardless if the target is done or not)
 	set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
 
+	$mkv::debug "NEED LIST:\n [array get db_need]"
+
 	# Check if the target is already done
 	if { $target in $q_done } {
 		# It's done, so don't try to do it again.
@@ -1430,7 +1469,11 @@ proc dequeue_action {nrequired} {
 			continue
 		}
 
-		set need [pget db_need($target)]
+		set need ""
+		foreach n [pget db_need($target)] {
+			lappend need {*}[resolve_pure_phony $n]
+		}
+
 		set alldone 1
 		vlog " --- checking if needs are satisfied: $need"
 		foreach n $need {
@@ -1604,30 +1647,6 @@ proc resolve_action {actual_target target whoneedstarget} {
 			puts stderr "ERROR ENQUEUING: $error"
 		}
 
-# ---	if { !$mkv::p::quiet } {
-# ---		puts $action
-# ---	}
-# ---
-# ---	set waserr [catch {exec $mkv::p::shell $mkv::p::shellcmdopt $action 2>@stderr >@stdout} result]; set retcode [pget ::errorCode]
-# ---	set failed [expr {$retcode != "NONE"}]
-# ---	if { $waserr } {
-# ---		if { $result != "" } {
-# ---			puts stderr $result
-# ---		}
-# ---		if { $failed } {
-# ---			if { !$mkv::p::ignore } {
-# ---				puts stderr "+++ Action for '$actual_target' failed!"
-# ---				lappend mkv::p::failed $target
-# ---				return false
-# ---			} else {
-# ---				puts stderr "+++ Action for '$actual_target' failed (but ignored)."
-# ---			}
-# ---		}
-# ---	} else {
-# ---		if { $result != "" } {
-# ---			puts $result
-# ---		}
-# ---	}
 	}
 
 	return true
