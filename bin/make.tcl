@@ -1972,7 +1972,7 @@ proc number_cores {} {
 	# - on Linux-compliant systems (including Cygwin), use /proc/cpuinfo
 	# - on others, return 2.
 
-	switch -glob -- $tcl_platform(os) {
+	switch -glob -- $::tcl_platform(os) {
 		CYGWIN* - Linux {
 			set nc [exec grep "^processor\[ \t\]:" /proc/cpuinfo | wc -l]
 		}
