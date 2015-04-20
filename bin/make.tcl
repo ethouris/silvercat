@@ -1928,6 +1928,7 @@ proc prelativize {path {wd .}} {
 		set wd [file normalize $wd]
 	}
 
+
 	if { [file pathtype $path] == "absolute" } {
 		set norm $path
 	} else {
@@ -1937,16 +1938,26 @@ proc prelativize {path {wd .}} {
 		cd $od
 	}
 
+	if { $norm == $wd } {
+		return .
+	}
+
 	set common 0
 	set norm_parts [file split $norm]
 	set b_parts [file split $wd]
+	set max [expr {max([llength $norm_parts],[llength $b_parts])}]
+	#puts "prelativize: NORM: $norm_parts B: $b_parts -- looking for diffs up to $max"
 	while { [lindex $norm_parts $common] == [lindex $b_parts $common] } {
 		incr common
+		if { $common == $max } {
+			break
+		}
 	}
 
 	set shift_norm_parts [lrange $norm_parts $common end]
 	set overhead [expr {[llength $b_parts]-$common}]
 	set uppath ""
+	#$mkv::debug "Adding up-dir overhead: $overhead"
 	if { $overhead > 0 } {
 		set uppath [lrepeat $overhead ..]
 	}

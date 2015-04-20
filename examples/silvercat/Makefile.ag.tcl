@@ -1,7 +1,7 @@
 # This is a silvercat file.
 
 # Make things loud (this file is used for testing)
-set mkv::p::verbose 1
+#set mkv::p::verbose 1
 
 # Usual minimum version requirement - using standard Tcl mechanism.
 package require ag 0.8
@@ -46,10 +46,14 @@ ag-profile posix-install   ;# Profile for installation rules
 
 ag-subdir party
 
+ag-profile c++ -defines ANSWER
+
 ag answer -type program -category bin ;#-fw pkg-config (framework can be also set per target)
 ag answer -packages zlib-1.2
 ag answer -sources file1.cc file2.cc
 ag answer -depends party/test
+
+ag answer -defines DEBUG -incdir $env(HOME)/.local/include
 
 ag ff -type library -category lib -sources file2.cc -headers file.h
 # Ups, file2 should be removed from the answer file!
