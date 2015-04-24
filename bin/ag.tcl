@@ -36,6 +36,9 @@ namespace eval agv {
 	variable target
 	namespace export target
 
+	variable foreign
+	namespace export foreign
+
 	# Supporting directories
 	variable directories
 	namespace export directories
@@ -1352,6 +1355,12 @@ proc GetDependentLibraryTargets target {
 
 		set type [dict:at $agv::target($d) type]
 
+		# Check if this is an imported target
+		if { [info exists agv::foreign($d)] } {
+			set type [dict:at $agv::foreign($d) type]
+			vlog "--- taking foreign target '$d' type '$type'"
+		}
+
 		if { $type == "library" } {
 			lappend libs [GetTargetFile $d]
 			set langs [dict:at $agv::target($d) language]
@@ -1615,6 +1624,7 @@ proc CheckDefinedTarget target {
 	# So, check if directory target is defined
 	set dir [lindex $parts 0]
 	if { ![info exists agv::target($dir)] } {
+		# XXX Maybe do lazy-define of the target?
 		error "Target '$target' is subdir-based, but no target '$dir' is defined (use ag-subdir to define)"
 	}
 
@@ -1626,11 +1636,24 @@ proc CheckDefinedTarget target {
 	vlog "--- Synthesizing subdir-redirection target '$target'"
 	set subtarget [file join {*}[lrange $parts 1 end]]
 
+	set foreigntarget [pget agv::foreign($target)]
+
 	set agv::target($target) [plist {
 		name $target
 		type custom
 		command "!tcl submake -C $dir $subtarget"
 	}]
+
+	# Take the output from the foreign target. Some processing parts
+	# may rely on the foreign target's data.
+	if { $foreigntarget != "" } {
+		set output  [dict:at $foreigntarget output]
+		if { $output != "" } {
+			vlog " --- importing foreign target's output (in $dir): $output"
+			set output [file join $dir $output]
+			dict set agv::target($target) output $output
+		}
+	}
 	return true
 }
 
@@ -1663,10 +1686,6 @@ proc agp-prepare-database {target {parent ""}} {
 
 	foreach dep [dict:at $agv::target($target) depends] {
 		vlog " ... DEP OF '$target': '$dep'"
-	   #if { [IsSubTarget $dep] } {
-	   #	vlog " ... not processing - assuming processed as dir"
-	   #	continue
-	   #}
 		if { ![agp-prepare-database $dep $target] } {
 			return false
 		}
@@ -1914,14 +1933,16 @@ proc ag-subdir1 target {
 	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Pinning in database."
 	set imported_targets ""
 	foreach t [ag-interp-indir eval array names agv::target] {
-		set agv::target($target/$t) [ag-interp-indir eval set agv::target($t)]
+		set agv::foreign($target/$t) [ag-interp-indir eval set agv::target($t)]
 		lappend imported_targets $target/$t
 	}
 
 	$::g_debug "AG-SUBDIR: Imported database:"
 	foreach t $imported_targets {
-		$::g_debug " --- $t (type: [pget agv::target($t).type])"
+		$::g_debug " --- $t (type: [pget agv::foreign($t).type])"
 	}
+
+	interp delete ag-interp-indir
 
 	# Restore environment
 
