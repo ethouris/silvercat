@@ -131,25 +131,25 @@ proc IsSubTarget target {
 }
 
 proc GenerateCompileFlags lang {
-	set define_flags ""
 
-	set define_flags ""
-	set defines [dict:at [pget agv::profile($lang)] defines]
-	foreach def $defines {
-		lappend define_flags -D$def
+	set defines_flag [pget agv::profile($lang).defineflag]
+	set incdir_flag [pget agv::profile($lang).incdirflag]
+	#set libdir_flag [pget agv::profile($lang).libdirflag]
+
+	set cflags [pget agv::profile($lang).cflags]
+
+	foreach flagtype {defines incdir} {
+		foreach val [pget agv::profile($lang).$flagtype] {
+			set e [set ${flagtype}_flag]$val
+			if { $e ni $cflags } {
+				lappend cflags $e
+			}
+		}
 	}
 
-	set inc_flags ""
-	set incdir [dict:at [pget agv::profile($lang)] incdir]
-	foreach def $incdir {
-		lappend inc_flags -I$def
-	}
+	$::g_debug " --- Profile-defined cflags for $lang: $cflags"
 
-	set cflags [dict:at [pget agv::profile($lang)] cflags]
-
-	$::g_debug " --- Profile-defined cflags for $lang: DEF: $define_flags INC: $inc_flags OTHER: $cflags"
-
-	return "$define_flags $cflags $inc_flags"
+	return $cflags
 }
 
 # This should do more-less the same as GenerateCompileFlags, just
@@ -158,23 +158,28 @@ proc GenerateCompileFlags lang {
 proc ProcessFlags target {
 	set db $agv::target($target)
 
-	set cflags [dict:at $db cflags]
+	set lang [dict get $db language]
+
+	set defines_flag [pget agv::profile($lang).defineflag]
+	set incdir_flag [pget agv::profile($lang).incdirflag]
+	set libdir_flag [pget agv::profile($lang).libdirflag]
+
 	set defines [dict:at $db defines]
 	set incdir [dict:at $db incdir]
+	set libdir [dict:at $db libdir]
 
-	foreach d $defines {
-		set e -D$d
-		if { [lsearch -exact $cflags $e] != -1 } {
-			lappend cflags $e
+	set cflags [dict:at $db cflags]
+
+	foreach flagtype {defines incdir libdir} {
+		foreach val [dict:at $db $flagtype] {
+			set e [set ${flagtype}_flag]$val
+			if { $e ni $cflags } {
+				lappend cflags $e
+			}
 		}
 	}
 
-	foreach d $incdir {
-		set e -I$d
-		if { [lsearch -exact $cflags $e] != -1 } {
-			lappend cflags $e
-		}
-	}
+	#puts stderr "($target) Extra cflags from special options: $cflags (from defines: $defines incdir: $incdir lang: [dict:at $db language])"
 
 	dict set agv::target($target) cflags $cflags
 }
@@ -539,6 +544,8 @@ proc UnaliasOption alias {
 		I { return incdir }
 		D { return defines }
 		L { return libdir }
+		libs { return ldflags }
+		lflags { return ldflags }
 	}
 
 	return $alias
@@ -751,22 +758,11 @@ proc ag-info {filename args} {
 	return [AccessDatabase agv::fileinfo $filename {*}$args]
 }
 
-
-proc ProcessSources target {
-
+proc ProcessLanguage target {
 	set db $agv::target($target)
 
 	set sources [dict:at $db sources]
-	set objects [dict:at $db objects]
-	set rules [dict:at $db rules]
-	set frameworks [dict:at $db frameworks]
 
-	set used_langs ""
-
-	vlog "Performing general processing for [dict:at $db type] '$target':"
-	$::g_debug "SOURCES: $sources"
-
-	set hdrs ""
 	foreach s $sources {
 
 		set info [pget agv::fileinfo($s)]
@@ -791,6 +787,39 @@ proc ProcessSources target {
 		}
 
 		dict lappend used_langs $lang $s
+		
+	}
+
+	set lang [dict:at $db language]
+	if { $lang == "" } {
+		set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
+		dict set db language $lang
+	}
+
+	# Write the database before running framework's hook
+	set agv::target($target) $db
+}
+
+
+proc ProcessSources target {
+
+	set db $agv::target($target)
+
+	set sources [dict:at $db sources]
+	set objects [dict:at $db objects]
+	set rules [dict:at $db rules]
+	set frameworks [dict:at $db frameworks]
+
+	set used_langs ""
+
+	vlog "Performing general processing for [dict:at $db type] '$target':"
+	$::g_debug "SOURCES: $sources"
+
+	set hdrs ""
+	foreach s $sources {
+
+		set info [pget agv::fileinfo($s)]
+		set lang [dict:at $info language]
 
 		set depspec [dict:at $agv::profile($lang) depspec]
 		$::g_debug "DEPSPEC: $depspec"
@@ -814,7 +843,15 @@ proc ProcessSources target {
 		}
 	}
 
+	set lang [dict:at $db language]
+
+	# Write the database before running framework's hook
+	set agv::target($target) $db
+
 	ExecuteFrameworks $target compile-pre $sources
+
+	# Re-read cache after possible changes were applied by the fw.
+	set db $agv::target($target)
 
 	foreach s $sources {
 
@@ -922,13 +959,6 @@ proc ProcessSources target {
 		}
 	}
 	dict set db noinst-headers $tnh
-
-
-	set lang [dict:at $db language]
-	if { $lang == "" } {
-		set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
-		dict set db language $lang
-	}
 
 	# Write back the database
 	dict set db sources $sources
@@ -1100,6 +1130,11 @@ proc GenerateInstallTarget:library {target prefix} {
 
 proc ProcessCompileLink {type target outfile} {
 
+	# The ProcessLanguage does only language check for all sources
+	# and defines the languages for every source file as well as for
+	# the whole target. This is required prior to ProcessFlags, as
+	# it will have to ask profile about prospective additional options.
+	ProcessLanguage $target
 	ProcessFlags $target
 	ProcessSources $target
 
@@ -2047,14 +2082,14 @@ if { $topdir != "" } {
 	set agv::toplevel [pwd]
 }
 
-puts stderr "READING DATABASE @[pwd]"
+puts stderr "READING DATABASE @[prelocate [pwd] $agv::toplevel]"
 
 # Do sourcing in the original directory of the file.
 # This is important so that all file references are relative
 # to the directory in which this file resides.
 source $agfile
 
-puts stderr "PROCESSING TO GENERATE MAKEFILE @[pwd]"
+puts stderr "PROCESSING TO GENERATE MAKEFILE @[prelocate [pwd] $agv::toplevel]"
 
 #set mkv::directory .
 

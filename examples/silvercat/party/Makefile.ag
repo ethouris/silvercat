@@ -1,6 +1,6 @@
 
 # Profile settings will be derived
-set mkv::p::verbose 1
+#set mkv::p::verbose 1
 
 ag test -type custom -output ./test.txt -sources test.txt.in -command {
 	cp ${agv::srcdir}/test.txt.in test.txt

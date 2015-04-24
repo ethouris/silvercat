@@ -100,17 +100,11 @@ namespace eval fw {
 			}
 		}
 
-		proc prepare {target} {
+		proc ExtractPackageFlags {r_db packages} {
 			variable pkg_config
+			upvar $r_db db
 
-			vlog "Running pkg-config framework for '$target'"
-			# Take the package name, extract the library
-			# parameters, apply to the database.
-			set db $::agv::target($target)
-
-			set packages [dict:at $db packages]
 			set confirmed ""
-
 			vlog "Packages: $packages"
 			foreach p $packages {
 				lassign [FindPackage $p] name version
@@ -138,6 +132,29 @@ namespace eval fw {
 				dict lappend db cflags {*}$cflags
 			}
 
+			return $confirmed
+		}
+
+		proc compile-pre {target args} {
+			vlog "Running pkg-config framework for '$target'"
+			# Take the package name, extract the library
+			# parameters, apply to the database.
+			set db $::agv::target($target)
+
+			set packages [dict:at $db packages]
+			set lang [dict:at $db language]
+			if { $lang == "" } {
+				puts stderr "NOTE: pkg-config can't propagate global package: unknown language for $target"
+			} else {
+				set globalpkg [dict:at $agv::profile($lang) packages]
+				if { $globalpkg != "" } {
+					vlog "+++--- pkg-config: propagating packages from profile: $globalpkg"
+					lappend packages {*}$globalpkg
+				}
+			}
+
+			set confirmed [ExtractPackageFlags db $packages]
+
 			set newpkg ""
 
 			foreach p $packages {
@@ -148,21 +165,15 @@ namespace eval fw {
 			$::g_debug "Confirmed packages: $confirmed"
 			$::g_debug "Unrecognized packages: $newpkg"
 
-			# Keep the list of not found packages
-			dict set db packages $newpkg
+			if { $newpkg != "" } {
+				puts stderr "ERROR: Packages not found: $newpkg"
+				error "Cannot configure due to lacking packages"
+			}
+
+			dict set db packages ""
 
 			# Write back the database
 			set ::agv::target($target) $db
-		}
-
-		proc compile-pre {target args} {
-			# This is only sanity check.
-			# If all packages were found, the packages key must be empty.
-			set pkg [dict:at $::agv::target($target) packages]
-			if { $pkg != "" } {
-				puts stderr "ERROR: Packages not found: $pkg"
-				error "Cannot configure due to lacking packages"
-			}
 		}
 	}
 }

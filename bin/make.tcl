@@ -2,7 +2,7 @@
 # but tcl \
 exec tclsh "$0" "$@"
 
-package require Tcl
+package require Tcl 8.5
 
 # Debug
 #package require Itcl
@@ -16,7 +16,7 @@ namespace eval p {
 
 # Forwarder for standard-method running cmdline app
 proc run args {
-	puts stderr "+run: $args"
+	vlog "+run: $args"
 	exec 2>@stderr >@stdout {*}$args
 }
 
@@ -892,6 +892,7 @@ proc build_make_tree {target whoneedstarget} {
 	variable db_phony
 	variable db_actions
 	variable db_prereq
+	variable db_need
 	variable depth
 	
 	vlog "--- building tree for $target ---"
@@ -981,6 +982,11 @@ proc build_make_tree {target whoneedstarget} {
 	# If a phony target doesn't have action, it won't be checked for generic action, too.
 	if { [info exists db_phony($target)] && ![info exists db_actions($target)] } {
 		vlog "Target '$target' is phony and has no action - skipping"
+
+		# Update the need database HERE because pure phony target will be no longer
+		# processed. Not doing it for normal target because this will undergo
+		# further processing.
+		set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
 		return
 	}
 
@@ -1040,10 +1046,15 @@ proc make target {
 	# If the command failed, it's done after the failed command,
 	# although it's moved to q_done with status = 1.
 
+	variable q_pending
+	variable q_running
+	variable failed
+	variable q_done
+
+
 	build_make_tree $target ""
 
 	vlog "------ Target queue prepared ---- starting action ------"
-	variable q_pending
 	$mkv::debug "::: Action queue: [llength $q_pending] pending actions :::"
 
 	foreach e $q_pending {
@@ -1051,10 +1062,6 @@ proc make target {
 		$mkv::debug " -::- $target:  (need by $need): [string map {"\n" "\\n"} $ac]"
 	}
 	vlog "--------------------------------------------------------"
-
-	variable q_running
-	variable failed
-	variable q_done
 
 
 	while 1 {
@@ -1164,13 +1171,22 @@ proc make target {
 		return false
 	}
 
+	if { $q_pending != "" } {
+		vlog "--- Q STILL NOT EMPTY: $q_pending"
+		puts stderr "+++ Impossible targets:"
+		foreach p $q_pending {
+			puts stderr "    [lindex $p 0]"
+		}
+		return false
+	}
+
 	return true
 }
 
 proc submake args {
 	set makeexec [mkv::MAKE]
 
-	set opt ""
+	set opt [list --submake-parentdir [pwd]]
 	if { $mkv::p::keep_going } {
 		lappend opt -k
 	}
@@ -1202,6 +1218,27 @@ proc apply_action_options action {
 		set action [string range $action 1 end]
 	}
 	return $action
+}
+
+# This function checks if the given target is pure phony.
+# If not, it just returns it. Otherwise it takes its
+# dependencies and returns them filtered by this function.
+# This function returns a list, possibly also empty!
+proc resolve_pure_phony {target} {
+	variable db_phony
+	variable db_actions
+	variable db_depends
+
+	if { [info exists db_phony($target)] && ![info exists db_actions($target)] } {
+		set deplist [pget db_depends($target)]
+		set deps ""
+		foreach d $deplist {
+			lappend deps {*}[resolve_pure_phony $d]
+		}
+		return $deps
+	}
+
+	return $target
 }
 
 proc fresher_depends {target depends} {
@@ -1337,6 +1374,8 @@ proc enqueue_action {target action whoneedstarget} {
 	# Update need information (regardless if the target is done or not)
 	set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
 
+	$mkv::debug "NEED LIST:\n [array get db_need]"
+
 	# Check if the target is already done
 	if { $target in $q_done } {
 		# It's done, so don't try to do it again.
@@ -1430,7 +1469,11 @@ proc dequeue_action {nrequired} {
 			continue
 		}
 
-		set need [pget db_need($target)]
+		set need ""
+		foreach n [pget db_need($target)] {
+			lappend need {*}[resolve_pure_phony $n]
+		}
+
 		set alldone 1
 		vlog " --- checking if needs are satisfied: $need"
 		foreach n $need {
@@ -1604,30 +1647,6 @@ proc resolve_action {actual_target target whoneedstarget} {
 			puts stderr "ERROR ENQUEUING: $error"
 		}
 
-# ---	if { !$mkv::p::quiet } {
-# ---		puts $action
-# ---	}
-# ---
-# ---	set waserr [catch {exec $mkv::p::shell $mkv::p::shellcmdopt $action 2>@stderr >@stdout} result]; set retcode [pget ::errorCode]
-# ---	set failed [expr {$retcode != "NONE"}]
-# ---	if { $waserr } {
-# ---		if { $result != "" } {
-# ---			puts stderr $result
-# ---		}
-# ---		if { $failed } {
-# ---			if { !$mkv::p::ignore } {
-# ---				puts stderr "+++ Action for '$actual_target' failed!"
-# ---				lappend mkv::p::failed $target
-# ---				return false
-# ---			} else {
-# ---				puts stderr "+++ Action for '$actual_target' failed (but ignored)."
-# ---			}
-# ---		}
-# ---	} else {
-# ---		if { $result != "" } {
-# ---			puts $result
-# ---		}
-# ---	}
 	}
 
 	return true
@@ -1662,8 +1681,12 @@ proc rolling_autoclean {rule debug} {
 
 	if { $deps == "" } {
 		if { [info exists db_depends($rule)] && [info exists db_actions($rule)] } {
-			$debug "WILL DELETE: $rule - no dependencies, but has a build rule"
-			lappend autoclean_candidates $rule
+			if { [info exists db_phony($rule)] } {
+				$debug "WON'T DELETE $rule - phony target not being a file"
+			} else {
+				$debug "WILL DELETE: $rule - no dependencies, but has a build rule"
+				lappend autoclean_candidates $rule
+			}
 		} else {
 			$debug "WON'T DELETE: $rule - no dependencies (generics: $generic)"
 		}
@@ -1844,7 +1867,7 @@ proc pread {filename} {
 
 proc pupdate {filename contents} {
 	if { [file exists $filename] } {
-		set oldcon [pcat $filename]
+		set oldcon [pread $filename]
 		if { [string trim $oldcon] == [string trim $contents] } {
 			return 0
 		}
@@ -1905,6 +1928,7 @@ proc prelativize {path {wd .}} {
 		set wd [file normalize $wd]
 	}
 
+
 	if { [file pathtype $path] == "absolute" } {
 		set norm $path
 	} else {
@@ -1914,16 +1938,26 @@ proc prelativize {path {wd .}} {
 		cd $od
 	}
 
+	if { $norm == $wd } {
+		return .
+	}
+
 	set common 0
 	set norm_parts [file split $norm]
 	set b_parts [file split $wd]
+	set max [expr {max([llength $norm_parts],[llength $b_parts])}]
+	#puts "prelativize: NORM: $norm_parts B: $b_parts -- looking for diffs up to $max"
 	while { [lindex $norm_parts $common] == [lindex $b_parts $common] } {
 		incr common
+		if { $common == $max } {
+			break
+		}
 	}
 
 	set shift_norm_parts [lrange $norm_parts $common end]
 	set overhead [expr {[llength $b_parts]-$common}]
 	set uppath ""
+	#$mkv::debug "Adding up-dir overhead: $overhead"
 	if { $overhead > 0 } {
 		set uppath [lrepeat $overhead ..]
 	}
@@ -1968,7 +2002,7 @@ proc number_cores {} {
 	# - on Linux-compliant systems (including Cygwin), use /proc/cpuinfo
 	# - on others, return 2.
 
-	switch -glob -- $tcl_platform(os) {
+	switch -glob -- $::tcl_platform(os) {
 		CYGWIN* - Linux {
 			set nc [exec grep "^processor\[ \t\]:" /proc/cpuinfo | wc -l]
 		}
@@ -1987,6 +2021,10 @@ proc number_cores {} {
 		return 2
 	}
 	return $nc
+}
+
+proc finished_program {var ix op} {
+	puts stderr "+++ Leaving '[file normalize $::mkv::directory]'"
 }
 
 set public_export [puncomment {
@@ -2015,6 +2053,7 @@ set public_export [puncomment {
 	pdefx
 	pwrite
 	pread
+	pupdate
 	pexpand
 	pfind
 	prelativize
@@ -2064,21 +2103,22 @@ package provide make 0.5
 namespace import {*}$mkv::p::public_import
 
 # Rest of the file is interactive.
-if { !$tcl_interactive } {
 
-
+proc main argv {
 
 	set help 0
 
 	set g_optargs {
-		-k *keep_going
-		-f makefile
 		--help *help
 		-help *help
-		-d *display_debug
-		-v *verbose
 		-C makefiledir
+		-d *display_debug
+		-f makefile
+		-k *keep_going
 		-j jobs
+		-x tcl_command
+		-v *verbose
+		--submake-parentdir parentdir
 	}
 
 	set keep_going 0
@@ -2088,6 +2128,8 @@ if { !$tcl_interactive } {
 	set help 0
 	set makefiledir .
 	set jobs 1
+	set parentdir ""
+	set tcl_command ""
 
 	lassign [process-options $argv $g_optargs] cmd_args cmd_variables
 
@@ -2096,7 +2138,7 @@ if { !$tcl_interactive } {
 		foreach {opt arg} $g_optargs {
 			puts stderr [format "  %-8s %s" $opt: $arg]
 		}
-		exit 1
+		return 1
 	}
 
 	unset help
@@ -2128,6 +2170,10 @@ if { !$tcl_interactive } {
 # --- SET DIRECTORY - before looking for makefile ---
 	set wd [pwd]
 	set makefiledir [file normalize $makefiledir]
+	if { $parentdir != "" } {
+		puts stderr "+++ Entering '$makefiledir'"
+		trace variable parentdir u ::mkv::p::finished_program
+	}
 	cd $makefiledir
 
 	if { $mkv::makefile == "" } {
@@ -2143,7 +2189,7 @@ if { !$tcl_interactive } {
 	}
 
 	$mkv::debug "Sourcing makefile"
-	source $mkv::makefile
+	uplevel #0 source $mkv::makefile
 
 	$mkv::debug "SUMMARY DATABASE (direct targets):"
 	foreach n [array names mkv::p::db_depends] {
@@ -2152,25 +2198,36 @@ if { !$tcl_interactive } {
 
 	$mkv::debug "Executing statements"
 
-	if {$cmd_args == ""} {set cmd_args $mkv::p::first_rule}
+	if { $tcl_command != "" } {
+		# There's just a Tcl command to execute.
+		# Execute it and say it's done.
+		set mkv::p::action_performed 1
+		uplevel #0 $tcl_command
+	} elseif {$cmd_args == ""} {
+		set cmd_args $mkv::p::first_rule
+	}
 
-	set res1 true
-	if { [set xc [catch {
-		$mkv::debug "WILL MAKE: $cmd_args STARTING FROM $mkv::p::first_rule"
-		foreach tar $cmd_args {
-			$mkv::debug "Applying make to '$tar'"
-			if { [catch {make $tar} res1] } {
-				$mkv::debug "FAILURE: $res1 $::errorCode $::errorInfo"
-				error $res1
-			} elseif { !$res1 } {
-				error "Stopped on $tar"
+	# Here cmd_args can only be empty if there was an -x command.
+	# So, with -x "some tcl command" and no target will result in cmd_args == "".
+	if { $cmd_args != "" } {
+		set res1 true
+		if { [set xc [catch {
+			$mkv::debug "WILL MAKE: $cmd_args STARTING FROM $mkv::p::first_rule"
+			foreach tar $cmd_args {
+				$mkv::debug "Applying make to '$tar'"
+				if { [catch {make $tar} res1] } {
+					$mkv::debug "FAILURE: $res1 $::errorCode $::errorInfo"
+					error $res1
+				} elseif { !$res1 } {
+					error "Stopped on $tar"
+				}
+
 			}
+		} result]] || !$res1} {
 
+			puts stderr "+++ Target '$tar' failed: $result"
+			return 1
 		}
-	} result]] || !$res1} {
-
-		puts stderr "+++ Target '$tar' failed: $result"
-		exit 1
 	}
 
 	if { !$mkv::p::action_performed } {
@@ -2179,6 +2236,23 @@ if { !$tcl_interactive } {
 
 	cd $wd
 
+	return 0
+}
 
+if { !$tcl_interactive } {
+	set er [catch {main $argv} result]
+	#puts stderr "--- Interactive run finished: exception: $er result: $result"
+	if { $er } {
+		puts stderr "+++ERROR: $result"
+		exit 1
+	}
+	# Whenever result isn't translateable to a nonzero integer, coerce it to 0.
+	if { ![string is integer $result] } {
+		puts stderr "+++ (weird result: $result)"
+		set result 0
+	}
 
-} ;# end of interactive actions
+	exit $result
+}
+
+;# end of interactive actions
