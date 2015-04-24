@@ -121,6 +121,15 @@ proc RealSourcePath target {
 	return $out
 }
 
+proc IsSubTarget target {
+	set p [file split $target]
+	if { [llength $p] != 1 } {
+		return true
+	}
+
+	return false
+}
+
 proc GenerateCompileFlags lang {
 
 	set defines_flag [pget agv::profile($lang).defineflag]
@@ -1507,6 +1516,10 @@ proc GenerateMakefile {target fd} {
 
 	vlog "Makefile generator: will generate sub-rules for deps: $deps"
 	foreach d $deps {
+		#if { [IsSubTarget $d] } {
+		#	vlog " --- skipping target in a subdir: $d"
+		#	continue
+		#}
 		GenerateMakefile $d $fd
 	}
 	vlog "Makefile generator: finished sub-rules for deps"
@@ -1650,6 +1663,10 @@ proc agp-prepare-database {target {parent ""}} {
 
 	foreach dep [dict:at $agv::target($target) depends] {
 		vlog " ... DEP OF '$target': '$dep'"
+	   #if { [IsSubTarget $dep] } {
+	   #	vlog " ... not processing - assuming processed as dir"
+	   #	continue
+	   #}
 		if { ![agp-prepare-database $dep $target] } {
 			return false
 		}
@@ -1885,9 +1902,26 @@ proc ag-subdir1 target {
 	set agfilepath [prelativize $agfilepath_abs]
 	$::g_debug "AG-SUBDIR: using directory '$sd'. Descending into Silverfile: '$agfilepath'"
 
-	mkv::p::run {*}[agv::AG] $agv::runmode -f $agfilepath -t $agv::toplevel
+	#mkv::p::run {*}[agv::AG] $agv::runmode -f $agfilepath -t $agv::toplevel
+	lappend cmd {*}[agv::AG] $agv::runmode -f $agfilepath -t $agv::toplevel
+	interp create ag-interp-indir
 
-	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Restoring env."
+	# XXX Pass the config and profile databases?
+	ag-interp-indir eval set argv [list [lrange $cmd 1 end]]
+	ag-interp-indir eval set me_is_slave 1
+	ag-interp-indir eval source [lindex $cmd 0]
+
+	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Pinning in database."
+	set imported_targets ""
+	foreach t [ag-interp-indir eval array names agv::target] {
+		set agv::target($target/$t) [ag-interp-indir eval set agv::target($t)]
+		lappend imported_targets $target/$t
+	}
+
+	$::g_debug "AG-SUBDIR: Imported database:"
+	foreach t $imported_targets {
+		$::g_debug " --- $t (type: [pget agv::target($t).type])"
+	}
 
 	# Restore environment
 
@@ -2061,7 +2095,9 @@ puts stderr "PROCESSING TO GENERATE MAKEFILE @[prelocate [pwd] $agv::toplevel]"
 
 set exitcode [ag-do-$agv::runmode [lrange $g_args 1 end]]
 
-exit $exitcode
+if { ![info exists me_is_slave] } {
+	exit $exitcode
+}
 
 
 } ;# END OF INTERACTIVE
