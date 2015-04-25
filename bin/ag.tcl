@@ -69,9 +69,9 @@ namespace eval agv {
 
 	# Install prefix.
 	# Will be set to the profile's default, unless overridden.
-	variable prefix
-	namespace export prefix
-	set prefix "" ;# /usr/local value should be copied from profile
+	proc prefix {} {
+		return [ag-profile general ?prefix]
+	}
 
 	# Per-file set information
 	variable fileinfo
@@ -1185,10 +1185,7 @@ proc ProcessCompileLink {type target outfile} {
 	#$::g_debug "DATABASE: agv::profile\[default\]"
 	#DebugDisplayDatabase agv::profile default
 
-	set prefix [pget agv::prefix]
-	if { $prefix == "" } {
-		set prefix [dict:at $agv::profile(default) prefix]
-	}
+	set prefix [dict:at $agv::profile(default) prefix]
 	if { $prefix == "" } {
 		puts stderr "+++ AG WARNING: 'prefix' not found - not generating install targets"
 	} else {
@@ -1283,8 +1280,9 @@ proc GetTargetFile target {
 		error "Output file not defined for $target"
 	}
 
-	set dir [file dirname $target]
-	return [file join $dir $filename]
+	return $filename
+	#set dir [file dirname $target]
+	#return [file join $dir $filename]
 }
 
 proc ResolveOutput1 o {
@@ -1362,7 +1360,9 @@ proc GetDependentLibraryTargets target {
 		}
 
 		if { $type == "library" } {
-			lappend libs [GetTargetFile $d]
+			set o [GetTargetFile $d]
+			$::g_debug " -- LIBRARY: output=[pget agv::target($d).output] ($o)"
+			lappend libs $o
 			set langs [dict:at $agv::target($d) language]
 			$::g_debug " --- Target '$d' provides libraries: $libs (language: $langs)"
 

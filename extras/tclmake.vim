@@ -13,7 +13,7 @@ syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<ag\>" matchgroup=NO
 syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<ag-profile\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,silvercatSwitch,tclNumber,tclVarRef,tclString,tcltkCommand,tclEmbeddedStatement
 syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<ag-instantiate\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,silvercatSwitch,tclNumber,tclVarRef,tclString,tcltkCommand,tclEmbeddedStatement
 
-syn keyword silvercatSwitch contained -s -h -hidir -nh -cflags -ldflags -packages -incdir -defines -depends -type -install -libspec -features -D -I -L
+syn keyword silvercatSwitch contained -s -sources -h -headers -nh -noinst-headers -hidir -cflags -L -ldflags -lflags -libs -packages -I -incdir -D -defines -depends -type -install -libspec -features -o -output -command 
 
 syn keyword tcltkCommandColor pget phas pset puncomment
 
