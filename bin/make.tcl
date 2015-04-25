@@ -1964,7 +1964,7 @@ proc prelativize {path {wd .}} {
 	set rpath [file join {*}$uppath {*}$shift_norm_parts]
 
 
-	$mkv::debug "Norma-localize in '$wd' $norm: $rpath"
+	#$mkv::debug "Norma-localize in '$wd' $norm: $rpath"
 	return $rpath
 }
 

@@ -750,7 +750,7 @@ proc AccessDatabase {array target args} {
 proc ag {target args} {
 	# Turn target name into path-based target, if a relative
 	# state directory was set.
-	$::g_debug "*** request prelativize by 'ag' for '$target'"
+	#$::g_debug "*** request prelativize by 'ag' for '$target'"
 	set tar [file join $agv::statedir $target]
 	set target [prelativize $tar]
 
@@ -1533,27 +1533,55 @@ proc GenerateMakefile {target fd} {
 	}
 	vlog "Makefile generator: finished sub-rules for deps"
 
-	# XXX This should be done different way:
-	# 1. This should be removed
-	# 2. TARGET-clean targets should be defined only for program and library, or all
-
-	set cleanname $target-clean
-	if { $target == "all" } {
-		set cleanname clean
-	} elseif { $type ni {program library custom} } {
-		vlog "Makefile generator: NOT generating clean for $target"
-		return true
-	}
-
-	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target'"
-
-	# Clean rule
-	puts $fd "rule $cleanname {
-	!tcl autoclean $target
-}"
-	puts $fd "phony $cleanname"
+	puts $fd [SynthesizeClean $target]
 
 	return true
+}
+
+proc SynthesizeClean {target} {
+	set type [dict:at $agv::target($target) type]
+
+	set parts [file split $target]
+	# use [join <parts> /] not [file join] because the latter
+	# doesn't work with empty arguments!
+	set dir [join [lrange $parts 0 end-1] /]
+	set tarname [lindex $parts end]
+
+	vlog "Makefile: checking for clean for '$tarname' in $dir ($type)"
+
+	if { $tarname == "all" } {
+		set cleanname clean
+	} else {
+		set cleanname $tarname-clean
+	}
+
+	if { $tarname != "all" && $type ni {program library custom} } {
+		return "# Not synthesizing clean target for $type $target"
+	} 
+
+	# Ok, now the generation in a subdirectory should
+	# forward it to the original makefile.
+	if { $dir != "" } {
+		vlog "Makefile generation: synthesizing '$dir/$cleanname' by forwarding to $dir"
+
+		# Add it also to the list of clean targets for that target.
+		# It's needed to spit it out as an overall clean target dependency.
+		lappend agv::target($target) cleantarget $dir/$cleanname
+
+		return "rule $dir/$cleanname {\n\t!tcl submake -C $dir $cleanname\n}\nphony $dir/$cleanname"
+	}
+
+	set cleandeps ""
+	if { $tarname == "all" } {
+		# This is a synthetic 'all' target, so take clean names from
+		# all dependent targets, if any. They must be dependencies of clean.
+		foreach d [ag all ?depends] {
+			lappend cleandeps {*}[dict:at $agv::target($d) cleantarget]
+		}
+	}
+
+	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target' (with extra $cleandeps)"
+	return "rule $cleanname $cleandeps {\n\t!tcl autoclean $target\n}\nphony $cleanname"
 }
 
 proc ag-do-make {target} {
