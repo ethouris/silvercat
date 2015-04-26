@@ -12,7 +12,7 @@
 # You can also first define a "rule" and make it "phony" later by just
 # saying "phony TARGET".
 
-set mkv::p::verbose 1
+#set mkv::p::verbose 1
 
 # The rule, as in standard Makefile, is that the first found rule is the
 # default one. It's usually called 'all'.
@@ -24,6 +24,7 @@ rule answer obj/file1.o obj/file2.o {
 	# As you can see, you can use the symbolic replacement known from Makefile.
 	# Well, treat this as an extension to Tcl; actually Tcl doesn't try to
 	# expand $, if not followed by [a-zA-Z0-9_], so this is just a text.
+	# (BUG) echo "Compiling $@"
 	[CXX] -o $@ $^
 }
 
@@ -52,7 +53,7 @@ rule clean {
 }
 
 rule cleantest {
-	!tcl autoclean-test answer
+	%autoclean-test answer
 }
 
 # Unblock this, if you want to see how the make.tcl tool works.

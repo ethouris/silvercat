@@ -212,6 +212,7 @@ proc pprun {tracername channels {vblank {}}} {
 	while 1 {
 		set ids [dict keys $res]
         foreach id $ids {
+			$mkv::debug "CHECKING JOB $id: [dict get $res $id]"
 			set fd [dict get $res $id fd]
 			if { $fd == "" } {
 				# This means that the block is prepared to run, but
@@ -220,21 +221,41 @@ proc pprun {tracername channels {vblank {}}} {
 
 				set cmdset [dict get $res $id pending]
 				set next [lassign $cmdset cmd]
+				dict set res $id next $next
 
 				set flags ""
+				set cmdspec ""
+
 				while 1 {
 					set flg [string index $cmd 0]
-					if { $flg == "@" } {
-						lappend flags silent
-						set cmd [string range $cmd 1 end]
-						continue
-					} elseif { $flg == "-" } {
-						lappend flags ignore
-						set cmd [string range $cmd 1 end]
-						continue
-					} else {
-						break
+					switch -- $flg {
+						@ {
+							lappend flags silent
+						}
+
+						- {
+							lappend flags ignore
+						}
+
+						! {
+							lappend flags cmd
+							set cmdspec [string range [lindex $cmd 0] 1 end]
+							set cmd [lrange $cmd 1 end]
+							break ;# no more possible flags in this case
+						}
+
+						% {
+							lappend flags cmd
+							set cmdspec tcl
+						}
+
+						default {
+							break
+						}
 					}
+
+					# Eat up flags until the picked up character isn't a flag
+					set cmd [string range $cmd 1 end]
 				}
 
 				dict set res $id running $cmd
@@ -244,30 +265,49 @@ proc pprun {tracername channels {vblank {}}} {
 					# Nothing more to run. Consider commandset succeeded.
 					continue
 				}
+				if { $cmdspec != "" } {
+					# This is left for future use, but currently the only
+					# special command is "tcl".
+					switch -- $cmdspec {
+						tcl {
+							if { "quiet" ni $flags } {
+								puts "%$cmd"
+							}
 
-				# You may need to resolve the command as Tcl command
-				set cmdcmd [lindex $cmd 0]
-				if { $cmdcmd == "!tcl" } {
-					set arglist [lrange $cmd 1 end]
-					# DO NOT schedule this command - execute it directly
-					if { !$mkv::p::quiet } {
-						puts "%$arglist"
+							$mkv::debug "TCL COMMAND - executing directly '$cmd' (next: $next)"
+							# DO NOT schedule this command - execute it directly
+							uplevel #0 [list eval $cmd]
+
+							# Leave the state as is. Next iteration will pick up
+							# the next command and do whatever's necessary.
+							# Most likely there's just one !tcl command, so it
+							# will be empty and the channel will be closed.
+
+							# Make fd nonempty to prevent rescheduling
+							dict set res $id fd "-"
+
+							# Remove the command from the queue
+							#set res [dict remove $res $id]
+							continue
+						}
+
+						default {
+							error "Unrecognized special command: !$cmdspec for target [dict:at $res $id target]"
+						}
 					}
-					uplevel #0 [list eval $arglist]
-
-					# Leave the state as is. Next iteration will pick up
-					# the next command and do whatever's necessary.
-					# Most likely there's just one !tcl command, so it
-					# will be empty and the channel will be closed.
-					continue
 				}
+
+				if { $fd == "-" } {
+					error "WTF fd - for cmd=$cmd"
+				}
+
 
 				set pfx ""
-				if { $njobs > 1 } {
-					set pfx "\[$id\]  "
+				if { $mkv::p::maxjobs > 1 } {
+					set pfx "\[$id/$njobs\]> "
 				}
 
-				if { !$mkv::p::quiet && "silent" ni $flags } {
+				if { "silent" ni $flags } {
 					$mkv::debug "$pfx<[pwd]>"
 					puts stderr "$pfx$cmd"
 				}
@@ -284,50 +324,66 @@ proc pprun {tracername channels {vblank {}}} {
 
 			# Ok, now it is running at least the first command
 			# (that is, $fd is nonempty)
+			# Or it was run as a Tcl command that was executed in place
 
-			if {[eof $fd]} {
+			if { $fd == "-" } {
+				set iseof 0
+				set isend 1
+				set cres ""
+				set copts ""
+				set code 0
+			} else {
+				set iseof [eof $fd]
+				set isend $iseof
+			}
 
-				# Turn of O_NDELAY or otherwise the error won't be seen!
-				fconfigure $fd -blocking 1
+			if { $isend } {
 
-				set infotext "\[$id\] "
-				# The currently running command has finished.
-				# If not to be ignored, check the exit code.
-				set err [catch {close $fd} cres copts]
-				set code [dict get $copts -code]
-				if { $code != 0 } {
-					append infotext " ***Error "
-					set ec [pget copts.-errorcode]
-					if { [lindex $ec 0] == "CHILDSTATUS" } {
-						set ec [lindex $ec 2]
-						append infotext " $ec"
-					} else {
-						set ec -1
-					}
-					if { "ignore" in $flags } {
-						append infotext "(ignored) "
-					} else {
-						set deadkey $id.$deadcount
-						incr deadcount
+				# Do this action for external processes only.
+				if { $iseof } {
 
-						# The command failed, so interrupt the sequence right now.
-						dict set ret $deadkey target [dict get $res $id target]
-						dict set ret $deadkey cmdset [dict get $res $id cmdset]
-						dict set ret $deadkey code $code
-						dict set ret $deadkey error $ec
-						dict set ret $deadkey failed [dict get $res $id running]
-						dict set ret $deadkey result $cres
-						dict set ret $deadkey options $copts
+					# Turn of O_NDELAY or otherwise the error won't be seen!
+					fconfigure $fd -blocking 1
 
-						# and remove the channel from the res list
-						set res [dict remove $res $id]
-						if { $njobs > 1 } {
-							puts stderr "$infotext: $cmd"
+					set infotext "\[$id\] "
+					# The currently running command has finished.
+					# If not to be ignored, check the exit code.
+					set err [catch {close $fd} cres copts]
+					set code [dict get $copts -code]
+					if { $code != 0 } {
+						append infotext " ***Error "
+						set ec [pget copts.-errorcode]
+						if { [lindex $ec 0] == "CHILDSTATUS" } {
+							set ec [lindex $ec 2]
+							append infotext " $ec"
+						} else {
+							set ec -1
 						}
-						continue
-					}
+						if { "ignore" in $flags } {
+							append infotext "(ignored) "
+						} else {
+							set deadkey $id.$deadcount
+							incr deadcount
 
-					# Continue, if the errors for $cmd should be ignored.
+							# The command failed, so interrupt the sequence right now.
+							dict set ret $deadkey target [dict get $res $id target]
+							dict set ret $deadkey cmdset [dict get $res $id cmdset]
+							dict set ret $deadkey code $code
+							dict set ret $deadkey error $ec
+							dict set ret $deadkey failed [dict get $res $id running]
+							dict set ret $deadkey result $cres
+							dict set ret $deadkey options $copts
+
+							# and remove the channel from the res list
+							set res [dict remove $res $id]
+							if { $njobs > 1 } {
+								puts stderr "$infotext: $cmd"
+							}
+							continue
+						}
+
+						# Continue, if the errors for $cmd should be ignored.
+					}
 				}
 
 				# Either succeeded, or maybe failed, but ignored.
@@ -356,11 +412,16 @@ proc pprun {tracername channels {vblank {}}} {
 				dict set res $id fd ""
 
 			} else {
+				set pfx ""
+				if { $mkv::p::maxjobs > 1 } {
+					set pfx "\[$id/$njobs\]  "
+				}
+
 				# Roll until EOF or EAGAIN.
 				# When EAGAIN, it will be retried at the next roll.
 				# When EOF, it will be removed from the list at the next roll.
 				while { [gets $fd linein] != -1 } {
-					puts "\[$id\] $linein"
+					puts "$pfx$linein"
 				}
 			}
         }
@@ -381,11 +442,31 @@ proc pprun {tracername channels {vblank {}}} {
 		# Ok, now clear the variable
 		set $tracername ""
 
-		# If vwait causes error, it may happen that the process
-		# has finished before it could be added to the event list
-		# (just the script had no opportunity to see it). If this
-		# happens, just go on, and in the next roll you'll find it out anyway.
-		catch {vwait $tracername}
+		# Now check for every target if they all have $fd that are not
+		# finished. Targets that have no fd in running state should be ignored
+		set nrun 0
+		foreach {id data} $res {
+			set fd [pget data.fd]
+			if { $fd == "" || $fd == "-" } {
+				continue
+			}
+			set isfinished 0
+			if { [catch {eof $fd} isfinished] || $isfinished} {
+				continue
+			}
+			incr nrun
+		}
+		
+		if { $nrun } {
+
+			$mkv::debug "STILL RUNNING: $mkv::p::q_running - waiting for finish any of $nrun running processes"
+
+			# If vwait causes error, it may happen that the process
+			# has finished before it could be added to the event list
+			# (just the script had no opportunity to see it). If this
+			# happens, just go on, and in the next roll you'll find it out anyway.
+			catch {vwait $tracername}
+		}
 
 		#puts "UNBLOCKED BY: [set $tracername]"
     }
@@ -1100,6 +1181,7 @@ proc make target {
 
 			# If there are no free channels, do nothing.
 			if { $lremain == 0 } {
+				$mkv::debug "+++ No more free channels - waiting for any process to finish"
 				return
 			}
 
@@ -1200,25 +1282,6 @@ proc submake args {
 	run {*}$makeexec {*}$opt
 }
 
-proc apply_action_options action {
-	# reset options
-	set mkv::p::quiet 0
-	set mkv::p::ignore 0
-	set mkv::p::escaped 0
-	
-	while 1 {
-		set first [string index $action 0]
-		if { $first == "@" } {
-		        set mkv::p::quiet 1
-		} elseif { $first == "-" } {
-		        set mkv::p::ignore 1
-		} elseif { $first == "!" } {
-		        set mkv::p::escaped 1
-		} else break
-		set action [string range $action 1 end]
-	}
-	return $action
-}
 
 # This function checks if the given target is pure phony.
 # If not, it just returns it. Otherwise it takes its
@@ -1603,40 +1666,39 @@ proc resolve_action {actual_target target whoneedstarget} {
         set mkv::p::action_performed 1
 		# apply standard make options
 
-		set action [apply_action_options [flatten $action]]
+		set action [flatten $action]
 
-		if { $mkv::p::escaped } {
-			set command [lindex $action 0]
-			set arglist [lrange $action 1 end]
-
-			switch -- $command {
-				link {
-					set linked_target $arglist
-					# XXX handle multiple targets in !link command
-					if { ![info exists db_actions($linked_target)] } {
-						puts stderr \
-						     "+++ Can't resolve $linked_target as a link to action"
-						lappend mkv::p::failed $target
-						return false
-					}
-
-					# Do substitution before altering target
-					if { ![resolve_action $target $linked_target $whoneedstarget] } {
-						lappend mkv::p::failed $target
-						return false
-					}
-					continue
-				}
-
-				tcl {
-					if { !$mkv::p::quiet } {
-						puts "%$arglist"
-					}
-					uplevel #0 [list eval $arglist]
-					continue
-				}
+		# Check only for "link" request
+		set link ""
+		switch -- [string index $action 0] {
+			= {
+				set link [string trim [string range $action 1 end]]
 			}
 
+			! {
+				if { [lindex $action 0] == "!link" } {
+					set link [lrange $action 1 end]
+				}
+			}
+		}
+
+		# If so, do recursive call to resolve_action to pick up the right target
+		if { $link != "" } {
+			set linked_target $link
+			# XXX handle multiple targets in !link command
+			if { ![info exists db_actions($linked_target)] } {
+				puts stderr \
+				"+++ Can't resolve $linked_target as a link to action"
+				lappend mkv::p::failed $target
+				return false
+			}
+
+			# Do substitution before altering target
+			if { ![resolve_action $target $linked_target $whoneedstarget] } {
+				lappend mkv::p::failed $target
+				return false
+			}
+			continue
 		}
 
 		# The remaining 'action' is the extracted commandset.
