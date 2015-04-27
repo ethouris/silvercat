@@ -24,7 +24,7 @@ rule answer obj/file1.o obj/file2.o {
 	# As you can see, you can use the symbolic replacement known from Makefile.
 	# Well, treat this as an extension to Tcl; actually Tcl doesn't try to
 	# expand $, if not followed by [a-zA-Z0-9_], so this is just a text.
-	# (BUG) echo "Compiling $@"
+	@echo "Linking $@"
 	[CXX] -o $@ $^
 }
 

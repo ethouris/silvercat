@@ -120,17 +120,17 @@ variable ignore
 # The [pprepare] function prepares the line-oriented set of commands
 # to be run sequentially. This is a required filter before putting it
 # to [ppupdate].
-proc pprepare {cmd} {
+proc pprepare {cmdlines} {
 	set res ""
 
 	set channels ""
 
-	vlog ":: pprepare: '$cmd' (original)"
-	set cmd [string map {"\\\n" "" "\n\\" ""} $cmd]
-	vlog ":: pprepare: '$cmd' (unbackslashed)"
-	set cmdlines [split $cmd \n]
-	set cmdset ""
-	vlog ":: Processing cmdlines: $cmdlines"
+    #vlog ":: pprepare: '$cmd' (original)"
+    #set cmd [string map {"\\\n" "" "\n\\" ""} $cmd]
+    #vlog ":: pprepare: '$cmd' (unbackslashed)"
+    #set cmdlines [split $cmd \n]
+    #set cmdset ""
+    vlog ":: Processing cmdlines: $cmdlines"
 	foreach c $cmdlines {
 		set c [string trim $c]
 		if { $c == "" || [string index $c 0] == "#" } {
@@ -853,6 +853,7 @@ proc rules {rulelist action} {
 }
 
 proc subst_action action {
+	set action [string map {"\\\n" "" "\n\\" ""} $action]
 	set lines [split $action \n]
 	set lines_target {}
 	foreach action $lines {
@@ -1085,8 +1086,8 @@ proc build_make_tree {target whoneedstarget} {
 
 	if { $need_build } {
 		vlog "File '$target' $reason - resolving action for '$target'"
-		if { ![resolve_action $target $target $whoneedstarget] } {
-            error "Action failure for '$target'"
+		if { ![enqueue_target $target $target $whoneedstarget] } {
+            error "Action resolution failure for '$target'"
         }
 	} elseif { $hasdepends } {
 		vlog "Checking if $target is fresh:"
@@ -1101,8 +1102,8 @@ proc build_make_tree {target whoneedstarget} {
 
 		if { $stale } {
 			vlog "Resolving make action for $target (stale against $depend)"
-			if {![resolve_action $target $target $whoneedstarget]} {
-				error "Action failure for $target"
+			if {![enqueue_target $target $target $whoneedstarget]} {
+				error "Action resolution failure for $target"
 			}
 		} else {
 			vlog "File $target is fresh, so won't be made"
@@ -1607,6 +1608,24 @@ proc dequeue_action {nrequired} {
 # If action is taken as a link to another target, second argument
 # is the target actually built; first is only the indetifier of
 # the action, which should be taken.
+proc enqueue_target {actual_target target whoneedstarget} {
+	set actions [resolve_action $actual_target $target $whoneedstarget]
+	if { $actions == "" } {
+		return false
+	}
+
+	# The remaining 'action' is the extracted commandset.
+	# Now enqueue the action.
+	$mkv::debug "ENQUEUING $actual_target with ACTIONS: {$actions} NEEDED BY: $whoneedstarget"
+
+	if { [catch {enqueue_action $actual_target $actions $whoneedstarget} error] } {
+		puts stderr "ERROR ENQUEUING: $error"
+		return false
+	}
+
+	return true
+}
+
 proc resolve_action {actual_target target whoneedstarget} {
 
 	variable db_depends
@@ -1662,6 +1681,8 @@ proc resolve_action {actual_target target whoneedstarget} {
 	vlog "ACTUAL ACTION: $actions"
 	#Set special values
 
+	set actual_actions ""
+
 	foreach action $actions {
         set mkv::p::action_performed 1
 		# apply standard make options
@@ -1690,28 +1711,21 @@ proc resolve_action {actual_target target whoneedstarget} {
 				puts stderr \
 				"+++ Can't resolve $linked_target as a link to action"
 				lappend mkv::p::failed $target
-				return false
+				return
 			}
 
 			# Do substitution before altering target
 			if { ![resolve_action $target $linked_target $whoneedstarget] } {
 				lappend mkv::p::failed $target
-				return false
+				return
 			}
 			continue
 		}
 
-		# The remaining 'action' is the extracted commandset.
-		# Now enqueue the action.
-		$mkv::debug "ENQUEUING $actual_target with ACTION: {$action} NEEDED BY: $whoneedstarget"
-	
-		if { [catch {enqueue_action $actual_target $action $whoneedstarget} error] } {
-			puts stderr "ERROR ENQUEUING: $error"
-		}
-
+		lappend actual_actions $action
 	}
 
-	return true
+	return $actual_actions
 }
 
 # Autoclean automaton
