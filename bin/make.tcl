@@ -1715,10 +1715,12 @@ proc resolve_action {actual_target target whoneedstarget} {
 			}
 
 			# Do substitution before altering target
-			if { ![resolve_action $target $linked_target $whoneedstarget] } {
+			set newactions [resolve_action $target $linked_target $whoneedstarget]
+			if { $newactions == "" } {
 				lappend mkv::p::failed $target
 				return
 			}
+			lappend actual_actions {*}$newactions
 			continue
 		}
 
