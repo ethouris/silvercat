@@ -1150,7 +1150,7 @@ proc make target {
 
 		set channels ""
 		foreach target2start [mkv::p::dequeue_action $mkv::p::maxjobs] {
-			vlog "--- DEQUEUED: $target2start"
+			vlog "--- DEQUEUED(init): $target2start"
 			lassign $target2start target action whoneedstarget
 			vlog "--- TARGET: $target ACTION: $action PARENT: $whoneedstarget"
 
@@ -1211,8 +1211,10 @@ proc make target {
 					}
 				}
 
+				vlog "+++ Adding done target: $target"
+
 				# Add to done targets (regardless of the status)
-				lappend q_done $target
+				lappend q_done $target {*}[mkv::p::resolve_pure_phony $target]
 			}
 
 			# Don't schedule anything if requested to exit on failure.
@@ -1229,6 +1231,7 @@ proc make target {
 			# Get the next action that can be done
 			set channels ""
 			foreach target2start [mkv::p::dequeue_action $lremain] {
+				vlog "--- DEQUEUED(cont): $target2start"
 				lassign $target2start target action whoneedstarget
 				lappend channels [list $target [mkv::p::pprepare $action]]
 			}
@@ -1535,11 +1538,17 @@ proc dequeue_action {nrequired} {
 
 		set need ""
 		foreach n [pget db_need($target)] {
-			lappend need {*}[resolve_pure_phony $n]
+			foreach pp [resolve_pure_phony $n] {
+				# May happen that dependency leads to itself
+				if { $pp != $target } {
+					lappend need $pp
+				}
+			}
 		}
 
 		set alldone 1
-		vlog " --- checking if needs are satisfied: $need"
+		vlog " --- checking if needs are satisfied: $need (resolved from: [pget db_need($target)])"
+		$mkv::debug "CHECKING '$need' in done:{$q_done} and failed:{$failed}"
 		foreach n $need {
 			# Check if all "needs" are already done
 			if { $n in $q_done } {
@@ -1910,6 +1919,11 @@ proc pget {name {default ""}} {
     return $lname
 }
 
+proc palias {name body} {
+	set procbody "return \[$body {*}\$args\]"
+	namespace inscope :: proc $name args $procbody
+}
+
 proc pdef {name args} {
 	if { [llength $args] == 1 } {
 		set args [lindex $args 0]
@@ -1996,6 +2010,18 @@ proc pfind {args} {
 	}
 
 	return $outlist
+}
+
+proc psearch {files args} {
+	set out ""
+
+	foreach file $files {
+		foreach dir $args {
+			lappend out {*}[glob -nocomplain [file join $dir $file]]
+		}
+	}
+
+	return $out
 }
 
 proc prelativize {path {wd .}} {
@@ -2126,6 +2152,7 @@ set public_export [puncomment {
 	pinit
 	pget
 	phas
+	palias
 	pdef
 	pdefv
 	pdefx
@@ -2134,6 +2161,7 @@ set public_export [puncomment {
 	pupdate
 	pexpand
 	pfind
+	psearch
 	prelativize
 	plist
 	pmap
