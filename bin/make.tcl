@@ -1085,7 +1085,7 @@ proc build_make_tree {target whoneedstarget} {
 	}
 
 	if { $need_build } {
-		vlog "File '$target' $reason - resolving action for '$target'"
+		vlog "File '$target' $reason - resolving action for '$target' (@[pwd])"
 		if { ![enqueue_target $target $target $whoneedstarget] } {
             error "Action resolution failure for '$target'"
         }
