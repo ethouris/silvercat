@@ -100,7 +100,7 @@ variable ignore
 #    Subsequent commands are provided in separate lines.
 #    Every pack is executed line by line, although multiple packs
 #    can be started simulaneously parallelly.
-#    Use [ppadd <command>...] where every command can be multi-line command pack.
+#    Use [ppupdate <command>...] where every command can be multi-line command pack.
 #    This command only reads every "command" (being a kind-of shell script)
 #    and turns it into a list of single commands to execute.
 # 2. Pass the prepared command packs to [pprun] command
@@ -129,7 +129,7 @@ proc pprepare {cmdlines} {
     #set cmd [string map {"\\\n" "" "\n\\" ""} $cmd]
     #vlog ":: pprepare: '$cmd' (unbackslashed)"
     #set cmdlines [split $cmd \n]
-    #set cmdset ""
+    set cmdset ""
     vlog ":: Processing cmdlines: $cmdlines"
 	foreach c $cmdlines {
 		set c [string trim $c]
@@ -395,6 +395,7 @@ proc pprun {tracername channels {vblank {}}} {
 					# Hooray! We've done all commands and all were successful.
 					set deadkey $id.$deadcount
 					incr deadcount
+					$mkv::debug "FINISHED CMD LIST for '[dict get $res $id target]'"
 
 					dict set ret $deadkey target [dict get $res $id target]
 					dict set ret $deadkey cmdset [dict get $res $id cmdset]
@@ -928,6 +929,7 @@ proc is_target_stale {target depend} {
 }
 
 proc depends {args} {
+	variable db_depends
 	if { $args == {} } { set args [array names db_depends] }
 	
 	foreach dep $args {
@@ -975,6 +977,7 @@ proc build_make_tree {target whoneedstarget} {
 	variable db_actions
 	variable db_prereq
 	variable db_need
+	variable q_done
 	variable depth
 	
 	vlog "--- building tree for $target ---"
@@ -1062,15 +1065,15 @@ proc build_make_tree {target whoneedstarget} {
  	}
 
 	# If a phony target doesn't have action, it won't be checked for generic action, too.
-	if { [info exists db_phony($target)] && ![info exists db_actions($target)] } {
-		vlog "Target '$target' is phony and has no action - skipping"
-
-		# Update the need database HERE because pure phony target will be no longer
-		# processed. Not doing it for normal target because this will undergo
-		# further processing.
-		set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
-		return
-	}
+    # --- if { [info exists db_phony($target)] && ![info exists db_actions($target)] } {
+    # --- 	vlog "Target '$target' is phony and has no action - skipping"
+    # --- 
+    # --- 	# Update the need database HERE because pure phony target will be no longer
+    # --- 	# processed. Not doing it for normal target because this will undergo
+    # --- 	# further processing.
+    # --- 	set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
+    # --- 	return
+    # --- }
 
 	set stale 0
 	
@@ -1107,6 +1110,8 @@ proc build_make_tree {target whoneedstarget} {
 			}
 		} else {
 			vlog "File $target is fresh, so won't be made"
+			# Good, but it it's fresh, then mark it as done.
+			lappend q_done $target
 		}
 	} else {
 		vlog "File $target exists and has no dependencies, so won't be made"
@@ -1150,7 +1155,7 @@ proc make target {
 
 		set channels ""
 		foreach target2start [mkv::p::dequeue_action $mkv::p::maxjobs] {
-			vlog "--- DEQUEUED(init): $target2start"
+			vlog "--- DEQUEUED/init: $target2start"
 			lassign $target2start target action whoneedstarget
 			vlog "--- TARGET: $target ACTION: $action PARENT: $whoneedstarget"
 
@@ -1172,7 +1177,14 @@ proc make target {
 			vlog "+++ VBLANK RUNNING: $q_running"
 			upvar $r_res res
 			upvar $r_ret ret
-			$mkv::debug "VBLANK: res=$res ret=$ret"
+			$mkv::debug "VBLANK: -- res:"
+			foreach {rk rv} $res {
+				$mkv::debug "      : $rk -- $rv"
+			}
+			$mkv::debug "VBLANK: -- ret:"
+			foreach {rk rv} $ret {
+				$mkv::debug "      : $rk -- $rv"
+			}
 			set lres [expr [llength $res]/2]
 			set lremain [expr $mkv::p::maxjobs-$lres]
 			$mkv::debug "+++ Channels used: $lres remaining: $lremain"
@@ -1190,8 +1202,7 @@ proc make target {
 
 			# Check which actions have been finished. Remove them from q_running.
 			# We have here just one action
-			lassign $ret deadkey retdb
-			if { $retdb != "" } {
+			foreach {deadkey retdb} $ret {
 				set target [dict get $retdb target]
 				vlog "+++ Found finished target: $target"
 
@@ -1211,10 +1222,11 @@ proc make target {
 					}
 				}
 
-				vlog "+++ Adding done target: $target"
+				set done_targets [concat $target [mkv::p::resolve_pure_phony $target]]
+				vlog "+++ Adding done target: $done_targets (for the sake of $target)"
 
 				# Add to done targets (regardless of the status)
-				lappend q_done $target {*}[mkv::p::resolve_pure_phony $target]
+				lappend q_done $target {*}$done_targets
 			}
 
 			# Don't schedule anything if requested to exit on failure.
@@ -1231,7 +1243,7 @@ proc make target {
 			# Get the next action that can be done
 			set channels ""
 			foreach target2start [mkv::p::dequeue_action $lremain] {
-				vlog "--- DEQUEUED(cont): $target2start"
+				vlog "--- DEQUEUED/cont: $target2start"
 				lassign $target2start target action whoneedstarget
 				lappend channels [list $target [mkv::p::pprepare $action]]
 			}
@@ -1441,7 +1453,10 @@ proc enqueue_action {target action whoneedstarget} {
 	# Update need information (regardless if the target is done or not)
 	set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
 
-	$mkv::debug "NEED LIST:\n [array get db_need]"
+	$mkv::debug "NEED LIST (after adding need '$target' for '$whoneedstarget':"
+	foreach {user needed} [array get db_need] {
+		$mkv::debug "$user NEEDS $needed"
+	}
 
 	# Check if the target is already done
 	if { $target in $q_done } {
@@ -1547,7 +1562,7 @@ proc dequeue_action {nrequired} {
 		}
 
 		set alldone 1
-		vlog " --- checking if needs are satisfied: $need (resolved from: [pget db_need($target)])"
+		vlog " --- checking if needs for $target are satisfied: $need (resolved from: [pget db_need($target)])"
 		$mkv::debug "CHECKING '$need' in done:{$q_done} and failed:{$failed}"
 		foreach n $need {
 			# Check if all "needs" are already done
@@ -1575,6 +1590,21 @@ proc dequeue_action {nrequired} {
 			vlog " --- requires '$n' which is not yet done."
 			# but the target should be considered next time!
 			lappend stalled [list $target $action $whoneedstarget]
+			continue
+		}
+
+		if { [string trim $action] == "" } {
+			vlog " --- is an empty target -- marking as done"
+			# This is probably a phony target that just need to fit
+			# well in the dependency and build tree. Mark it done
+			# and do not return it as scheduled.
+			lappend q_done $target
+
+			# That target won't land in stalled, so it will be
+			# removed from the pending list.
+
+			# If the target has some failed target in the dependencies,
+			# then it has been moved to failed queue already.
 			continue
 		}
 
@@ -1619,9 +1649,6 @@ proc dequeue_action {nrequired} {
 # the action, which should be taken.
 proc enqueue_target {actual_target target whoneedstarget} {
 	set actions [resolve_action $actual_target $target $whoneedstarget]
-	if { $actions == "" } {
-		return false
-	}
 
 	# The remaining 'action' is the extracted commandset.
 	# Now enqueue the action.
@@ -1649,14 +1676,20 @@ proc resolve_action {actual_target target whoneedstarget} {
 
     vlog "Resolving action defined for '$target'$sake"
 	set generic ""
+	set phony false
 	
 	if { ![info exists db_actions($target)] } {
         vlog "No specific actions found for '$target' - checking generic actions"
 		set generic [find_generic $actual_target]
 		if { $generic == "" } {
-			puts stderr "+++ No rule to make target '$target'"
-            lappend mkv::p::failed $target
-            return false
+			if { [info exists db_phony($target)] } {
+				vlog "No generic actions, but target is phony - going on with empty action"
+				set phony true
+			} else {
+				puts stderr "+++ No rule to make target '$target'"
+				lappend mkv::p::failed $target
+				return false
+			}
 		} else {
             vlog "Found generic '$generic' applicable for target '$target'"
         }
@@ -1664,76 +1697,83 @@ proc resolve_action {actual_target target whoneedstarget} {
 
 	set actions ""
 	set depends ""
-	if { $generic == "" } {
-		vlog "Resolving action (direct):\n>>> $db_actions($target)"
-		set depends $db_depends($actual_target)
-		set actions [apply_special_variables $db_actions($target) $actual_target]
+	if { $phony } {
+		vlog "NOT Resolving action for a phony target: $target (adding empty action)"
+		return ""
 	} else {
-		vlog "Resolving action (generic):\n>>> $db_actions($generic)"
-		set depends [generate_depends $actual_target $generic $db_depends($generic)]
 
-		# Update dependencies for generated generic target
-		set db_depends($actual_target) $depends
-		set actions [apply_special_variables $db_actions($generic) $actual_target]
-	}
+		if { $generic == "" } {
+			vlog "Resolving action (direct):\n>>> $db_actions($target)"
+			set depends $db_depends($actual_target)
+			set actions [apply_special_variables $db_actions($target) $actual_target]
+		} else {
+			vlog "Resolving action (generic):\n>>> $db_actions($generic)"
+			set depends [generate_depends $actual_target $generic $db_depends($generic)]
 
-	vlog "Actions resolved:\n>>> $actions"
+			# Update dependencies for generated generic target
+			set db_depends($actual_target) $depends
+			set actions [apply_special_variables $db_actions($generic) $actual_target]
+		}
 
-	if { [catch {
-		# XXX Action variable substitution replaced only here!
-		set actions [subst_action $actions]
-	} result] } {
-		vlog "Substitution failed: $result"
-		error $::errorInfo
-	}
+		vlog "Actions resolved:\n>>> $actions"
 
-	vlog "ACTUAL ACTION: $actions"
-	#Set special values
+		if { [catch {
+			# XXX Action variable substitution replaced only here!
+			set actions [subst_action $actions]
+		} result] } {
+			vlog "Substitution failed: $result"
+			error $::errorInfo
+		}
 
-	set actual_actions ""
+		vlog "ACTUAL ACTION: $actions"
+		#Set special values
 
-	foreach action $actions {
-        set mkv::p::action_performed 1
-		# apply standard make options
+		set actual_actions ""
 
-		set action [flatten $action]
+		foreach action $actions {
+			set mkv::p::action_performed 1
+			# apply standard make options
 
-		# Check only for "link" request
-		set link ""
-		switch -- [string index $action 0] {
-			= {
-				set link [string trim [string range $action 1 end]]
-			}
+			set action [flatten $action]
 
-			! {
-				if { [lindex $action 0] == "!link" } {
-					set link [lrange $action 1 end]
+			# Check only for "link" request
+			set link ""
+			switch -- [string index $action 0] {
+				= {
+					set link [string trim [string range $action 1 end]]
+				}
+
+				! {
+					if { [lindex $action 0] == "!link" } {
+						set link [lrange $action 1 end]
+					}
 				}
 			}
-		}
 
-		# If so, do recursive call to resolve_action to pick up the right target
-		if { $link != "" } {
-			set linked_target $link
-			# XXX handle multiple targets in !link command
-			if { ![info exists db_actions($linked_target)] } {
-				puts stderr \
-				"+++ Can't resolve $linked_target as a link to action"
-				lappend mkv::p::failed $target
-				return
+			# If so, do recursive call to resolve_action to pick up the right target
+			if { $link != "" } {
+				set linked_target $link
+				# XXX handle multiple targets in !link command
+				if { ![info exists db_actions($linked_target)] } {
+					puts stderr \
+					"+++ Can't resolve $linked_target as a link to action"
+					lappend mkv::p::failed $target
+					return
+				}
+
+				# Do substitution before altering target
+				set newactions [resolve_action $target $linked_target $whoneedstarget]
+				if { $newactions == "" } {
+					lappend mkv::p::failed $target
+					return
+				}
+				lappend actual_actions {*}$newactions
+				continue
 			}
 
-			# Do substitution before altering target
-			set newactions [resolve_action $target $linked_target $whoneedstarget]
-			if { $newactions == "" } {
-				lappend mkv::p::failed $target
-				return
-			}
-			lappend actual_actions {*}$newactions
-			continue
+			lappend actual_actions $action
 		}
 
-		lappend actual_actions $action
 	}
 
 	return $actual_actions
