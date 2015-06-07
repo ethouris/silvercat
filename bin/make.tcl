@@ -25,6 +25,7 @@ variable db_actions
 variable db_generic
 variable db_phony
 variable db_need
+variable db_stale
 
 set maxjobs 1
 
@@ -889,8 +890,13 @@ proc subst_action action {
 proc is_target_stale {target depend} {
 	variable db_phony
 	variable db_depends
+	variable db_stale
 
-	$mkv::debug "Checking if $target is stale against $depend"
+	$mkv::debug "is_target_stale: Checking if '$target' is stale against '$depend'"
+	if { [info exists db_stale($depend)] } {
+		vlog "Target '$depend' is already stale, therefore so is '$target'"
+		return true
+	}
 
 	# Check if $depend is phony.
 	# If phony, then just forward the request to its depends.
@@ -977,10 +983,11 @@ proc build_make_tree {target whoneedstarget} {
 	variable db_actions
 	variable db_prereq
 	variable db_need
+	variable db_stale
 	variable q_done
 	variable depth
 	
-	vlog "--- building tree for $target ---"
+	$mkv::debug "--- building tree for $target ---"
 
 	# Deny making targets, which already failed
 	if { [lsearch $mkv::p::failed $target] != -1 } {
@@ -1024,11 +1031,15 @@ proc build_make_tree {target whoneedstarget} {
 
 		set depends [getdeps $target $depnames]
 		foreach depend $depends {
-			vlog "Considering $depend as dependency for $target"
-			if { [catch {build_make_tree $depend $target} result] } {
+			$mkv::debug "Considering $depend as dependency for $target"
+			debug_indent+
+			set res [catch {build_make_tree $depend $target} result]
+			debug_indent-
+			$mkv::debug "... <--- back at '$target'"
+			if { $res } {
 				$mkv::debug "ERROR: '$result' $::errorCode $::errorInfo"
 				set status 0
-				vlog "Making $depend failed, so $target won't be made"
+				$mkv::debug "Making $depend failed, so $target won't be made"
 				if { $mkv::p::keep_going } {
 					vlog "- although continuing with other targets (-k)"
 				} else {
@@ -1044,7 +1055,10 @@ proc build_make_tree {target whoneedstarget} {
 			vlog "Considering $p as prerequisite for $target"
 			if { ![file exists $p] } {
 				incr depth
+				mkv::p::debug_indent+
 				set res [catch {build_make_tree $p $target} result]
+				mkv::p::debug_indent-
+				$mkv::debug "... <--- back at '$target'"
 				incr depth -1
 				if { $res } {
 					$mkv::debug "ERROR: '$result' $::errorCode $::errorInfo"
@@ -1099,6 +1113,7 @@ proc build_make_tree {target whoneedstarget} {
 		    set stale [is_target_stale $target $depend]
 			if { $stale } {
 		        vlog "File '$target' is stale against '$depend', will be made"
+				dict set db_stale($target) $depend 1
 		        break
 		    }
 		}
@@ -1221,12 +1236,16 @@ proc make target {
 						set exit_on_failure 1
 					}
 				}
+				dict set done_targets $target 1
+				foreach dt [mkv::p::resolve_pure_phony $target] {
+					dict set done_targets $dt 1
+				}
+				set done_targets [dict keys $done_targets]
 
-				set done_targets [concat $target [mkv::p::resolve_pure_phony $target]]
 				vlog "+++ Adding done target: $done_targets (for the sake of $target)"
 
 				# Add to done targets (regardless of the status)
-				lappend q_done $target {*}$done_targets
+				lappend q_done {*}$done_targets
 			}
 
 			# Don't schedule anything if requested to exit on failure.
@@ -1562,7 +1581,7 @@ proc dequeue_action {nrequired} {
 		}
 
 		set alldone 1
-		vlog " --- checking if needs for $target are satisfied: $need (resolved from: [pget db_need($target)])"
+		vlog " --- checking if needs for '$target' are satisfied: $need (resolved from: [pget db_need($target)])"
 		$mkv::debug "CHECKING '$need' in done:{$q_done} and failed:{$failed}"
 		foreach n $need {
 			# Check if all "needs" are already done
