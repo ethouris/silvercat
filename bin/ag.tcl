@@ -900,11 +900,11 @@ proc ProcessSources target {
 
 				# The separate-generation version. Used only when a compiler
 				# does not support file generation simultaneously with the object file.
-				$::g_debug " ... generating rule for dependency file $depfile"
+				$::g_debug " ... generating rule for dependency file $depfile @$agv::srcdir"
 				if { ![dict exists $rules $depfile] } {
 					set cflags [CompleteCflags $db $lang]
 					set depcmd [CreateDepGenCommand $lang $cflags [prelocate $s_abs $agv::srcdir]]
-					set rule "$s {\n\t!tcl gendep $agv::srcdir $depfile $depcmd\n}"
+					set rule "$s {\n\t!tcl gendep [prelocate $agv::srcdir $agv::builddir] $depfile $depcmd\n}"
 					dict set rules $depfile $rule
 				}
 			}

@@ -553,12 +553,23 @@ proc process-options {argv optargd} {
 	return [list $args $variables]
 }
 
-proc InterpretDepends { rule deps } {
+proc InterpretDepends { rule deps {r_depfiles ""} } {
+	if { $r_depfiles != "" } {
+		upvar $r_depfiles depfiles
+	} else {
+		set depfiles ""
+	}
+
+	$mkv::debug "Interpreting deps for '$rule': $deps"
+
 	set od ""
 	foreach dep $deps {
 		if { [string index $dep 0] == "<" } {
 			set rf [string range $dep 1 end]
 			set dp [load-rule $rule $rf $od]
+			lappend depfiles $rf
+
+			$mkv::debug " --- rules extracted from $rf: $dp"
 
 			foreach d $dp {
 				if { $d ni $od } {
@@ -576,11 +587,14 @@ proc InterpretDepends { rule deps } {
 			variable db_actions
 			if { [info exists db_actions($rf)] || $od == "" } {
 				lappend od $rf
+			} else {
+				$mkv::debug "NOT adding depfile '$rf' to deps of '$rule': action:'[pget db_actions($rf)]' otherdeps:'$od'"
 			}
 		} else {
 			lappend od $dep
 		}
 	}
+	$mkv::debug "Resulting deps for '$rule': $od"
 	return $od
 }
 
@@ -1846,11 +1860,16 @@ proc rolling_autoclean {rule debug} {
 	}
 
 	# Extract and filter out dependency files
-	set deps [InterpretDepends $rule $deps]
+	set depfiles ""
+	set deps [InterpretDepends $rule $deps depfiles]
 
 	incr ::gg_debug_indent
 	foreach dep $deps {
 		lappend autoclean_candidates {*}[rolling_autoclean $dep $debug]
+	}
+	if { $depfiles != "" } {
+		$debug "WILL DELETE DEPFILE: $depfiles"
+		lappend autoclean_candidates {*}$depfiles
 	}
 	incr ::gg_debug_indent -1
 	return [lsort -decreasing -unique $autoclean_candidates]
@@ -2126,6 +2145,9 @@ proc prelativize {path {wd .}} {
 	}
 	set rpath [file join {*}$uppath {*}$shift_norm_parts]
 
+	if { $rpath == "" } {
+		return .
+	}
 
 	#$mkv::debug "Norma-localize in '$wd' $norm: $rpath"
 	return $rpath
