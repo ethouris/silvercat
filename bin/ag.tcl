@@ -43,6 +43,9 @@ namespace eval agv {
 	variable directories
 	namespace export directories
 
+	variable generated
+	namespace export generated
+
 	namespace eval p {
 
 		# Prologue
@@ -349,8 +352,10 @@ proc GenerateDepends {lang cflags source} {
 	if { [catch {
 				set wd [pwd]
 				cd $agv::srcdir
+				$::g_debug "<Entering> [pwd]"
 				set deps [exec {*}$cmd]
 				cd $wd
+				$::g_debug "<Back in> [pwd]"
 			} error] } {
 		puts stderr "ERROR: dependency generation command failed:\n$error"
 		puts stderr "If this is because of nonexistent HEADER file, use:\n"
@@ -923,17 +928,25 @@ proc ProcessSources target {
 
 		$::g_debug "DEPS: $deps"
 
-		# Generate rule for the target
-		set rule [GenerateCompileRule $db $lang $o $s $deps]
-
 		# Add rule to objects, notify in the database
 		if { [lsearch $objects $o] == -1 } {
 			lappend objects $o
 		}
 
-		# Don't override rules that are set already.
-		if { ![dict exists $rules $o] } {
-			dict set rules $o $rule
+		if { ![info exists mkv::generated($o)] } {
+
+			# Generate rule for the target
+			set rule [GenerateCompileRule $db $lang $o $s $deps]
+
+			# Don't override rules that are set already.
+			if { ![dict exists $rules $o] } {
+				dict set rules $o $rule
+			}
+
+			set mkv::generated($o) [list $target $s $rule]
+		} else {
+			set rule [lindex $mkv::generated($o) 2]
+			$::g_debug "NOT generating rule for '$o' - already generated for [lindex $mkv::generated($o) 0]:$s: $rule"
 		}
 
 		# Find headers among dependent files in the rules
@@ -949,7 +962,6 @@ proc ProcessSources target {
 				lappend hdrs $n
 			}
 		}
-
 	}
 
 	# Extract existing headers
@@ -1936,6 +1948,7 @@ proc ag-subdir1 target {
 	# XXX This may need 'mkdir' in case of shadow build
 	set wd [pwd]
 	cd $local_builddir
+	$::g_debug "<Entering> [pwd]"
 	set agv::statedir $sd
 
 	vlog "*** Trying $agfile in $target_dir"
@@ -1976,6 +1989,7 @@ proc ag-subdir1 target {
 
 	#set agv::srcdir $osd
 	cd $wd
+	$::g_debug "<Back in> [pwd]"
 	set agv::statedir $od
 }
 
@@ -2107,6 +2121,7 @@ set agv::runmode [lindex $g_args 0] ;# != "" because g_args != ""
 
 set wd [pwd]
 cd $agfiledir
+$::g_debug "<Entering> [pwd]"
 
 # Set this to current directory because this is the directory
 # where all things happen.
