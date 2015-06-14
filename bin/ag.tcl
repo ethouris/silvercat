@@ -168,15 +168,15 @@ proc ProcessFlags target {
 
 	set defines_flag [pget agv::profile($lang).defineflag]
 	set incdir_flag [pget agv::profile($lang).incdirflag]
-	set libdir_flag [pget agv::profile($lang).libdirflag]
+	#set libdir_flag [pget agv::profile($lang).libdirflag]
 
 	set defines [dict:at $db defines]
 	set incdir [dict:at $db incdir]
-	set libdir [dict:at $db libdir]
+	#set libdir [dict:at $db libdir]
 
 	set cflags [dict:at $db cflags]
 
-	foreach flagtype {defines incdir libdir} {
+	foreach flagtype {defines incdir} {
 		foreach val [dict:at $db $flagtype] {
 			set e [set ${flagtype}_flag]$val
 			if { $e ni $cflags } {
@@ -1405,13 +1405,18 @@ proc GenerateLinkRule:program {db outfile} {
 	set objects [dict:at $db objects]
 	set ldflags [dict:at $db ldflags]
 	set depends [dict:at $db depends]
+	set libdirs [dict:at $db libdir]
+	set libdir ""
+	foreach ld $libdirs {
+		lappend libdir -L$ld
+	}
 
 	set linker [dict get $agv::profile($lang) link]
 	set oflag [dict get $agv::profile($lang) link_oflag]
 
 	$::g_debug "Generating link rule for '$outfile' ldflags: $ldflags libs: $libs"
 
-	set command "$linker $objects $oflag $outfile $libs $ldflags"
+	set command "$linker $objects $oflag $outfile $libs $libdir $ldflags"
 
 	# The rule should contain all ingredient files
 	# and all "targets" declared here as its dependency

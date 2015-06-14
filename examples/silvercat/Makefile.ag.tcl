@@ -48,12 +48,12 @@ ag-subdir party
 
 ag-profile c++ -defines ANSWER
 
-ag answer -type program -category bin ;#-fw pkg-config (framework can be also set per target)
+ag answer -type program -install bin ;#-fw pkg-config (framework can be also set per target)
 ag answer -packages zlib-1.2
 ag answer -sources file1.cc file2.cc
 ag answer -depends party/test
 
-ag answer -defines DEBUG -incdir $env(HOME)/.local/include
+ag answer -defines DEBUG -incdir $env(HOME)/.local/include -libdir $env(HOME)/.local/lib
 
 ag ff -type library -category lib -sources file2.cc -headers file.h
 # Ups, file2 should be removed from the answer file!
