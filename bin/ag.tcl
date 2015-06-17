@@ -945,7 +945,19 @@ proc ProcessSources target {
 
 			set mkv::generated($o) [list $target $s $rule]
 		} else {
-			set rule [lindex $mkv::generated($o) 2]
+			# Generate rule for the target
+			set rule [GenerateCompileRule $db $lang $o $s $deps]
+			# Check if the rule is the same as the one already generated. If so, just pass on.
+			# If not, report error.
+			set oldrule [lindex $mkv::generated($o) 2]
+
+			if { $rule != $oldrule } {
+				puts stderr "+++ Error: Rule for [lindex $mkv::generated($o) 0]:$s would reuse $target:$s, but they differ:"
+				puts stderr "+++ [lindex $mkv::generated($o) 0]: [string map {\n "; "} $oldrule]"
+				puts stderr "+++ $target: [string map {\n "; "] $rule]"
+				error "IM-file conflict. Please use target-name or target-path method for IM-file name."
+			}
+
 			$::g_debug "NOT generating rule for '$o' - already generated for [lindex $mkv::generated($o) 0]:$s: $rule"
 		}
 

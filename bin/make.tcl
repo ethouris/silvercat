@@ -765,6 +765,7 @@ proc TranslateDeps {indeps} {
 	return [lrange $deps 1 end]
 }
 
+
 proc gendep {srcdir depfile args} {
 	set wd [pwd]
 	cd $srcdir
@@ -2413,6 +2414,7 @@ proc main argv {
 		} result]] || !$res1} {
 
 			puts stderr "+++ Target '$tar' failed: $result"
+			puts stderr "+++ ($::errorInfo)"
 			return 1
 		}
 	}
