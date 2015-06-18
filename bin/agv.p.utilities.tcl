@@ -15,11 +15,35 @@ proc lsuniq {ls} {
 
 namespace export lsuniq
 
-proc GenFileBase srcfile {
-	return [string map {../ _ ./ {} / -} [file rootname $srcfile]]
+proc GenFileBase {method target srcfile} {
+	return [gen-imfile-$method $target $srcfile]
 }
 
 namespace export GenFileBase
+
+proc gen-imfile-path {target srcfile} {
+	return [string map {../ _ ./ {} / -} [file rootname $srcfile]]
+}
+
+proc gen-imfile-name {target srcrile} {
+	return [file rootname [file tail $srcfile]]
+}
+
+proc gen-imfile-target-path {target srcfile} {
+	return $target-[gen-imfile-path $target $srcfile]
+}
+
+proc gen-imfile-target-name {target srcfile} {
+	return $target-[file rootname [file tail $srcfile]]
+}
+
+namespace export {
+	gen-imfile-path
+	gen-imfile-name
+	gen-imfile-target-path
+	gen-imfile-target-name
+}
+
 
 proc dict:at {dic args} {
 	if { [llength $dic]%2 == 1 } {

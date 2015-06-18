@@ -876,11 +876,18 @@ proc ProcessSources target {
 		set lang [dict:at $info language]
 		set depspec [dict:at $agv::profile($lang) depspec]
 		set depopt [dict:at $agv::profile($lang) depopt]
+	    set imgen [dict:at $db imgen]
+	    if { $imgen == "" } {
+			set imgen [dict:at $agv::profile($lang) imgen]
+		}
+	    if { $imgen == "" } {
+	    	set imgen path
+	    }
 
 		# XXX This is required just to make things work, but it may be
 		# required that this be optional, and "original directory preserved"
 		# for o-files should be somehow supported.
-		set o [GenFileBase $s].ag.o
+		set o [GenFileBase $imgen $target $s].ag.o
 
 		$::g_debug " ... processing $s (language $lang) --> $o"
 
@@ -893,7 +900,7 @@ proc ProcessSources target {
 		# defined here. For Makefile it would have to be 'include(DEPFILE)' followed
 		# by the build command line.
 		if { $depspec == "cached" } {
-			set depfile [GenFileBase $s].ag.dep
+			set depfile [GenFileBase $imgen $target $s].ag.dep
 
 			# If there are no options, then add depfile generation rules.
 			if { $depopt == "" } {
@@ -954,8 +961,10 @@ proc ProcessSources target {
 			if { $rule != $oldrule } {
 				puts stderr "+++ Error: Rule for [lindex $mkv::generated($o) 0]:$s would reuse $target:$s, but they differ:"
 				puts stderr "+++ [lindex $mkv::generated($o) 0]: [string map {\n "; "} $oldrule]"
-				puts stderr "+++ $target: [string map {\n "; "] $rule]"
+				puts stderr "+++ $target: [string map {\n "; "} $rule]"
 				error "IM-file conflict. Please use target-name or target-path method for IM-file name."
+			} else {
+				puts stderr "+++ Note: Rule $s -> $o generated for both '$target' and '[lindex $mkv::generated($o) 0]'"
 			}
 
 			$::g_debug "NOT generating rule for '$o' - already generated for [lindex $mkv::generated($o) 0]:$s: $rule"
