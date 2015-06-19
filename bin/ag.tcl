@@ -962,7 +962,7 @@ proc ProcessSources target {
 				puts stderr "+++ Error: Rule for [lindex $mkv::generated($o) 0]:$s would reuse $target:$s, but they differ:"
 				puts stderr "+++ [lindex $mkv::generated($o) 0]: [string map {\n "; "} $oldrule]"
 				puts stderr "+++ $target: [string map {\n "; "} $rule]"
-				error "IM-file conflict. Please use target-name or target-path method for IM-file name."
+				error "IM-file conflict. Please use -imgen with target-name or target-path"
 			} else {
 				puts stderr "+++ Note: Rule $s -> $o generated for both '$target' and '[lindex $mkv::generated($o) 0]'"
 			}
