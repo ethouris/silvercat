@@ -30,6 +30,7 @@ rule answer obj/file1.o obj/file2.o {
 
 rule obj {
 	mkdir -v obj
+	@echo [pget VALUE]
 }
 
 # This is a generic rule - surprise!
