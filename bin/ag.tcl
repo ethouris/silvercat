@@ -85,7 +85,7 @@ namespace eval agv {
 	variable genrules_done ""
 	namespace export genrules_done
 
-	variable srcdir .
+	variable srcdir
 	variable statedir .
 	namespace export { srcdir statedir }
 }
@@ -94,7 +94,12 @@ namespace import agv::p::dict:at
 namespace import agv::p::GenFileBase
 
 proc RealSourcePath target {
+
+	# return [prelocate [file join $agv::srcdir $target]]
+
 	#vlog "*** RESOLVING '$target' in $agv::srcdir"
+
+	# THIS IS "if" - repeatable by continue
 	while { [string first / $target] } {
 		set rem [lassign [file split $target] first]
 		if { $first == "." } {
@@ -102,7 +107,7 @@ proc RealSourcePath target {
 			set target [file join {*}$rem]
 			continue
 			# We have a ./FILENAME
-			return $target
+			#return $target
 		}
 
 		# Check if the path is absolute already
@@ -755,9 +760,9 @@ proc AccessDatabase {array target args} {
 proc ag {target args} {
 	# Turn target name into path-based target, if a relative
 	# state directory was set.
-	#$::g_debug "*** request prelativize by 'ag' for '$target'"
+	#$::g_debug "*** request prelocate by 'ag' for '$target'"
 	set tar [file join $agv::statedir $target]
-	set target [prelativize $tar]
+	set target [prelocate $tar]
 
 	return [AccessDatabase agv::target $target {*}$args]
 }
@@ -871,7 +876,7 @@ proc ProcessSources target {
 		# it can be now localized towards build directory
 		
 		set s_abs [RealSourcePath $s]
-		set s [prelativize $s_abs $agv::builddir]
+		set s [prelocate $s_abs $agv::builddir]
 
 		set lang [dict:at $info language]
 		set depspec [dict:at $agv::profile($lang) depspec]
@@ -916,7 +921,7 @@ proc ProcessSources target {
 				}
 			}
 			# Otherwise (if $depopt is nonempty), there will be a compile command
-			# generated that generates the depfile in place.
+			# generated that generates the depfile in place (together with o-file).
 
 			# Set "dependency list" as "please use deps saved in a file"
 			# the info.include is unavailable in this mode.
@@ -929,7 +934,7 @@ proc ProcessSources target {
 			set incs [dict get $info includes]
 			set deps $s
 			foreach i $incs {
-				lappend deps [prelativize [RealSourcePath $i] $agv::builddir]
+				lappend deps [prelocate [RealSourcePath $i] $agv::builddir]
 			}
 		}
 
@@ -1063,7 +1068,7 @@ proc Process:custom target {
 
 	set rsrc ""
 	foreach s $sources {
-		lappend rsrc [prelativize [RealSourcePath $s] $agv::builddir]
+		lappend rsrc [prelocate [RealSourcePath $s] $agv::builddir]
 	}
 
 	set rule [list {*}$rsrc "\n\t$command\n"]
@@ -1359,8 +1364,7 @@ proc ResolveOutput1 o {
 		error "Invalid special-path specification: $prefix (in $o) - use 's:' or 'b:'"
 	}
 
-	set abspath [file join $apath $file]
-	set relpath [prelativize $abspath $agv::builddir]
+	set relpath [prelocate [file join $apath $file] $agv::builddir]
 
 	return $relpath
 }
@@ -1668,6 +1672,14 @@ proc ag-do-make {target} {
 	return 0
 }
 
+proc ag-make {target} {
+	set wd [pwd]
+	file mkdir $agv::builddir
+	cd $agv::builddir
+	ag-do-make $target
+	cd $wd
+}
+
 # This procedure should be used instead of checking if exists agv::target($target).
 # It's specifically for targets that may have a special form and because of that
 # have to be synthesized lazily.
@@ -1955,10 +1967,7 @@ proc ag-subdir1 target {
 
 	set osd $agv::srcdir
 	set od $agv::statedir
-	if { $od == "." } {
-		set od ""
-	}
-	set sd [file join $od $target]
+	set sd [prelocate [file join $od $target]]  ;# may change ./tar into tar
 	set local_builddir [file normalize [file join $agv::builddir $sd]]
 	#puts stderr "SUBDIR: sd=$sd od=$od wd=[pwd] builddir=[pget agv::builddir]"
 	if { [file exists $local_builddir] } {
@@ -1985,11 +1994,11 @@ proc ag-subdir1 target {
 	}
 
 	set agfilepath_abs [file join $target_dir_abs $agfile]
-	set agfilepath [prelativize $agfilepath_abs]
+	set agfilepath [prelocate $agfilepath_abs]
 	$::g_debug "AG-SUBDIR: using directory '$sd'. Descending into Silverfile: '$agfilepath'"
 
 	#mkv::p::run {*}[agv::AG] $agv::runmode -f $agfilepath -t $agv::toplevel
-	lappend cmd {*}[agv::AG] $agv::runmode -f $agfilepath -t $agv::toplevel
+	lappend cmd {*}[agv::AG] $agv::runmode -f $agfilepath_abs -t $agv::toplevel
 	interp create ag-interp-indir
 
 	# XXX Pass the config and profile databases?
@@ -2151,7 +2160,6 @@ $::g_debug "<Entering> [pwd]"
 
 # Set this to current directory because this is the directory
 # where all things happen.
-#set agv::srcdir [pwd]
 set agv::builddir $wd
 if { $topdir != "" } {
 	# Check if toplevel directory is a parent to [pwd]

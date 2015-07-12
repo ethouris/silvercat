@@ -2104,7 +2104,7 @@ proc psearch {files args} {
 	return $out
 }
 
-proc prelativize {path {wd .}} {
+proc prelocate {path {wd .}} {
 
 	if { $wd == "." } {
 		set wd [pwd]
@@ -2112,15 +2112,7 @@ proc prelativize {path {wd .}} {
 		set wd [file normalize $wd]
 	}
 
-
-	if { [file pathtype $path] == "absolute" } {
-		set norm $path
-	} else {
-		set od [pwd]
-		cd $wd
-		set norm [file normalize $path]
-		cd $od
-	}
+	set norm [file normalize $path]
 
 	if { $norm == $wd } {
 		return .
@@ -2155,12 +2147,6 @@ proc prelativize {path {wd .}} {
 	return $rpath
 }
 
-
-proc prelocate {path dir} {
-	set apath [file normalize $path]
-	$mkv::debug "Prelocate: '$path' in '[pwd]' to '$dir': $apath"
-	return [prelativize $apath $dir]
-}
 
 # utilities (for debug stuff)
 

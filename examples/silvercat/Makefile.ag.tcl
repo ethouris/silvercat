@@ -55,7 +55,7 @@ ag answer -depends party/test
 
 ag answer -defines DEBUG -incdir $env(HOME)/.local/include -libdir $env(HOME)/.local/lib
 
-ag ff -type library -category lib -sources file2.cc -headers file.h
+ag ff -type library -install lib -sources file2.cc -headers file.h
 # Ups, file2 should be removed from the answer file!
 ag answer -sources {- file2.cc}
 # This demonstrated how to add values that have "-" as the first character
