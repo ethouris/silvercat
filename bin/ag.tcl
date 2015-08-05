@@ -654,10 +654,11 @@ proc AccessDatabase {array target args} {
 
 		set f2 [string range $o 0 1]
 		set f3 [string range $o 0 2]
+		#$::g_debug " --- --- AC/DB: f2:'$f2' f3:'$f3' o:'$o'"
 
 		# This time it's -option {- config speed} - means remove these items
 		if { !$nomoreoptions && $f2 == "- " } {
-			set o [pexpand [lrange $o 2 end] 3]
+			set o [pexpand [lrange $o 1 end] 3]
 			set opt [pget options($lastopt)]
 			set pos ""
 
@@ -705,8 +706,10 @@ proc AccessDatabase {array target args} {
 			set push_front true
 		}
 
+		$::g_debug "TO SET '$lastopt' (before): $o"
 		set o [puncomment $o]
 		set o [pexpand $o 3]
+		$::g_debug "TO SET '$lastopt' (after ): $o"
 		# This time it's nothing special. At least try to strip one level,
 		# in case when user did -option {value1 value2}
 		if { ![catch {llength $o} size] } {
@@ -738,7 +741,7 @@ proc AccessDatabase {array target args} {
 		}
 		# Do nothing in case when calculating lenght resulted in exception.
 
-		$::g_debug " --- --- AC/DB: $lastopt += $o"
+		$::g_debug " --- --- AC/DB: $lastopt += {$o}"
 	}
 
 	if { $query != "" } {
@@ -784,7 +787,7 @@ proc ProcessLanguage target {
 		if { $lang == "" } {
 			# Now identify the programming language
 			set lang [IdentifyLanguage $s]
-			$::g_debug " --- Autodetecting language for $s: $lang"
+			#$::g_debug " --- Autodetecting language for $s: $lang"
 
 			if { $lang == "" } {
 				error "Can't autodetect language for source named '$s' - please specify!"
@@ -835,7 +838,7 @@ proc ProcessSources target {
 		set lang [dict:at $info language]
 
 		set depspec [dict:at $agv::profile($lang) depspec]
-		$::g_debug "DEPSPEC: $depspec"
+		#$::g_debug "DEPSPEC: $depspec"
 		if { $depspec == "auto" } {
 			# Check if you have depends declared explicitly. If so, use them.
 			set info [pget agv::fileinfo($s)]
@@ -1492,6 +1495,17 @@ proc ag-do-genrules target {
 		}
 	}
 
+	set agfile_inmake [prelocate $::agfile $agv::builddir]
+	set cmdf \
+{
+	[mkv::MAKE] clean && [agv::AG] genrules -f !agfile && [mkv::MAKE] [pget mkv::targets]
+	%exit
+}
+
+	# For genrules, add also reconfigure rule to regenerate Makefile.tcl.
+	ag reconfigure -type custom -output Makefile.tcl -flags noclean -sources $::agfile \
+		-command {[string map [list !agfile $agfile_inmake] $cmdf]}
+		
 	# Complete lacking values that have to be generated.
 	if { ![agp-prepare-database $target] } {
 		puts stderr "+++ ERROR: Failed to prepare database for '$target'"
@@ -1510,7 +1524,7 @@ proc ag-do-genrules target {
 
 	set ok [GenerateMakefile $target $fd]
 	if { !$ok } {
-		puts $fd "# XXX THIS MAKEFILE IS INVALID. Please check errors and regenerate"
+		puts $fd "error {XXX THIS MAKEFILE IS INVALID. Please check errors and regenerate}"
 	}
 
 	close $fd
@@ -1541,12 +1555,16 @@ proc GenerateMakefile {target fd} {
 
 	set rules [dict:at $agv::target($target) rules]
 	set type [dict:at $agv::target($target) type]
+	set flags [dict:at $agv::target($target) flags]
 
 	# Rules is itself also a dictionary.
 	# Key is target file, value is dependencies and command at the end.
 
 	foreach {tarfile data} $rules {
 		puts $fd "rule $tarfile $data"
+		if { $flags != "" } {
+			puts $fd "setflags $tarfile $flags"
+		}
 	}
 
 	# First rules, then phony. Later phonies may override earlier rules.
@@ -1614,16 +1632,21 @@ proc SynthesizeClean {target} {
 	}
 
 	set cleandeps ""
+	set cleanflags ""
 	if { $tarname == "all" } {
 		# This is a synthetic 'all' target, so take clean names from
 		# all dependent targets, if any. They must be dependencies of clean.
 		foreach d [ag all ?depends] {
 			lappend cleandeps {*}[dict:at $agv::target($d) cleantarget]
 		}
+		set cleanflags "-noclean"
 	}
 
 	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target' (with extra $cleandeps)"
-	return "rule $cleanname $cleandeps {\n\t!tcl autoclean $target\n}\nphony $cleanname"
+	set orule "rule $cleanname $cleandeps {\n\t%autoclean $target $cleanflags\n}\nphony $cleanname"
+	if { $tarname == "all" } {
+		append orule "\nrule distclean clean {\n\t%file delete Makefile.tcl\n}"
+	}
 }
 
 proc ag-do-make {target} {
@@ -2002,6 +2025,7 @@ proc ag-subdir1 target {
 	interp create ag-interp-indir
 
 	# XXX Pass the config and profile databases?
+	ag-interp-indir eval set argv0 $::argv0
 	ag-interp-indir eval set argv [list [lrange $cmd 1 end]]
 	ag-interp-indir eval set me_is_slave 1
 	ag-interp-indir eval source [lindex $cmd 0]
@@ -2119,7 +2143,6 @@ if { $ag_debug_on } {
 	set mkv::debug mkv::p::debug
 }
 
-
 set mkv::p::verbose $verbose
 set mkv::directory $agv::builddir
 
@@ -2150,6 +2173,9 @@ if { $agfile == "" } {
 	exit 1
 }
 
+set ag_call [list $::argv0 genrules -f %agfile]
+
+
 #puts stderr "AGFILE FOUND AS: $agfile"
 
 set agv::runmode [lindex $g_args 0] ;# != "" because g_args != ""
@@ -2176,6 +2202,7 @@ if { $topdir != "" } {
 		}
 	}
 	set agv::toplevel $topdir
+	lappend ag_call -t %topdir
 } else {
 	set agv::toplevel [pwd]
 }

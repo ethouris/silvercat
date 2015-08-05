@@ -8,6 +8,8 @@ let &iskeyword .= ",-"
 syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<rule\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
 syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<phony\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
 syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<dep-rule\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
+syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<setflags\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
+syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<getflags\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
 
 syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<ag\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,silvercatSwitch,tclNumber,tclVarRef,tclString,tcltkCommand,tclEmbeddedStatement
 syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<ag-profile\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,silvercatSwitch,tclNumber,tclVarRef,tclString,tcltkCommand,tclEmbeddedStatement

@@ -26,6 +26,7 @@ variable db_generic
 variable db_phony
 variable db_need
 variable db_stale
+variable db_flags
 
 set maxjobs 1
 
@@ -798,6 +799,34 @@ proc phony {name args} {
 	set db_phony($name) ""
 }
 
+proc setflags {target args} {
+	variable db_flags
+
+	if { $args == "-" } {
+		unset db_flags($target)
+		return
+	}
+
+	set neg 0
+
+	foreach f $args {
+		if { $f == "-" } {
+			set neg 1
+			continue
+		}
+		if { $neg } {
+			set db_flags($target) [lsearch -all -inline -not -exact [pget db_flags($target)] $f]
+		} else {
+			set db_flags($target) [lsort -unique [concat [pget db_flags($target)] $f]]
+		}
+	}
+}
+
+proc getflags {target} {
+	variable db_flags
+	return [pget db_flags($target)]
+}
+
 proc flatten args {
 	set target ""
 	foreach el $args {
@@ -912,27 +941,28 @@ proc is_target_stale {target depend} {
 	# If phony, then just forward the request to its depends.
 	# XXX THIS FEATURE IS SLIGHTLY CONTROVERSIAL.
 	# Probably another type of target "forward" should exist, parallel to "phony".
+	# XXX PHONY SHOULD BE THE SAME AS "always stale" - just executed exactly once in the session.
 	if { [info exists db_phony($depend)] } {
-		set out false
-		if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
-		        set target_deps [getdeps $depend]
-		        vlog "... ... and has deps: $target_deps"
-		        foreach d $target_deps {
-		                if { $d == $target } {
-		                        puts stderr "+++ ERROR: recursive dep $target -> $d - DROPPING."
-		                        continue
-		                }
-		                vlog "... ... forwarding to dep of $target: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
-		                mkv::p::debug_indent+
-		                set stale [is_target_stale $target $d]
-		                mkv::p::debug_indent-
-		                set out [expr {$out || $stale} ]
-		                vlog "... stale: $out"
-		        }
-		} else {
-		        vlog "... ... and has no deps ..."
-		        return true ;# phony that has no deps means always stale
-		}
+		set out true
+	    # --- if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
+	    # ---         set target_deps [getdeps $depend]
+	    # ---         vlog "... ... and has deps: $target_deps"
+	    # ---         foreach d $target_deps {
+	    # ---                 if { $d == $target } {
+	    # ---                         puts stderr "+++ ERROR: recursive dep $target -> $d - DROPPING."
+	    # ---                         continue
+	    # ---                 }
+	    # ---                 vlog "... ... forwarding to dep of $target: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
+	    # ---                 mkv::p::debug_indent+
+	    # ---                 set stale [is_target_stale $target $d]
+	    # ---                 mkv::p::debug_indent-
+	    # ---                 set out [expr {$out || $stale} ]
+	    # ---                 vlog "... stale: $out"
+	    # ---         }
+	    # --- } else {
+	    # ---         vlog "... ... and has no deps ..."
+	    # ---         return true ;# phony that has no deps means always stale
+	    # --- }
 		return $out
 	}
 	if { [catch {set stale [expr {![file exists $target] || ![file exists $depend]
@@ -1117,8 +1147,8 @@ proc build_make_tree {target whoneedstarget} {
 	if { $need_build } {
 		vlog "File '$target' $reason - resolving action for '$target' (@[pwd])"
 		if { ![enqueue_target $target $target $whoneedstarget] } {
-	    error "Action resolution failure for '$target'"
-	}
+	    	error "Action resolution failure for '$target'"
+		}
 	} elseif { $hasdepends } {
 		vlog "Checking if $target is fresh:"
 		foreach depend $depends {
@@ -1256,12 +1286,12 @@ proc make target {
 		                foreach dt [mkv::p::resolve_pure_phony $target] {
 		                        dict set done_targets $dt 1
 		                }
-		                set done_targets [dict keys $done_targets]
+		                set done_target_list [dict keys $done_targets]
 
-		                vlog "+++ Adding done target: $done_targets (for the sake of $target)"
+		                vlog "+++ Adding done target: $done_target_list (for the sake of $target)"
 
 		                # Add to done targets (regardless of the status)
-		                lappend q_done {*}$done_targets
+		                lappend q_done {*}$done_target_list
 		        }
 
 		        # Don't schedule anything if requested to exit on failure.
@@ -1816,13 +1846,14 @@ proc resolve_action {actual_target target whoneedstarget} {
 
 # Autoclean automaton
 
-proc rolling_autoclean {rule debug} {
+proc rolling_autoclean {rule debug flagged} {
 
 	variable db_depends
 	variable db_actions
 	variable db_generic
 	variable db_phony
 	variable db_prereq
+	variable db_flags
 
 	set autoclean_candidates ""
 	$debug "TO CLEAN $rule:"
@@ -1841,23 +1872,53 @@ proc rolling_autoclean {rule debug} {
 		lappend deps {*}[generate_depends $rule $generic $db_prereq($generic)]
 	}
 
+	set excluded 0
+	if { $flagged != "" } {
+		foreach f $flagged {
+			set not 0
+			if { [string index $f 0] == "-" } {
+				set f [string range $f 1 end]
+				set not 1
+			}
+
+			if { [lsearch [pget db_flags($rule)] $f] == -1 } {
+				# Flag not found
+				set excluded [expr {!$not}]
+			} else {
+				set excluded $not
+			}
+			if { $excluded } {
+				break
+			}
+		}
+	}
+
 	if { $deps == "" } {
 		if { [info exists db_depends($rule)] && [info exists db_actions($rule)] } {
-		        if { [info exists db_phony($rule)] } {
-		                $debug "WON'T DELETE $rule - phony target not being a file"
-		        } else {
-		                $debug "WILL DELETE: $rule - no dependencies, but has a build rule"
-		                lappend autoclean_candidates $rule
-		        }
+			if { [info exists db_phony($rule)] } {
+				$debug "WON'T DELETE $rule - phony target not being a file"
+			} elseif { $excluded } {
+				$debug "WON'T DELETE $rule - by flags: $flagged"
+			} else {
+				$debug "WILL DELETE: $rule - no dependencies, but has a build rule"
+				lappend autoclean_candidates $rule
+			}
 		} else {
-		        $debug "WON'T DELETE: $rule - no dependencies (generics: $generic)"
+			if { $generic != "" } {
+				set genshow " (generics: $generic)"
+			} else {
+				set genshow ""
+			}
+			$debug "WON'T DELETE: $rule - no dependencies$genshow"
 		}
 	} else {
 		if { ![info exists db_actions($rule)] && $generic == "" } {
-		        $debug "WON'T DELETE: $rule - no action (phony rule)"
+			$debug "WON'T DELETE: $rule - no action (phony rule)"
+		} elseif { $excluded } {
+			$debug "WON'T DELETE $rule - by flags: $flagged"
 		} else {
-		        $debug "WILL DELETE: $rule (built from $deps)"
-		        lappend autoclean_candidates $rule
+			$debug "WILL DELETE: $rule (built from $deps)"
+			lappend autoclean_candidates $rule
 		}
 	}
 
@@ -1867,7 +1928,7 @@ proc rolling_autoclean {rule debug} {
 
 	incr ::gg_debug_indent
 	foreach dep $deps {
-		lappend autoclean_candidates {*}[rolling_autoclean $dep $debug]
+		lappend autoclean_candidates {*}[rolling_autoclean $dep $debug $flagged]
 	}
 	if { $depfiles != "" } {
 		$debug "WILL DELETE DEPFILE: $depfiles"
@@ -1877,9 +1938,9 @@ proc rolling_autoclean {rule debug} {
 	return [lsort -decreasing -unique $autoclean_candidates]
 }
 
-proc autoclean {rule} {
+proc autoclean {rule args} {
 	set mkv::p::gg_debug_indent 0
-	set ac [rolling_autoclean $rule $mkv::debug]
+	set ac [rolling_autoclean $rule $mkv::debug $args]
 	if { $ac != "" } {
 		puts stderr "Autoclean deletes: $ac"
 		if { [catch {file delete {*}$ac} result] } {
@@ -1888,9 +1949,9 @@ proc autoclean {rule} {
 	}
 }
 
-proc autoclean-test {rule} {
+proc autoclean-test {rule args} {
 	set mkv::p::gg_debug_indent 0
-	set ac [rolling_autoclean $rule debug]
+	set ac [rolling_autoclean $rule debug $args]
 	puts stderr "Autoclean would delete: $ac"
 }
 
@@ -2239,6 +2300,8 @@ set public_export [puncomment {
 	autoclean
 	autoclean-test
 	process-options
+	setflags
+	getflags
 }]
 
 set public_import ""
@@ -2269,6 +2332,8 @@ proc MAKE {} {
 
 	return $path$options
 }
+
+variable targets
 
 }
 
@@ -2322,6 +2387,7 @@ proc main argv {
 	set mkv::debug_on $display_debug
 	set mkv::p::verbose $verbose
 	set mkv::directory $makefiledir
+	set mkv::targets $cmd_args
 
 	if { $jobs == "j" } {
 		set jobs [mkv::p::number_cores]
@@ -2392,7 +2458,8 @@ proc main argv {
 				$mkv::debug "Applying make to '$tar'"
 				if { [catch {make $tar} res1] } {
 					$mkv::debug "FAILURE: $res1 $::errorCode $::errorInfo"
-					error $res1
+					#puts stderr "FAILURE: $::errorInfo"
+					error $res1 $::errorInfo
 				} elseif { !$res1 } {
 					error "Stopped on $tar"
 				}
@@ -2402,6 +2469,7 @@ proc main argv {
 
 			puts stderr "+++ Target '$tar' failed: $result"
 			$mkv::debug "+++ ($::errorInfo)"
+			#puts stderr "+++ ($::errorInfo)"
 			return 1
 		}
 	}

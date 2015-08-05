@@ -8,6 +8,7 @@ set singles {
 	gendep
 	depspec
 	preproc
+	command
 }
 
 set profiles {

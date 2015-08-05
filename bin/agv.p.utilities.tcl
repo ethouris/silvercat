@@ -189,16 +189,16 @@ proc PrepareGeneralTarget {} {
 	# Extract only targets of type program or library
 	foreach t [array names agv::target] {
 		set type [dict:at $agv::target($t) type]
-		vlog "Target '$t', type $type:"
+		$::g_debug "Target '$t', type $type:"
 		if { $type in {program library custom} } {
-			vlog " --> Added to 'all' (because $type)"
+			$::g_debug " --> Added to 'all' (because $type)"
 			lappend subtargets $t
 		} elseif { $type == "directory" } {
-			vlog " --> Added to 'all' as $t/all (because $type)"
+			$::g_debug " --> Added to 'all' as $t/all (because $type)"
 			CheckDefinedTarget $t/all  ;# Create it lazily
 			lappend subtargets $t/all
 		} else {
-			vlog " --| Not added to 'all' (because $type)"
+			$::g_debug " --| Not added to 'all' (because $type)"
 		}
 	}
 
@@ -229,6 +229,12 @@ proc PrepareGeneralTarget {} {
 		}
 	}
 	set subtargets $otargets
+
+	# The "reconfigure" target is somewhat special and MUST BE FIRST, always.
+	# If found, move it to the first one.
+	if { "reconfigure" in $subtargets } {
+		set subtargets [concat reconfigure [lsearch -all -inline -not -exact $subtargets reconfigure]]
+	}
 
 	vlog " --: ALL TARGETS: $subtargets"
 	ag all -type phony -depends {*}$subtargets
