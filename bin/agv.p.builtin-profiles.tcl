@@ -94,6 +94,9 @@ set profiles {
 		default {
 			depspec auto
 			depopt "-MMD -MF "
+			defineflag -D
+			libdirflag -L
+			incdirflag -I
 		}
 		c++ {
 			compile "clang++ -c"

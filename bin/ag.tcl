@@ -141,8 +141,11 @@ proc IsSubTarget target {
 	return false
 }
 
-proc GenerateCompileFlags lang {
+proc GetUnifiedProfileFlags {lang type} {
+	return [GetUnifiedProfile-$type $lang]
+}
 
+proc GetUnifiedProfile-cflags lang {
 	set defines_flag [pget agv::profile($lang).defineflag]
 	set incdir_flag [pget agv::profile($lang).incdirflag]
 	#set libdir_flag [pget agv::profile($lang).libdirflag]
@@ -163,9 +166,33 @@ proc GenerateCompileFlags lang {
 	return $cflags
 }
 
-# This should do more-less the same as GenerateCompileFlags, just
-# has to extract additional info from target's extra data (defines and incdir)
-# and write them into cflags cell.
+proc GetUnifiedProfile-ldflags lang {
+
+	set libdir_flag [pget agv::profile($lang).libdirflag]
+
+	set ldflags [pget agv::profile($lang).ldflags]
+
+	set ldflags_front ""
+	foreach val [pget agv::profile($lang).libdir] {
+		set e [set libdir_flag]$val
+		if { $e ni $ldflags } {
+			lappend ldflags_front $e
+		}
+	}
+	set ldflags [concat $ldflags_front $ldflags]
+
+	$::g_debug " --- Profile-defined ldflags for $lang: $ldflags"
+
+	return $ldflags
+}
+
+
+# This procedure transfers the high-level flags into low-level.
+# The flags added as 'defines' and 'incdir' are transformed into
+# 'cflags', and 'libdir' into 'ldflags', with the use of appropriate
+# compiler options for passing these data, as retrieved from
+# the profile (e.g. for gcc it's -D for 'defines', -L for 'libdir'
+# etc.).
 proc ProcessFlags target {
 	set db $agv::target($target)
 
@@ -173,11 +200,11 @@ proc ProcessFlags target {
 
 	set defines_flag [pget agv::profile($lang).defineflag]
 	set incdir_flag [pget agv::profile($lang).incdirflag]
-	#set libdir_flag [pget agv::profile($lang).libdirflag]
+	set libdir_flag [pget agv::profile($lang).libdirflag]
 
 	set defines [dict:at $db defines]
 	set incdir [dict:at $db incdir]
-	#set libdir [dict:at $db libdir]
+	set libdir [dict:at $db libdir]
 
 	set cflags [dict:at $db cflags]
 
@@ -190,9 +217,24 @@ proc ProcessFlags target {
 		}
 	}
 
+	set ldflags [dict:at $db ldflags]
+	set need_ldflags ""
+
+	foreach val [dict:at $db libdir] {
+		set e ${libdir_flag}$val
+		if { $e ni $ldflags } {
+			lappend need_ldflags $e
+		}
+	}
+
+	if { $need_ldflags != "" } {
+		set ldflags [concat $need_ldflags $ldflags]
+	}
+
 	#puts stderr "($target) Extra cflags from special options: $cflags (from defines: $defines incdir: $incdir lang: [dict:at $db language])"
 
 	dict set agv::target($target) cflags $cflags
+	dict set agv::target($target) ldflags $ldflags
 }
 
 proc ShellWrap arg {
@@ -847,7 +889,7 @@ proc ProcessSources target {
 				set deps [concat $s [dict get $info includes]]
 			} else {
 				$::g_debug " --- Include info not found for '$s' - using gendep to generate:"
-				set cflags [CompleteCflags $db $lang]
+				set cflags [CompleteFlags $db $lang cflags]
 				set deps [GenerateDepends $lang $cflags $s]
 				# Write them back to the database
 				dict set agv::fileinfo($s) includes [lrange $deps 1 end] ;# skip the source itself
@@ -917,7 +959,7 @@ proc ProcessSources target {
 				# does not support file generation simultaneously with the object file.
 				$::g_debug " ... generating rule for dependency file $depfile @$agv::srcdir"
 				if { ![dict exists $rules $depfile] } {
-					set cflags [CompleteCflags $db $lang]
+					set cflags [CompleteFlags $db $lang cflags]
 					set depcmd [CreateDepGenCommand $lang $cflags [prelocate $s_abs $agv::srcdir]]
 					set rule "$s {\n\t!tcl gendep [prelocate $agv::srcdir $agv::builddir] $depfile $depcmd\n}"
 					dict set rules $depfile $rule
@@ -1252,22 +1294,21 @@ proc Process:phony target {
 	}
 }
 
-proc CompleteCflags {db lang} {
+proc CompleteFlags {db lang flagtype} {
+	# General $flagtype for the target
+	set flags [dict:at $db $flagtype]
 
-	# General cflags for the target
-	set cflags [dict:at $db cflags]
-
-	# General language cflags applicable for all targets
+	# General language $flagtype applicable for all targets
 	# For example, definitions will be collected here for -D option
-	# The value of agv::cflags($lang) will be also included
-	set lang_cflags [GenerateCompileFlags $lang]
+	# The value of agv::profile($lang).$flagtype will be also included
+	set lang_flags [GetUnifiedProfileFlags $lang $flagtype]
 
-	$::g_debug " ... target's cflags: $cflags"
-	$::g_debug " ... lang($lang) cflags: $lang_cflags"
+	$::g_debug " ... target's $flagtype: $flags"
+	$::g_debug " ... lang($lang) $flagtype: $lang_flags"
 
-	append cflags " $lang_cflags"
+	append flags " $lang_flags"
 
-	return $cflags
+	return $flags
 }
 
 proc GenerateCompileRule {db lang objfile source deps} {
@@ -1278,7 +1319,7 @@ proc GenerateCompileRule {db lang objfile source deps} {
 
 	$::g_debug "Generating compile rule for '$objfile' from '$source':"
 
-	set cflags [CompleteCflags $db $lang]
+	set cflags [CompleteFlags $db $lang cflags]
 
 	# The rule should be formed as for make.tcl
 	# except the 'rule' command and the target name.
@@ -1431,20 +1472,16 @@ proc GenerateLinkRule:program {db outfile} {
 	vlog "GLR/p: Common language for '$langs': $lang"
 
 	set objects [dict:at $db objects]
-	set ldflags [dict:at $db ldflags]
 	set depends [dict:at $db depends]
-	set libdirs [dict:at $db libdir]
-	set libdir ""
-	foreach ld $libdirs {
-		lappend libdir -L$ld
-	}
+	set ldflags [CompleteFlags $db $lang ldflags]
+
 
 	set linker [dict get $agv::profile($lang) link]
 	set oflag [dict get $agv::profile($lang) link_oflag]
 
 	$::g_debug "Generating link rule for '$outfile' ldflags: $ldflags libs: $libs"
 
-	set command "$linker $objects $oflag $outfile $libs $libdir $ldflags"
+	set command "$linker $objects $oflag $outfile $libs $ldflags"
 
 	# The rule should contain all ingredient files
 	# and all "targets" declared here as its dependency
