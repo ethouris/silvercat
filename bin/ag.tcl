@@ -1682,7 +1682,7 @@ proc SynthesizeClean {target} {
 	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target' (with extra $cleandeps)"
 	set orule "rule $cleanname $cleandeps {\n\t%autoclean $target $cleanflags\n}\nphony $cleanname"
 	if { $tarname == "all" } {
-		append orule "\nrule distclean clean {\n\t%file delete Makefile.tcl\n}"
+		append orule "\nrule distclean clean {\n\t%autoclean $target\n\t%autoclean $target distclean\n}"
 	}
 }
 
@@ -1990,6 +1990,10 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 	# instantiated that, however it can be any kind of file.
 	puts $fd $contents
 	close $fd
+
+	# Now that it has been instantiated, mark this file as target to be cleaned.
+	# Simply add generation target for it, without target
+	ag $target -type custom -output $target -s $source -flags noclean distclean -command {}
 }
 
 proc ag-subdir args {
