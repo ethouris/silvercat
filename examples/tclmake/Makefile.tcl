@@ -18,14 +18,16 @@
 # default one. It's usually called 'all'.
 phony all answer
 
+phony lol
+
 # Ok, so here we go with the rule to make the target.
 # And no, in contrast to Makefile, the tab before the command isn't required :P
-rule answer obj/file1.o obj/file2.o {
+rule answer obj/file1.o obj/file2.o lol {
 	# As you can see, you can use the symbolic replacement known from Makefile.
 	# Well, treat this as an extension to Tcl; actually Tcl doesn't try to
 	# expand $, if not followed by [a-zA-Z0-9_], so this is just a text.
 	@echo "Linking $@"
-	[CXX] -o $@ $^
+	[CXX] -o $@ obj/file1.o obj/file2.o   ;#$^
 }
 
 rule obj {
@@ -50,7 +52,7 @@ pdef CXX g++
 # delete every file, for which there's a rule to build, starting from
 # given target.
 rule clean {
-	!tcl autoclean answer
+	!tcl autoclean all
 }
 
 rule cleantest {

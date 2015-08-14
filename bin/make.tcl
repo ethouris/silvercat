@@ -941,28 +941,27 @@ proc is_target_stale {target depend} {
 	# If phony, then just forward the request to its depends.
 	# XXX THIS FEATURE IS SLIGHTLY CONTROVERSIAL.
 	# Probably another type of target "forward" should exist, parallel to "phony".
-	# XXX PHONY SHOULD BE THE SAME AS "always stale" - just executed exactly once in the session.
 	if { [info exists db_phony($depend)] } {
-		set out true
-	    # --- if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
-	    # ---         set target_deps [getdeps $depend]
-	    # ---         vlog "... ... and has deps: $target_deps"
-	    # ---         foreach d $target_deps {
-	    # ---                 if { $d == $target } {
-	    # ---                         puts stderr "+++ ERROR: recursive dep $target -> $d - DROPPING."
-	    # ---                         continue
-	    # ---                 }
-	    # ---                 vlog "... ... forwarding to dep of $target: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
-	    # ---                 mkv::p::debug_indent+
-	    # ---                 set stale [is_target_stale $target $d]
-	    # ---                 mkv::p::debug_indent-
-	    # ---                 set out [expr {$out || $stale} ]
-	    # ---                 vlog "... stale: $out"
-	    # ---         }
-	    # --- } else {
-	    # ---         vlog "... ... and has no deps ..."
-	    # ---         return true ;# phony that has no deps means always stale
-	    # --- }
+		set out false
+	    if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
+	            set target_deps [getdeps $depend]
+	            vlog "... ... and '$depend' has deps: $target_deps"
+	            foreach d $target_deps {
+	                    if { $d == $target } {
+	                            puts stderr "+++ ERROR: recursive dep $target -> $d - DROPPING."
+	                            continue
+	                    }
+	                    vlog "... ... forwarding to dep of $target: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
+	                    mkv::p::debug_indent+
+	                    set stale [is_target_stale $target $d]
+	                    mkv::p::debug_indent-
+	                    set out [expr {$out || $stale} ]
+	                    vlog "... stale: $out"
+	            }
+	    } else {
+	            vlog "... ... and '$depend' has no deps ..."
+	            return false ;# phony that has no deps means always fresh
+	    }
 		return $out
 	}
 	if { [catch {set stale [expr {![file exists $target] || ![file exists $depend]
@@ -1161,7 +1160,7 @@ proc build_make_tree {target whoneedstarget} {
 		    }
 		}
 
-		if { $stale } {
+		if { $stale || [info exists db_phony($target)] } {
 		        vlog "Resolving make action for $target (stale against $depend)"
 		        if {![enqueue_target $target $target $whoneedstarget]} {
 		                error "Action resolution failure for $target"
