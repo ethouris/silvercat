@@ -128,11 +128,16 @@ proc ReorderTargets subtargets {
 		}
 
 		# Check if any of found target doesn't already occur in previous ones
+		$::g_debug "CHECKING CYCLE: '$targets' in <0,$point>[lrange $ltargets 0 $point-1]"
 		for {set i 0} {$i < $point} {incr i} {
 			foreach s $targets {
-				if { $s in [lindex $targets $i] } {
-					set msg "Cyclic dependency in definition of taret '$s' ($i)"
-					error $msg
+				if { $s in [lindex $ltargets $i] } {
+					#set msg "Cyclic dependency in definition of taret '$s' ($i)"
+					#error $msg
+					vlog "NOTE: Dropping circular dependency in $s (as [lindex $ltargets $i] from $t)"
+					set i $point ;# force break outer for
+					set targets "" ;# prevent adding
+					break
 				}
 			}
 		}

@@ -306,7 +306,7 @@ proc pprun {tracername channels {vblank {}}} {
 
 		                set pfx ""
 		                if { $mkv::p::maxjobs > 1 } {
-		                        set pfx "\[$id/$njobs\]> "
+		                        set pfx "\[[expr {$id+1}]/$njobs\]> "
 		                }
 
 		                if { "silent" ni $flags } {
@@ -347,7 +347,7 @@ proc pprun {tracername channels {vblank {}}} {
 		                        # Turn of O_NDELAY or otherwise the error won't be seen!
 		                        fconfigure $fd -blocking 1
 
-		                        set infotext "\[$id\] "
+		                        set infotext "\[[expr {$id+1}]\] "
 		                        # The currently running command has finished.
 		                        # If not to be ignored, check the exit code.
 		                        set err [catch {close $fd} cres copts]

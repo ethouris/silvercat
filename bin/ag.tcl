@@ -1533,15 +1533,20 @@ proc ag-do-genrules target {
 	}
 
 	set agfile_inmake [prelocate $::agfile $agv::builddir]
+	set variables [pget ::g_variables]
+	set varexpr ""
+	foreach {vname vval} $variables {
+		append varexpr "'$vname=$vval' "
+	}
 	set cmdf \
 {
-	[mkv::MAKE] clean && !agcmd genrules -f !agfile && [mkv::MAKE] [pget mkv::targets]
+	[mkv::MAKE] clean && !agcmd genrules -f !agfile !varexpr&& [mkv::MAKE] [pget mkv::targets]
 	%exit
 }
 
 	# For genrules, add also reconfigure rule to regenerate Makefile.tcl.
 	ag reconfigure -type custom -output Makefile.tcl -flags noclean -sources $::agfile \
-		-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake] $cmdf]}
+		-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr] $cmdf]}
 		
 	# Complete lacking values that have to be generated.
 	if { ![agp-prepare-database $target] } {
