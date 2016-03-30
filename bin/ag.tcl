@@ -1689,6 +1689,8 @@ proc SynthesizeClean {target} {
 	if { $tarname == "all" } {
 		append orule "\nrule distclean clean {\n\t%autoclean $target\n\t%autoclean $target distclean\n}"
 	}
+
+	return $orule
 }
 
 proc ag-do-make {target} {
@@ -1996,9 +1998,23 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 	puts $fd $contents
 	close $fd
 
+	# DON'T generate target under the $target name. Targets that have
+	# slash inside are treated as target inside a directory and will cause
+	# generation of redirection instead of generation in place.
+	set target_name [string map {../ _ ./ {} / -} $target]
+
+	# Prevent target duplication
+	if { [info exists agv::target($target_name)] } {
+		set numdia 0
+		while { [info exists agv::target(${target_name}$numdia)] } {
+			incr numdia
+		}
+		set target_name ${target_name}$numdia
+	}
+
 	# Now that it has been instantiated, mark this file as target to be cleaned.
 	# Simply add generation target for it, without target
-	ag $target -type custom -output $target -s $source -flags noclean distclean -command {}
+	ag $target_name -type custom -output $target -s $source -flags noclean distclean -command [list %error "Regenerate '$target' only by 'ag.tcl genrules'"]
 }
 
 proc ag-subdir args {

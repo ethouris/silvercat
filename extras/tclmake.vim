@@ -3,21 +3,37 @@
 
 source $VIMRUNTIME/syntax/tcl.vim
 
-let &iskeyword .= ",-"
+if index(split(&iskeyword, ","), "-") == -1 
+	let &iskeyword .= ",-"
+endif
 
-syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<rule\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
-syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<phony\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
-syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<dep-rule\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
-syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<setflags\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
-syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<getflags\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,tclNumber,tclVarRef,tclString,tcltkCommand
+command! -nargs=1 TclmakeDefineCommand :syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<<args>\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,silvercatSwitch,tclNumber,tclVarRef,tclString,tcltkCommand,tclEmbeddedStatement
 
-syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<ag\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,silvercatSwitch,tclNumber,tclVarRef,tclString,tcltkCommand,tclEmbeddedStatement
-syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<ag-profile\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,silvercatSwitch,tclNumber,tclVarRef,tclString,tcltkCommand,tclEmbeddedStatement
-syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<ag-instantiate\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,silvercatSwitch,tclNumber,tclVarRef,tclString,tcltkCommand,tclEmbeddedStatement
+" make.tcl
 
-syn keyword silvercatSwitch contained -s -sources -h -headers -nh -noinst-headers -hidir -cflags -L -ldflags -lflags -libs -packages -I -incdir -D -defines -depends -type -install -libspec -features -o -output -command 
+TclmakeDefineCommand rule
+TclmakeDefineCommand phony
+TclmakeDefineCommand dep-rule
+TclmakeDefineCommand setflags
+TclmakeDefineCommand getflags
 
-syn keyword tcltkCommandColor pget phas pset puncomment
+syn keyword tcltkCommandColor pget phas pset pset+ pinit puncomment pexpand pdef pdefx pdefv
+syn keyword tcltkCommandColor pwrite pupdate pread pmap pfind prelativize plist 
+
+
+" ag.tcl
+
+TclmakeDefineCommand ag
+TclmakeDefineCommand ag-profile
+TclmakeDefineCommand ag-instantiate
+TclmakeDefineCommand ag-subdir
+TclmakeDefineCommand ag-make
+TclmakeDefineCommand ag-export
+
+
+syn keyword silvercatSwitch contained -s -sources -h -headers -nh -noinst-headers -hidir -cflags -L -ldflags -lflags -libs
+\ -packages -I -incdir -D -defines -depends -type -install -libspec -features -o -output -command
+\ -depspec -imgen 
 
 hi def link silvercatSwitch Special
 
