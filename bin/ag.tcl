@@ -1540,9 +1540,13 @@ proc ag-do-genrules target {
 	}
 	set cmdf \
 {
-	[mkv::MAKE] clean && !agcmd genrules -f !agfile !varexpr&& [mkv::MAKE] [pget mkv::targets]
-	%exit
+	[mkv::MAKE] clean && !agcmd genrules -f !agfile !varexpr
 }
+
+	# These actions were added previously to enforce restarting make and do nothing afterwards.
+	# This is now supported by make as autodetected makefile regeneration, so it's no longer needed
+	#%submake [pget mkv::targets]
+	#%exit
 
 	# For genrules, add also reconfigure rule to regenerate Makefile.tcl.
 	ag reconfigure -type custom -output Makefile.tcl -flags noclean -sources $::agfile \

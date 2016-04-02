@@ -490,18 +490,18 @@ proc process-options {argv optargd} {
 	# Set first all boolean options to false
 	foreach {on ov} $optargd {
 		if { [string index $ov 0] == "*" } {
-		        set varname [string range $ov 1 end]
-		        upvar $varname r_$varname
-		        #puts stderr "OPTION VARIABLE: ::$varname (bool: 0)"
-		        if { ![info exists r_$varname] } {
-		                set r_$varname 0
-		        }
+			set varname [string range $ov 1 end]
+			upvar $varname r_$varname
+			#puts stderr "OPTION VARIABLE: ::$varname (bool: 0)"
+			if { ![info exists r_$varname] } {
+				set r_$varname 0
+			}
 		} else {
-		        upvar $ov r_$ov
-		        #puts stderr "OPTION VARIABLE: ::$ov (string: '')"
-		        if { ![info exists r_$ov] } {
-		                set r_$ov ""
-		        }
+			upvar $ov r_$ov
+			#puts stderr "OPTION VARIABLE: ::$ov (string: '')"
+			if { ![info exists r_$ov] } {
+				set r_$ov ""
+			}
 		}
 	}
 
@@ -514,46 +514,46 @@ proc process-options {argv optargd} {
 
 		# This variable is set only if there are more than 0 optargs for this option
 		if { $in_option != "" } {
-		        lassign $in_option on ox
-		        set os [llength $optargs($on)]
-		        set pos [expr {$os-$ox}]
-		        set varname [lindex $optargs($on) $pos]
-		        set r_$varname $e
-		        #puts stderr "OPTION: ::$varname = $e"
-		        incr ox -1
-		        if { $ox == 0 } {
-		                set in_option ""
-		        } else {
-		                set in_option [list $on $ox]
-		        }
-		        continue
+			lassign $in_option on ox
+			set os [llength $optargs($on)]
+			set pos [expr {$os-$ox}]
+			set varname [lindex $optargs($on) $pos]
+			set r_$varname $e
+			#puts stderr "OPTION: ::$varname = $e"
+			incr ox -1
+			if { $ox == 0 } {
+				set in_option ""
+			} else {
+				set in_option [list $on $ox]
+			}
+			continue
 		}
 
 		if { [string index $e 0] == "-" } {
-		        if { [info exists optargs($e)] } {
-		                set oa $optargs($e)
-		                if { [string index $oa 0] == "*" } {
-		                        # boolean option. set to 1,default is 0
-		                        set varname [string range $oa 1 end]
-		                        set r_$varname 1
-		                        #puts stderr "OPTION: ::$varname = $e"
-		                        continue
-		                }
+			if { [info exists optargs($e)] } {
+				set oa $optargs($e)
+				if { [string index $oa 0] == "*" } {
+					# boolean option. set to 1,default is 0
+					set varname [string range $oa 1 end]
+					set r_$varname 1
+					#puts stderr "OPTION: ::$varname = $e"
+					continue
+				}
 
-		                # Otherwise set the hook for the next iteration
-		                set in_option [list $e 1]
-		                continue
-		        }
+				# Otherwise set the hook for the next iteration
+				set in_option [list $e 1]
+				continue
+			}
 
-		        # This is for command-line so this is ok.
-		        error "No such option: $e"
+			# This is for command-line so this is ok.
+			error "No such option: $e"
 		}
 
 		set varval [split $e =]
 		if { [llength $varval] == 1 } {
-		        lappend args $e
+			lappend args $e
 		} else {
-		        lappend variables [lindex $varval 0] [lindex $varval 1]
+			lappend variables [lindex $varval 0] [lindex $varval 1]
 		}
 	}
 
@@ -657,6 +657,24 @@ proc load-rule {target rulefile others} {
 	$mkv::debug "RULE FROM FILE '$rulefile': ingredients: $rule"
 
 	return $rule
+}
+
+proc reload_makefile {} {
+	set q_done ""
+	foreach ar {
+		db_depends
+		db_generic
+		db_phony
+		db_actions
+		db_prereq
+		db_need
+		db_stale
+	} {
+		variable $ar
+		array unset $ar
+	}
+
+	uplevel #0 source $mkv::makefile
 }
 
 proc rule args {
@@ -949,32 +967,32 @@ proc is_target_stale {target depend} {
 	# Probably another type of target "forward" should exist, parallel to "phony".
 	if { [info exists db_phony($depend)] } {
 		set out false
-	    if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
-	            set target_deps [getdeps $depend]
-	            vlog "... ... and '$depend' has deps: $target_deps"
-	            foreach d $target_deps {
-	                    if { $d == $target } {
-	                            puts stderr "+++ ERROR: recursive dep $target -> $d - DROPPING."
-	                            continue
-	                    }
-	                    vlog "... ... forwarding to dep of $target: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
-	                    mkv::p::debug_indent+
-	                    set stale [is_target_stale $target $d]
-	                    mkv::p::debug_indent-
-	                    set out [expr {$out || $stale} ]
-	                    vlog "... stale: $out"
-	            }
-	    } else {
-	            vlog "... ... and '$depend' has no deps ..."
-	            return false ;# phony that has no deps means always fresh
-	    }
+		if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
+			set target_deps [getdeps $depend]
+			vlog "... ... and '$depend' has deps: $target_deps"
+			foreach d $target_deps {
+				if { $d == $target } {
+					puts stderr "+++ ERROR: recursive dep $target -> $d - DROPPING."
+					continue
+				}
+				vlog "... ... forwarding to dep of $target: against $d ... [expr {[info exists db_phony($d)] ? "(also phony)" : ""}]"
+				mkv::p::debug_indent+
+				set stale [is_target_stale $target $d]
+				mkv::p::debug_indent-
+				set out [expr {$out || $stale} ]
+				vlog "... stale: $out"
+			}
+		} else {
+			vlog "... ... and '$depend' has no deps ..."
+			return false ;# phony that has no deps means always fresh
+		}
 		return $out
 	}
 	if { [catch {set stale [expr {![file exists $target] || ![file exists $depend]
-		        || [file mtime $depend] > [file mtime $target]} ]}] } {
-		puts stderr "MTIME checked on nonexistent '$depend'"
-		return false
-	}
+		|| [file mtime $depend] > [file mtime $target]} ]}] } {
+			puts stderr "MTIME checked on nonexistent '$depend'"
+			return false
+		}
 
 	return $stale
 }
@@ -1044,29 +1062,29 @@ proc build_make_tree {target whoneedstarget} {
 	set hasdepends [info exists db_depends($target)] 
 	set prereq ""
 
-    if { !$hasdepends } {
+	if { !$hasdepends } {
 		vlog "No direct depends for '$target', checking for generic depends"
-	set generic [find_generic $target]
-	if { $generic != "" } {
-		        incr depth
-	    set depnames [generate_depends $target $generic $db_depends($generic)]
-		        incr depth -1
-	    if { $depnames != "" } {
-		set hasdepends 1
-	    }
-		        if { [info exists db_prereq($generic)] } {
-		                incr depth
-		                set prereq [generate_depends $target $generic $db_prereq($generic)]
-		                incr depth -1
-		        }
-		        vlog "Found generic '$generic' with deps: '$depnames' and prereq '$prereq'"
-	}
-    } else {
-	set depnames $db_depends($target)
-		if { [info exists db_prereq($target)] } {
-		        set prereq $db_prereq($target)
+		set generic [find_generic $target]
+		if { $generic != "" } {
+			incr depth
+			set depnames [generate_depends $target $generic $db_depends($generic)]
+			incr depth -1
+			if { $depnames != "" } {
+				set hasdepends 1
+			}
+			if { [info exists db_prereq($generic)] } {
+				incr depth
+				set prereq [generate_depends $target $generic $db_prereq($generic)]
+				incr depth -1
+			}
+			vlog "Found generic '$generic' with deps: '$depnames' and prereq '$prereq'"
 		}
-    }
+	} else {
+		set depnames $db_depends($target)
+		if { [info exists db_prereq($target)] } {
+			set prereq $db_prereq($target)
+		}
+	}
 
 	set result "(reason unknown)"
 	set failgoal ""
@@ -1201,154 +1219,196 @@ proc make target {
 	variable failed
 	variable q_done
 
+	set makefile_regenerated no
+	set start_target $target ;# The variable is unfortunately widely reused down there.
 
-	if { [catch {build_make_tree $target ""} result] } {
-		puts stderr "+++ Syntax error at '$target'\n+++ $result"
-		return false
-	}
-
-	vlog "------ Target queue prepared ---- starting action ------"
-	$mkv::debug "::: Action queue: [llength $q_pending] pending actions :::"
-
-	foreach e $q_pending {
-		lassign $e target ac need
-		$mkv::debug " -::- $target:  (need by $need): [string map {"\n" "\\n"} $ac]"
-	}
-	vlog "--------------------------------------------------------"
-
-
+	# This is only for a case when there's a need to repeat this process.
 	while 1 {
 
-		set channels ""
-		foreach target2start [mkv::p::dequeue_action $mkv::p::maxjobs] {
-		        vlog "--- DEQUEUED/init: $target2start"
-		        lassign $target2start target action whoneedstarget
-		        vlog "--- TARGET: $target ACTION: $action PARENT: $whoneedstarget"
-
-		        # Add this target to the running targets
-		        lappend q_running $target
-		        lappend channels [list $target [mkv::p::pprepare $action]]
-		}
-		vlog "--- CURRENTLY RUNNING: $q_running"
-
-		if { $channels == "" } {
-		        break
+		if { [catch {build_make_tree $target ""} result] } {
+			puts stderr "+++ Syntax error at '$target'\n+++ $result"
+			return false
 		}
 
-		pprun ::mkv::p::tracer $channels {{r_res r_ret} {
-		        upvar ::mkv::p::q_running q_running
-		        upvar ::mkv::p::q_pending q_pending
-		        upvar ::mkv::p::q_done q_done
-		        upvar ::mkv::p::failed failed
-		        vlog "+++ VBLANK RUNNING: $q_running"
-		        upvar $r_res res
-		        upvar $r_ret ret
-		        $mkv::debug "VBLANK: -- res:"
-		        foreach {rk rv} $res {
-		                $mkv::debug "      : $rk -- $rv"
-		        }
-		        $mkv::debug "VBLANK: -- ret:"
-		        foreach {rk rv} $ret {
-		                $mkv::debug "      : $rk -- $rv"
-		        }
-		        set lres [expr [llength $res]/2]
-		        set lremain [expr $mkv::p::maxjobs-$lres]
-		        $mkv::debug "+++ Channels used: $lres remaining: $lremain"
-		        if { $lremain < 0 } {
-		                error "INTERNAL ERROR! (lres $lres > maxjobs $mkv::p::maxjobs, res.size = [llength $res])"
-		        }
+		# Now look for a pending target as to whether it's $mkv::makefile. When such a target is found,
+		# then a different procedure must be undertaken: The build tree must be reduced to only makefile
+		# and its dependencies, then the whole process must start again. It must be also checked if the
+		# process has updated the makefile really because otherwise this would cause an infinite loop.
+		set need_regen [check_makefile_rebuild]
 
-		        # If there are no free channels, do nothing.
-		        if { $lremain == 0 } {
-		                $mkv::debug "+++ No more free channels - waiting for any process to finish"
-		                return
-		        }
-
-		        set exit_on_failure 0
-
-		        # Check which actions have been finished. Remove them from q_running.
-		        # We have here just one action
-		        foreach {deadkey retdb} $ret {
-		                set target [dict get $retdb target]
-		                vlog "+++ Found finished target: $target"
-
-		                # Remove the target from running
-		                set q_running [plremove $q_running $target]
-
-		                # Check the status
-		                set failedcmd [dict get $retdb failed]
-		                if { $failedcmd != "" } {
-		                        vlog "+++ Target '$target' failed on: $failedcmd"
-
-		                        lappend failed $target
-		                        if { $mkv::p::keep_going } {
-		                                vlog "+++ ... although continuing on other targets"
-		                        } else {
-		                                set exit_on_failure 1
-		                        }
-		                }
-		                dict set done_targets $target 1
-		                foreach dt [mkv::p::resolve_pure_phony $target] {
-		                        dict set done_targets $dt 1
-		                }
-		                set done_target_list [dict keys $done_targets]
-
-		                vlog "+++ Adding done target: $done_target_list (for the sake of $target)"
-
-		                # Add to done targets (regardless of the status)
-		                lappend q_done {*}$done_target_list
-		        }
-
-		        # Don't schedule anything if requested to exit on failure.
-		        if { $exit_on_failure } {
-		                vlog "+++ NOT SCHEDULING any other targets due to exitting on failure"
-		                # Clear the pending queue so that the machine stops by starving.
-		                set q_pending ""
-		                return
-		        }
-
-		        # This should remove from ret - but in ret there should be only one
-		        set ret ""
-
-		        # Get the next action that can be done
-		        set channels ""
-		        foreach target2start [mkv::p::dequeue_action $lremain] {
-		                vlog "--- DEQUEUED/cont: $target2start"
-		                lassign $target2start target action whoneedstarget
-		                lappend channels [list $target [mkv::p::pprepare $action]]
-		        }
-		        # Don't schedule anything if empty
-		        if { $channels != "" } {
-		                mkv::p::ppupdate res $channels
-		        }
-
-		        vlog "+++ NOW RUNNING: $q_running"
-
-		}}
-
-		if { $q_pending == "" } {
-		        vlog "+++ No more pending after all running finished - breaking"
-		        break
+		if { $need_regen && $makefile_regenerated } {
+			# Prevent this from happening again and again...
+			puts stderr "+++ The rule to regenerate '$mkv::makefile' (starting from '$target') did not rewrite it!"
+			puts stderr "+++ Quitting to prevent infinite loop."
+			return false
 		}
 
-		vlog "+++ ALL CHANNELS FREE (occasionally at once) -- repeating the make loop."
+		set makefile_regenerated $need_regen
+
+		vlog "------ Target queue prepared ---- starting action ------"
+		$mkv::debug "::: Action queue: [llength $q_pending] pending actions :::"
+
+		foreach e $q_pending {
+			lassign $e target ac need
+			$mkv::debug " -::- $target:  (need by $need): [string map {"\n" "\\n"} $ac]"
+		}
+		vlog "--------------------------------------------------------"
+
+
+		while 1 {
+
+			set channels ""
+			foreach target2start [mkv::p::dequeue_action $mkv::p::maxjobs] {
+				vlog "--- DEQUEUED/init: $target2start"
+				lassign $target2start target action whoneedstarget
+				vlog "--- TARGET: $target ACTION: $action PARENT: $whoneedstarget"
+
+				# Add this target to the running targets
+				lappend q_running $target
+				lappend channels [list $target [mkv::p::pprepare $action]]
+			}
+			vlog "--- CURRENTLY RUNNING: $q_running"
+
+			if { $channels == "" } {
+				break
+			}
+
+			pprun ::mkv::p::tracer $channels {{r_res r_ret} {
+				upvar ::mkv::p::q_running q_running
+				upvar ::mkv::p::q_pending q_pending
+				upvar ::mkv::p::q_done q_done
+				upvar ::mkv::p::failed failed
+				vlog "+++ VBLANK RUNNING: $q_running"
+				upvar $r_res res
+				upvar $r_ret ret
+				$mkv::debug "VBLANK: -- res:"
+				foreach {rk rv} $res {
+					$mkv::debug "      : $rk -- $rv"
+				}
+				$mkv::debug "VBLANK: -- ret:"
+				foreach {rk rv} $ret {
+					$mkv::debug "      : $rk -- $rv"
+				}
+				set lres [expr [llength $res]/2]
+				set lremain [expr $mkv::p::maxjobs-$lres]
+				$mkv::debug "+++ Channels used: $lres remaining: $lremain"
+				if { $lremain < 0 } {
+					error "INTERNAL ERROR! (lres $lres > maxjobs $mkv::p::maxjobs, res.size = [llength $res])"
+				}
+
+				# If there are no free channels, do nothing.
+				if { $lremain == 0 } {
+					$mkv::debug "+++ No more free channels - waiting for any process to finish"
+					return
+				}
+
+				set exit_on_failure 0
+
+				# Check which actions have been finished. Remove them from q_running.
+				# We have here just one action
+				foreach {deadkey retdb} $ret {
+					set target [dict get $retdb target]
+					vlog "+++ Found finished target: $target"
+
+					# Remove the target from running
+					set q_running [plremove $q_running $target]
+
+					# Check the status
+					set failedcmd [dict get $retdb failed]
+					if { $failedcmd != "" } {
+						vlog "+++ Target '$target' failed on: $failedcmd"
+
+						lappend failed $target
+						if { $mkv::p::keep_going } {
+							vlog "+++ ... although continuing on other targets"
+						} else {
+							set exit_on_failure 1
+						}
+					}
+					dict set done_targets $target 1
+					foreach dt [mkv::p::resolve_pure_phony $target] {
+						dict set done_targets $dt 1
+					}
+					set done_target_list [dict keys $done_targets]
+
+					vlog "+++ Adding done target: $done_target_list (for the sake of $target)"
+
+					# Add to done targets (regardless of the status)
+					lappend q_done {*}$done_target_list
+				}
+
+				# Don't schedule anything if requested to exit on failure.
+				if { $exit_on_failure } {
+					vlog "+++ NOT SCHEDULING any other targets due to exitting on failure"
+					# Clear the pending queue so that the machine stops by starving.
+					set q_pending ""
+					return
+				}
+
+				# This should remove from ret - but in ret there should be only one
+				set ret ""
+
+				# Get the next action that can be done
+				set channels ""
+				foreach target2start [mkv::p::dequeue_action $lremain] {
+					vlog "--- DEQUEUED/cont: $target2start"
+					lassign $target2start target action whoneedstarget
+					lappend channels [list $target [mkv::p::pprepare $action]]
+				}
+				# Don't schedule anything if empty
+				if { $channels != "" } {
+					mkv::p::ppupdate res $channels
+				}
+
+				vlog "+++ NOW RUNNING: $q_running"
+
+			}}
+
+			if { $q_pending == "" } {
+				vlog "+++ No more pending after all running finished - breaking"
+				break
+			}
+
+			vlog "+++ ALL CHANNELS FREE (occasionally at once) -- repeating the make loop."
+		}
+
+		if { $failed != "" } {
+			puts stderr "+++ Failed: $failed"
+			return false
+		}
+
+		if { $q_pending != "" } {
+			vlog "--- Q STILL NOT EMPTY: $q_pending"
+			puts stderr "+++ Impossible targets:"
+			foreach p $q_pending {
+				puts stderr "    [lindex $p 0]"
+			}
+			return false
+		}
+
+		if { $makefile_regenerated } {
+			puts stderr "+++ Restarting the make process due to rebuilt '$mkv::makefile'"
+			reload_makefile
+
+			# LOL, after reloading this target might be no longer valid. If so, then you can only
+			# say sorry.
+			set target $start_target
+			variable db_actions
+			variable db_phony
+
+			if { ![info exists db_actions($target)] && ![info exists db_phony($target)] } {
+				puts stderr "+++ After regeneration, '$target' no longer exists. Sorry. Exiting."
+				puts "Actions found: [array get db_actions]"
+				puts "Phoneys found: [array get db_phony]"
+				return false
+			}
+			# This means that this was running with a queue purged of everything except makefile.
+			# So now repeat the analysis and this time run the schedule normally.
+			continue
+		}
+
+		return true
 	}
-
-	if { $failed != "" } {
-		puts stderr "+++ Failed: $failed"
-		return false
-	}
-
-	if { $q_pending != "" } {
-		vlog "--- Q STILL NOT EMPTY: $q_pending"
-		puts stderr "+++ Impossible targets:"
-		foreach p $q_pending {
-		        puts stderr "    [lindex $p 0]"
-		}
-		return false
-	}
-
-	return true
 }
 
 proc submake args {
@@ -1555,6 +1615,58 @@ proc enqueue_action {target action whoneedstarget} {
 	return pass
 }
 
+proc check_makefile_rebuild {} {
+
+	variable q_pending
+	variable db_need
+
+	set schedule ""
+	set found 0
+
+	set deps [get_all_needs $mkv::makefile]
+	foreach pend $q_pending {
+		lassign $pend target action whoneedstarget
+		# Find a target named $mkv::makefile. Add it to the schedule.
+		if { $target == $mkv::makefile } {
+			lappend schedule $pend
+			set found 1
+			continue
+		}
+
+		if { $target in $deps } {
+			lappend schedule $pend
+		}
+	}
+
+	if { !$found } {
+		return 0
+	}
+
+	puts stderr "+++ Makefile '$mkv::makefile' rebuilding detected."
+	puts stderr "+++ This will be done now and the process will restart afterwards."
+
+	# Revert the schedule so that the makefile building action falls the last one.
+	# This doesn't change much except that the loop will just be walked through once in a natural order.
+	set q_pending [lreverse $schedule]
+
+	return 1
+}
+
+proc get_all_needs {target} {
+	variable db_need
+
+	if { ![info exists db_need($target)] } {
+		return ""
+	}
+
+	set deps $db_need($target)
+	foreach d $deps {
+		lappend deps {*}[get_all_needs $d]
+	}
+
+	return $deps
+}
+
 proc dequeue_action {nrequired} {
 	set schedule ""
 	set nqueued 0
@@ -1744,25 +1856,25 @@ proc resolve_action {actual_target target whoneedstarget} {
 		set sake " for the sake of '$actual_target'"
 	}
 
-    vlog "Resolving action defined for '$target'$sake"
+	vlog "Resolving action defined for '$target'$sake"
 	set generic ""
 	set phony false
-	
+
 	if { ![info exists db_actions($target)] } {
-	vlog "No specific actions found for '$target' - checking generic actions"
+		vlog "No specific actions found for '$target' - checking generic actions"
 		set generic [find_generic $actual_target]
 		if { $generic == "" } {
-		        if { [info exists db_phony($target)] } {
-		                vlog "No generic actions, but target is phony - going on with empty action"
-		                set phony true
-		        } else {
-		                puts stderr "+++ No rule to make target '$target'"
-		                lappend mkv::p::failed $target
-		                return false
-		        }
+			if { [info exists db_phony($target)] } {
+				vlog "No generic actions, but target is phony - going on with empty action"
+				set phony true
+			} else {
+				puts stderr "+++ No rule to make target '$target'"
+				lappend mkv::p::failed $target
+				return false
+			}
 		} else {
-	    vlog "Found generic '$generic' applicable for target '$target'"
-	}
+			vlog "Found generic '$generic' applicable for target '$target'"
+		}
 	}
 
 	set actions ""
@@ -1773,26 +1885,26 @@ proc resolve_action {actual_target target whoneedstarget} {
 	} else {
 
 		if { $generic == "" } {
-		        vlog "Resolving action (direct):\n>>> $db_actions($target)"
-		        set depends $db_depends($actual_target)
-		        set actions [apply_special_variables $db_actions($target) $actual_target]
+			vlog "Resolving action (direct):\n>>> $db_actions($target)"
+											 set depends $db_depends($actual_target)
+																	 set actions [apply_special_variables $db_actions($target) $actual_target]
 		} else {
-		        vlog "Resolving action (generic):\n>>> $db_actions($generic)"
-		        set depends [generate_depends $actual_target $generic $db_depends($generic)]
+			vlog "Resolving action (generic):\n>>> $db_actions($generic)"
+											  set depends [generate_depends $actual_target $generic $db_depends($generic)]
 
-		        # Update dependencies for generated generic target
-		        set db_depends($actual_target) $depends
-		        set actions [apply_special_variables $db_actions($generic) $actual_target]
+																	  # Update dependencies for generated generic target
+																	  set db_depends($actual_target) $depends
+																	  set actions [apply_special_variables $db_actions($generic) $actual_target]
 		}
 
 		vlog "Actions resolved:\n>>> $actions"
 
 		if { [catch {
-		        # XXX Action variable substitution replaced only here!
-		        set actions [subst_action $actions]
+			# XXX Action variable substitution replaced only here!
+			set actions [subst_action $actions]
 		} result] } {
-		        $mkv::debug "Substitution failed: $result"
-				error $result
+			$mkv::debug "Substitution failed: $result"
+			error $result
 		}
 
 		vlog "ACTUAL ACTION: $actions"
@@ -1801,47 +1913,47 @@ proc resolve_action {actual_target target whoneedstarget} {
 		set actual_actions ""
 
 		foreach action $actions {
-		        set mkv::p::action_performed 1
-		        # apply standard make options
+			set mkv::p::action_performed 1
+			# apply standard make options
 
-		        set action [flatten $action]
+			set action [flatten $action]
 
-		        # Check only for "link" request
-		        set link ""
-		        switch -- [string index $action 0] {
-		                = {
-		                        set link [string trim [string range $action 1 end]]
-		                }
+			# Check only for "link" request
+			set link ""
+			switch -- [string index $action 0] {
+				= {
+					set link [string trim [string range $action 1 end]]
+				}
 
-		                ! {
-		                        if { [lindex $action 0] == "!link" } {
-		                                set link [lrange $action 1 end]
-		                        }
-		                }
-		        }
+				! {
+					if { [lindex $action 0] == "!link" } {
+						set link [lrange $action 1 end]
+					}
+				}
+			}
 
-		        # If so, do recursive call to resolve_action to pick up the right target
-		        if { $link != "" } {
-		                set linked_target $link
-		                # XXX handle multiple targets in !link command
-		                if { ![info exists db_actions($linked_target)] } {
-		                        puts stderr \
-		                        "+++ Can't resolve $linked_target as a link to action"
-		                        lappend mkv::p::failed $target
-		                        return
-		                }
+			# If so, do recursive call to resolve_action to pick up the right target
+			if { $link != "" } {
+				set linked_target $link
+				# XXX handle multiple targets in !link command
+				if { ![info exists db_actions($linked_target)] } {
+					puts stderr \
+					"+++ Can't resolve $linked_target as a link to action"
+					lappend mkv::p::failed $target
+					return
+				}
 
-		                # Do substitution before altering target
-		                set newactions [resolve_action $target $linked_target $whoneedstarget]
-		                if { $newactions == "" } {
-		                        lappend mkv::p::failed $target
-		                        return
-		                }
-		                lappend actual_actions {*}$newactions
-		                continue
-		        }
+				# Do substitution before altering target
+				set newactions [resolve_action $target $linked_target $whoneedstarget]
+				if { $newactions == "" } {
+					lappend mkv::p::failed $target
+					return
+				}
+				lappend actual_actions {*}$newactions
+				continue
+			}
 
-		        lappend actual_actions $action
+			lappend actual_actions $action
 		}
 
 	}
