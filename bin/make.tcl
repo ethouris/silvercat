@@ -213,234 +213,240 @@ proc pprun {tracername channels {vblank {}}} {
 
 	while 1 {
 		set ids [dict keys $res]
-	foreach id $ids {
-		        $mkv::debug "CHECKING JOB $id: [dict get $res $id]"
-		        set fd [dict get $res $id fd]
-		        if { $fd == "" } {
-		                # This means that the block is prepared to run, but
-		                # the command hasn't been started yet.
-		                # Start the command that is next in the queue.
+		foreach id $ids {
+			$mkv::debug "CHECKING JOB $id: [dict get $res $id]"
+			set fd [dict get $res $id fd]
+			if { $fd == "" } {
+				# This means that the block is prepared to run, but
+				# the command hasn't been started yet.
+				# Start the command that is next in the queue.
 
-		                set cmdset [dict get $res $id pending]
-		                set next [lassign $cmdset cmd]
-		                dict set res $id next $next
+				set cmdset [dict get $res $id pending]
+				set next [lassign $cmdset cmd]
+				dict set res $id next $next
 
-		                set flags ""
-		                set cmdspec ""
+				set flags ""
+				set cmdspec ""
 
-		                while 1 {
-		                        set flg [string index $cmd 0]
-		                        switch -- $flg {
-		                                @ {
-		                                        lappend flags silent
-		                                }
+				while 1 {
+					set flg [string index $cmd 0]
+					switch -- $flg {
+						@ {
+							lappend flags silent
+						}
 
-		                                - {
-		                                        lappend flags ignore
-		                                }
+						- {
+							lappend flags ignore
+						}
 
-		                                ! {
-		                                        lappend flags cmd
-		                                        set cmdspec [string range [lindex $cmd 0] 1 end]
-		                                        set cmd [lrange $cmd 1 end]
-		                                        break ;# no more possible flags in this case
-		                                }
+						! {
+							lappend flags cmd
+							set cmdspec [string range [lindex $cmd 0] 1 end]
+							set cmd [lrange $cmd 1 end]
+							break ;# no more possible flags in this case
+						}
 
-		                                % {
-		                                        lappend flags cmd
-		                                        set cmdspec tcl
-		                                }
+						% {
+							lappend flags cmd
+							set cmdspec tcl
+						}
 
-		                                default {
-		                                        break
-		                                }
-		                        }
+						default {
+							break
+						}
+					}
 
-		                        # Eat up flags until the picked up character isn't a flag
-		                        set cmd [string range $cmd 1 end]
-		                }
+					# Eat up flags until the picked up character isn't a flag
+					set cmd [string range $cmd 1 end]
+				}
 
-		                dict set res $id running $cmd
-		                dict set res $id pending $next
-		                dict set res $id flags $flags
-		                if { $cmd == "" } {
-		                        # Nothing more to run. Consider commandset succeeded.
-		                        continue
-		                }
-		                if { $cmdspec != "" } {
-		                        # This is left for future use, but currently the only
-		                        # special command is "tcl".
-		                        switch -- $cmdspec {
-		                                tcl {
-		                                        if { "quiet" ni $flags } {
-		                                                puts "%$cmd"
-		                                        }
+				dict set res $id running $cmd
+				dict set res $id pending $next
+				dict set res $id flags $flags
+				if { $cmd == "" } {
+					# Nothing more to run. Consider commandset succeeded.
+					continue
+				}
+				if { $cmdspec != "" } {
+					# This is left for future use, but currently the only
+					# special command is "tcl".
+					switch -- $cmdspec {
+						tcl {
+							if { "quiet" ni $flags } {
+								puts "%$cmd"
+							}
 
-		                                        $mkv::debug "TCL COMMAND - executing directly '$cmd' (next: $next)"
-		                                        # DO NOT schedule this command - execute it directly
-		                                        uplevel #0 [list eval $cmd]
+							$mkv::debug "TCL COMMAND - executing directly '$cmd' (next: $next)"
+							# DO NOT schedule this command - execute it directly
+							uplevel #0 [list eval $cmd]
 
-		                                        # Leave the state as is. Next iteration will pick up
-		                                        # the next command and do whatever's necessary.
-		                                        # Most likely there's just one !tcl command, so it
-		                                        # will be empty and the channel will be closed.
+							# Leave the state as is. Next iteration will pick up
+							# the next command and do whatever's necessary.
+							# Most likely there's just one !tcl command, so it
+							# will be empty and the channel will be closed.
 
-		                                        # Make fd nonempty to prevent rescheduling
-		                                        dict set res $id fd "-"
+							# Make fd nonempty to prevent rescheduling
+							dict set res $id fd "-"
 
-		                                        # Remove the command from the queue
-		                                        #set res [dict remove $res $id]
-		                                        continue
-		                                }
+							# Remove the command from the queue
+							#set res [dict remove $res $id]
+							continue
+						}
 
-		                                default {
-		                                        error "Unrecognized special command: !$cmdspec for target [dict:at $res $id target]"
-		                                }
-		                        }
-		                }
+						default {
+							error "Unrecognized special command: !$cmdspec for target [dict:at $res $id target]"
+						}
+					}
+				}
 
-		                if { $fd == "-" } {
-		                        error "WTF fd - for cmd=$cmd"
-		                }
+				if { $fd == "-" } {
+					error "WTF fd - for cmd=$cmd"
+				}
 
 
-		                set pfx ""
-		                if { $mkv::p::maxjobs > 1 } {
-		                        set pfx "\[[expr {$id+1}]/$njobs\]> "
-		                }
+				set pfx ""
+				if { $mkv::p::maxjobs > 1 } {
+					set pfx "\[[expr {$id+1}]/$njobs\]> "
+				}
 
-		                if { "silent" ni $flags } {
-		                        $mkv::debug "$pfx<[pwd]>"
-		                        puts stderr "$pfx$cmd"
-		                }
+				if { "silent" ni $flags } {
+					$mkv::debug "$pfx<[pwd]>"
+					puts stderr "$pfx$cmd"
+				}
 
-		                set external "$mkv::p::shell $mkv::p::shellcmdopt {$cmd} 2>@stderr"
-		                $mkv::debug "RUNNING: {$external} NUMBER OF JOBS: $njobs"
+				set external "$mkv::p::shell $mkv::p::shellcmdopt {$cmd} 2>@stderr"
+				$mkv::debug "RUNNING: {$external} NUMBER OF JOBS: $njobs"
 
-		                set fd [open "|$external"]
-		                dict set res $id fd $fd
+				set fd [open "|$external"]
+				dict set res $id fd $fd
 
-		                fconfigure $fd -blocking 0 -buffering line
-		            fileevent $fd readable "set $tracername $fd"
-		        }
+				fconfigure $fd -blocking 0 -buffering line
+				fileevent $fd readable "set $tracername $fd"
+			}
 
-		        # Ok, now it is running at least the first command
-		        # (that is, $fd is nonempty)
-		        # Or it was run as a Tcl command that was executed in place
+			# Ok, now it is running at least the first command
+			# (that is, $fd is nonempty)
+			# Or it was run as a Tcl command that was executed in place
 
-		        if { $fd == "-" } {
-		                set iseof 0
-		                set isend 1
-		                set cres ""
-		                set copts ""
-		                set code 0
-		        } else {
-		                set iseof [eof $fd]
-		                set isend $iseof
-		        }
+			if { $fd == "-" } {
+				set iseof 0
+				set isend 1
+				set cres ""
+				set copts ""
+				set code 0
+			} else {
+				set iseof [eof $fd]
+				set isend $iseof
+			}
 
-		        if { $isend } {
+			if { $isend } {
 
-		                # Do this action for external processes only.
-		                if { $iseof } {
+				# Do this action for external processes only.
+				if { $iseof } {
 
-		                        # Turn of O_NDELAY or otherwise the error won't be seen!
-		                        fconfigure $fd -blocking 1
+					# Turn of O_NDELAY or otherwise the error won't be seen!
+					fconfigure $fd -blocking 1
 
-		                        set infotext "\[[expr {$id+1}]\] "
-		                        # The currently running command has finished.
-		                        # If not to be ignored, check the exit code.
-		                        set err [catch {close $fd} cres copts]
-		                        set code [dict get $copts -code]
-		                        if { $code != 0 } {
-		                                append infotext " ***Error "
-		                                set ec [pget copts.-errorcode]
-		                                if { [lindex $ec 0] == "CHILDSTATUS" } {
-		                                        set ec [lindex $ec 2]
-		                                        append infotext " $ec"
-		                                } else {
-		                                        set ec -1
-		                                }
-		                                if { "ignore" in $flags } {
-		                                        append infotext "(ignored) "
-		                                } else {
-		                                        set deadkey $id.$deadcount
-		                                        incr deadcount
+					set infotext "\[[expr {$id+1}]\] "
+					# The currently running command has finished.
+					# If not to be ignored, check the exit code.
+					set err [catch {close $fd} cres copts]
+					set code [dict get $copts -code]
+					if { $code != 0 } {
+						append infotext " ***Error "
+						set ec [pget copts.-errorcode]
+						if { [lindex $ec 0] == "CHILDSTATUS" } {
+							set ec [lindex $ec 2]
+							append infotext " $ec"
+						} else {
+							set ec -1
+						}
+						if { "ignore" in $flags } {
+							append infotext "(ignored) "
+						} else {
+							set deadkey $id.$deadcount
+							incr deadcount
 
-		                                        # The command failed, so interrupt the sequence right now.
-		                                        dict set ret $deadkey target [dict get $res $id target]
-		                                        dict set ret $deadkey cmdset [dict get $res $id cmdset]
-		                                        dict set ret $deadkey code $code
-		                                        dict set ret $deadkey error $ec
-		                                        dict set ret $deadkey failed [dict get $res $id running]
-		                                        dict set ret $deadkey result $cres
-		                                        dict set ret $deadkey options $copts
+							# The command failed, so interrupt the sequence right now.
+							dict set ret $deadkey target [dict get $res $id target]
+							dict set ret $deadkey cmdset [dict get $res $id cmdset]
+							dict set ret $deadkey code $code
+							dict set ret $deadkey error $ec
+							dict set ret $deadkey failed [dict get $res $id running]
+							dict set ret $deadkey result $cres
+							dict set ret $deadkey options $copts
 
-		                                        # and remove the channel from the res list
-		                                        set res [dict remove $res $id]
-		                                        if { $njobs > 1 } {
-		                                                puts stderr "$infotext: $cmd"
-		                                        }
-		                                        continue
-		                                }
+							# and remove the channel from the res list
+							set res [dict remove $res $id]
+							if { $njobs > 1 } {
+								puts stderr "$infotext: $cmd"
+							}
+							continue
+						}
 
-		                                # Continue, if the errors for $cmd should be ignored.
-		                        }
-		                }
+						# Continue, if the errors for $cmd should be ignored.
+					}
+				}
 
-		                # Either succeeded, or maybe failed, but ignored.
-		                # Whatever way, finished.
+				# Either succeeded, or maybe failed, but ignored.
+				# Whatever way, finished.
 
-		                # So, pick up the next command from the list
-		                set next [dict get $res $id pending]
-		                if { $next == "" } {
-		                        # Hooray! We've done all commands and all were successful.
-		                        set deadkey $id.$deadcount
-		                        incr deadcount
-		                        $mkv::debug "FINISHED CMD LIST for '[dict get $res $id target]'"
+				# So, pick up the next command from the list
+				set next [dict get $res $id pending]
+				if { $next == "" } {
+					# Hooray! We've done all commands and all were successful.
+					set deadkey $id.$deadcount
+					incr deadcount
+					$mkv::debug "FINISHED CMD LIST for '[dict get $res $id target]'"
 
-		                        dict set ret $deadkey target [dict get $res $id target]
-		                        dict set ret $deadkey cmdset [dict get $res $id cmdset]
-		                        dict set ret $deadkey code 0
-		                        dict set ret $deadkey error ""
-		                        dict set ret $deadkey failed "" 
-		                        dict set ret $deadkey result $cres 
-		                        dict set ret $deadkey options $copts
-		                        set res [dict remove $res $id]
-		                        continue
-		                }
+					dict set ret $deadkey target [dict get $res $id target]
+					dict set ret $deadkey cmdset [dict get $res $id cmdset]
+					dict set ret $deadkey code 0
+					dict set ret $deadkey error ""
+					dict set ret $deadkey failed "" 
+					dict set ret $deadkey result $cres 
+					dict set ret $deadkey options $copts
+					set res [dict remove $res $id]
+					continue
+				}
 
-		                # Ok, so if we have "next", clear the fd so that the next
-		                # roll will know that it should pick up and start the next command.
-		                dict set res $id fd ""
+				# Ok, so if we have "next", clear the fd so that the next
+				# roll will know that it should pick up and start the next command.
+				dict set res $id fd ""
 
-		        } else {
-		                set pfx ""
-		                if { $mkv::p::maxjobs > 1 } {
-		                        set pfx "\[$id/$njobs\]  "
-		                }
+			} else {
+				set pfx ""
+				if { $mkv::p::maxjobs > 1 } {
+					set pfx "\[$id/$njobs\]  "
+				}
 
-		                # Roll until EOF or EAGAIN.
-		                # When EAGAIN, it will be retried at the next roll.
-		                # When EOF, it will be removed from the list at the next roll.
-		                while { [gets $fd linein] != -1 } {
-		                        puts "$pfx$linein"
-		                }
-		        }
-	}
+				# Roll until EOF or EAGAIN.
+				# When EAGAIN, it will be retried at the next roll.
+				# When EOF, it will be removed from the list at the next roll.
+				while { [gets $fd linein] != -1 } {
+					puts "$pfx$linein"
+				}
+			}
+		}
 
 		if { $vblank != "" } {
+			# The vblank callback could have modified the 'res' variable, and
+			# add new command sequences, even though the previous loop has made
+			# them all wiped out.
+			apply $vblank res ret
 
-		        # The vblank callback could have modified the 'res' variable, and
-		        # add new command sequences, even though the previous loop has made
-		        # them all wiped out.
-		        apply $vblank res ret
+			# VBLANK might have changed the number of jobs, it's actually its job
+			set ljobs [expr [llength $res]/2]
+			if { $ljobs > $njobs } {
+				$mkv::debug "INCREASED JOB SLOT USAGE TO: $ljobs"
+				set njobs $ljobs
+			}
 		}
 
 		if { $res == "" } {
-		        # All processes finished.
-		        break
-	}
+			# All processes finished.
+			break
+		}
 
 		# Ok, now clear the variable
 		set $tracername ""
@@ -449,31 +455,31 @@ proc pprun {tracername channels {vblank {}}} {
 		# finished. Targets that have no fd in running state should be ignored
 		set nrun 0
 		foreach {id data} $res {
-		        set fd [pget data.fd]
-		        if { $fd == "" || $fd == "-" } {
-		                continue
-		        }
-		        set isfinished 0
-		        if { [catch {eof $fd} isfinished] || $isfinished} {
-		                continue
-		        }
-		        incr nrun
+			set fd [pget data.fd]
+			if { $fd == "" || $fd == "-" } {
+				continue
+			}
+			set isfinished 0
+			if { [catch {eof $fd} isfinished] || $isfinished} {
+				continue
+			}
+			incr nrun
 		}
-		
+
 		if { $nrun } {
 
-		        $mkv::debug "STILL RUNNING: $mkv::p::q_running - waiting for finish any of $nrun running processes"
+			$mkv::debug "STILL RUNNING: $mkv::p::q_running - waiting for finish any of $nrun running processes"
 
-		        # If vwait causes error, it may happen that the process
-		        # has finished before it could be added to the event list
-		        # (just the script had no opportunity to see it). If this
-		        # happens, just go on, and in the next roll you'll find it out anyway.
-		        catch {vwait $tracername}
+			# If vwait causes error, it may happen that the process
+			# has finished before it could be added to the event list
+			# (just the script had no opportunity to see it). If this
+			# happens, just go on, and in the next roll you'll find it out anyway.
+			catch {vwait $tracername}
 		}
 
 		#puts "UNBLOCKED BY: [set $tracername]"
-    }
-    return $ret
+	}
+	return $ret
 }
 
 
