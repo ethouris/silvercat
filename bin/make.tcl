@@ -572,33 +572,33 @@ proc InterpretDepends { rule deps {r_depfiles ""} } {
 	set od ""
 	foreach dep $deps {
 		if { [string index $dep 0] == "<" } {
-		        set rf [string range $dep 1 end]
-		        set dp [load-rule $rule $rf $od]
-		        lappend depfiles $rf
+			set rf [string range $dep 1 end]
+			set dp [load-rule $rule $rf $od]
+			lappend depfiles $rf
 
-		        $mkv::debug " --- rules extracted from $rf: $dp"
+			$mkv::debug " --- rules extracted from $rf: $dp"
 
-		        foreach d $dp {
-		                if { $d ni $od } {
-		                        lappend od $d
-		                }
-		        }
+			foreach d $dp {
+				if { $d ni $od } {
+					lappend od $d
+				}
+			}
 
-		        # Add the dependency file itself to the dependencies,
-		        # but ONLY IF THE RULE FOR BUILDING IT EXISTS, OR
-		        # if this is so far the only rule. In other words,
-		        # don't make the depfile itself a dependency, if the
-		        # depfile doesn't exist and it's expected to be generated
-		        # together with *.o file (in which case we must have at
-		        # least the source file itself already in $od).
-		        variable db_actions
-		        if { [info exists db_actions($rf)] || $od == "" } {
-		                lappend od $rf
-		        } else {
-		                $mkv::debug "NOT adding depfile '$rf' to deps of '$rule': action:'[pget db_actions($rf)]' otherdeps:'$od'"
-		        }
+			# Add the dependency file itself to the dependencies,
+			# but ONLY IF THE RULE FOR BUILDING IT EXISTS, OR
+			# if this is so far the only rule. In other words,
+			# don't make the depfile itself a dependency, if the
+			# depfile doesn't exist and it's expected to be generated
+			# together with *.o file (in which case we must have at
+					# least the source file itself already in $od).
+			variable db_actions
+			if { [info exists db_actions($rf)] || $od == "" } {
+				lappend od $rf
+			} else {
+				$mkv::debug "NOT adding depfile '$rf' to deps of '$rule': action:'[pget db_actions($rf)]' otherdeps:'$od'"
+			}
 		} else {
-		        lappend od $dep
+			lappend od $dep
 		}
 	}
 	$mkv::debug "Resulting deps for '$rule': $od"
@@ -611,6 +611,20 @@ proc getdeps { target {depnames {}} } {
 		set depnames $db_depends($target)
 	}
 	return [InterpretDepends $target $depnames]
+}
+
+proc getprereq { target } {
+	variable db_prereq
+	if { ![info exists db_prereq($target)] } {
+		return ""
+	}
+
+	set deps $db_prereq($target)
+	foreach d $deps {
+		lappend deps {*}[getprereq $d]
+	}
+
+	return $deps
 }
 
 # Provide expansion in style of {*} in tcl 8.5
@@ -857,6 +871,17 @@ proc flatten args {
 		append target "[string map {\n { }} $el] "
 	}
 	return $target
+}
+
+proc pluniq ls {
+	set output ""
+
+	foreach l $ls {
+		if { $l ni $output } {
+			lappend output $l
+		}
+	}
+	return $output
 }
 
 proc puncomment text {
@@ -1470,13 +1495,18 @@ proc apply_special_variables {action target} {
 
 	set depends [getdeps $target]
 
-	set str [string map \
-		                 [list \
-		                        {$@} $target \
-		                        {$<} [lindex $depends 0] \
-		                        {$^} $depends \
-		                                                {$?} [fresher_depends $target $depends]] \
-		                 $action]
+	# Not supported:
+	# $@ and $%: no support for special archive targets.
+	# $*: it's weird, not everywhere supported the same way, and strongly discouraged
+
+	set str [string map [list \
+			{$@} $target  \
+			{$<} [lindex $depends 0]  \
+			{$^} [pluniq $depends] \
+			{$+} $depends  \
+			{$|} [pluniq [getprereq $target]] \
+			{$?} [fresher_depends $target $depends]  \
+	] $action]
 	return $str
 }
 
@@ -1886,15 +1916,15 @@ proc resolve_action {actual_target target whoneedstarget} {
 
 		if { $generic == "" } {
 			vlog "Resolving action (direct):\n>>> $db_actions($target)"
-											 set depends $db_depends($actual_target)
-																	 set actions [apply_special_variables $db_actions($target) $actual_target]
+			set depends $db_depends($actual_target)
+			set actions [apply_special_variables $db_actions($target) $actual_target]
 		} else {
 			vlog "Resolving action (generic):\n>>> $db_actions($generic)"
-											  set depends [generate_depends $actual_target $generic $db_depends($generic)]
+			set depends [generate_depends $actual_target $generic $db_depends($generic)]
 
-																	  # Update dependencies for generated generic target
-																	  set db_depends($actual_target) $depends
-																	  set actions [apply_special_variables $db_actions($generic) $actual_target]
+			# Update dependencies for generated generic target
+			set db_depends($actual_target) $depends
+			set actions [apply_special_variables $db_actions($generic) $actual_target]
 		}
 
 		vlog "Actions resolved:\n>>> $actions"
@@ -2450,6 +2480,7 @@ proc MAKE {} {
 	return $path$options
 }
 
+variable target
 variable targets
 
 }
