@@ -1001,6 +1001,9 @@ proc ProcessSources target {
 			}
 
 			set mkv::generated($o) [list $target $s $rule]
+		} elseif { [lindex $mkv::generated($o) 0] == $target } {
+			lassign $mkv::generated($o) target s rule
+			vlog "NOTE: already generated rule for $target:$o from $s"
 		} else {
 			# Generate rule for the target
 			set rule [GenerateCompileRule $db $lang $o $s $deps]

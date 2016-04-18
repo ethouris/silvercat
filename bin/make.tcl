@@ -512,48 +512,86 @@ proc process-options {argv optargd} {
 
 	foreach e $argv {
 
-		# This variable is set only if there are more than 0 optargs for this option
-		if { $in_option != "" } {
-			lassign $in_option on ox
-			set os [llength $optargs($on)]
-			set pos [expr {$os-$ox}]
-			set varname [lindex $optargs($on) $pos]
-			set r_$varname $e
-			#puts stderr "OPTION: ::$varname = $e"
-			incr ox -1
-			if { $ox == 0 } {
-				set in_option ""
-			} else {
-				set in_option [list $on $ox]
-			}
-			continue
-		}
+		set follow ""
+		set continue 1
+		# This is for the case when the whole body needs to be repeated
+		# without getting to the next iteration
+		while { $continue } {
 
-		if { [string index $e 0] == "-" } {
-			if { [info exists optargs($e)] } {
-				set oa $optargs($e)
-				if { [string index $oa 0] == "*" } {
-					# boolean option. set to 1,default is 0
-					set varname [string range $oa 1 end]
-					set r_$varname 1
-					#puts stderr "OPTION: ::$varname = $e"
-					continue
+			# This variable is set only if there are more than 0 optargs for this option
+			# The in_option contains: <name of the option> <how many arguments to grab>
+			if { $in_option != "" } {
+				lassign $in_option on ox
+				set os [llength $optargs($on)]
+				set pos [expr {$os-$ox}]
+				set varname [lindex $optargs($on) $pos]
+				set r_$varname $e
+				#puts stderr "OPTION: ::$varname = $e"
+				incr ox -1
+				if { $ox == 0 } {
+					set in_option ""
+				} else {
+					set in_option [list $on $ox]
+				}
+				break ; # meaning, continue iterations
+			}
+
+			if { [string index $e 0] == "-" } {
+				# Grab the next character:
+				# - if this is "-", then take the whole word as option.
+				# - otherwise, take a "one letter option"; if there are more
+				# characters, treat it as its argument.
+				if { [string index $e 1] != "-" } {
+					set follow [string range $e 2 end]
+					set e [string range $e 0 1]
+				}
+				
+				#puts stderr "OPTION EXTRACTED: '$e' follow=$follow"
+
+				if { [info exists optargs($e)] } {
+					set oa $optargs($e)
+					if { [string index $oa 0] == "*" } {
+						# boolean option. set to 1,default is 0
+						set varname [string range $oa 1 end]
+						set r_$varname 1
+						#puts stderr "OPTION: ::$varname = true (boolean)"
+
+						if { $follow != "" } {
+							# If there was any string following the boolean option,
+							# make it look like another option.
+							set e "-$follow"
+							set follow ""
+							#puts stderr "OPTION FOLLOWING: $e"
+							continue ; # repeat current iteration
+						}
+						break ;# continue iterations
+					}
+
+					# Otherwise set the hook for the next iteration
+					set in_option [list $e [llength $oa]]
+
+					if { $follow != "" } {
+						set e $follow
+						set follow ""
+						#puts stderr "OPTION REPEATED: $e"
+						continue ;# repeat current iteration, don't get argument from the argument list
+					}
+
+					break ; # meaning, continue iterations
 				}
 
-				# Otherwise set the hook for the next iteration
-				set in_option [list $e 1]
-				continue
+				# This is for command-line so this is ok.
+				error "No such option: $e"
 			}
 
-			# This is for command-line so this is ok.
-			error "No such option: $e"
-		}
+			set varval [split $e =]
+			if { [llength $varval] == 1 } {
+				lappend args $e
+			} else {
+				lappend variables [lindex $varval 0] [lindex $varval 1]
+			}
 
-		set varval [split $e =]
-		if { [llength $varval] == 1 } {
-			lappend args $e
-		} else {
-			lappend variables [lindex $varval 0] [lindex $varval 1]
+			break
 		}
 	}
 
@@ -2504,7 +2542,7 @@ proc main argv {
 
 	set g_optargs {
 		--help *help
-		-help *help
+		-h *help
 		-C makefiledir
 		-d *display_debug
 		-f makefile
