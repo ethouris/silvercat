@@ -45,18 +45,6 @@ namespace export {
 }
 
 
-proc dict:at {dic args} {
-	if { [llength $dic]%2 == 1 } {
-		error "This doesn't look like a dictionary: '$dic'"
-	}
-	if { ![dict exists $dic {*}$args] } {
-		return ""
-	}
-
-	return [dict get $dic {*}$args]
-}
-
-namespace export dict:at
 
 # XXX
 # NOTE: This code comes from rosettacode.org and can be found here:

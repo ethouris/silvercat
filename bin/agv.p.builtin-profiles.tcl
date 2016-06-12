@@ -42,6 +42,8 @@ set profiles {
 			preproc "Command to run preprocessor (optional, can be empty if a language doesn't use one)"
 			cflags "Flags passed always to compile command (compile, gendep, preproc)"
 			ldflags "Flags passed to link command"
+			std_option "Compiler option to use given language standard"
+			std_values "key-value pairs to map general names of the language standard to value required to pass to that option"
 		}
 
 	}
@@ -74,12 +76,28 @@ set profiles {
 			defineflag -D
 			libdirflag -L
 			incdirflag -I
+			std_option "-std="
 		}
 		c++ {
 			compile "g++ -c"
 			link "g++"
 			linkdl "g++ -dynamic"
 			gendep "g++ -MM"
+			std_values {
+				c++ c++03
+				c++98 c++03
+				c++11 c++0x
+				c++14 c++1y
+				c++17 c++1z
+				gnu-c++98 gnu++98
+				gnu-c++03 gnu++03
+				gnu-c++0x gnu++0x
+				gnu-c++11 gnu++0x
+				gnu-c++1y gnu++1y
+				gnu-c++14 gnu++1y
+				gnu-c++1z gnu++1z
+				gnu-c++17 gnu++1z
+			}
 		}
 
 		c {
@@ -87,6 +105,10 @@ set profiles {
 			link "gcc"
 			linkdl "gcc -dynamic"
 			gendep "gcc -MM"
+			std_values {
+				c c90
+				"" ""
+			}
 		}
 	}
 
@@ -97,6 +119,7 @@ set profiles {
 			defineflag -D
 			libdirflag -L
 			incdirflag -I
+			std_option "-std="
 		}
 		c++ {
 			compile "clang++ -c"
@@ -104,6 +127,18 @@ set profiles {
 			linkdl "clang++ -dynamic"
 			gendep "clang++ -MM"
 			depspec auto
+			std_values {
+				c++ c++03
+				c++98 c++03
+				c++11 c++0x
+				c++14 c++1y
+				c++17 c++1z
+				gnu-c++98 gnu++98
+				gnu-c++03 gnu++03
+				gnu-c++11 gnu++0x
+				gnu-c++14 gnu++1y
+				gnu-c++17 gnu++1z
+			}
 		}
 
 		c {
@@ -112,6 +147,10 @@ set profiles {
 			linkdl "clang -dynamic"
 			gendep "clang -MM"
 			depspec auto
+			std_values {
+				c c90
+				"" ""
+			}
 		}
 	}
 

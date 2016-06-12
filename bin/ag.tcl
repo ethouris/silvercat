@@ -90,7 +90,6 @@ namespace eval agv {
 	namespace export { srcdir statedir }
 }
 
-namespace import agv::p::dict:at
 namespace import agv::p::GenFileBase
 
 proc RealSourcePath target {
@@ -145,21 +144,83 @@ proc GetUnifiedProfileFlags {lang type} {
 	return [GetUnifiedProfile-$type $lang]
 }
 
-proc GetUnifiedProfile-cflags lang {
-	set defines_flag [pget agv::profile($lang).defineflag]
-	set incdir_flag [pget agv::profile($lang).incdirflag]
-	#set libdir_flag [pget agv::profile($lang).libdirflag]
+proc TranslateValue {value map} {
+	# This translates value according to the map:
+	# - if the value is among keys, the associated value is returned
+	# - if the value is among values, it's returned as is
+	# - if both key and value are empty at some iteration (should be the last one), the value is returned as is anyway
+	# - otherwise an empty value is returned
 
-	set cflags [pget agv::profile($lang).cflags]
+	foreach {key val} $map {
+		if { $value == $key } {
+			return $val
+		}
 
-	foreach flagtype {defines incdir} {
-		foreach val [pget agv::profile($lang).$flagtype] {
-			set e [set ${flagtype}_flag]$val
-			if { $e ni $cflags } {
-				lappend cflags $e
+		if { $value == $val } {
+			return $val
+		}
+
+		if { $key == "" && $val == "" } {
+			return $value
+		}
+	}
+
+	return ""
+}
+
+proc TranslateFlags { lang flagmap mainkey {order append} } {
+	# flagmap is expected to be:
+	# flagname flagvalues... ...
+	# flagname should be without "-". Allowed flagnames are:
+	# - cflags (to be passed through)
+	# - defines
+	# - incdir
+	# - libdir
+	# - std
+
+	# As a result it should return the exact value to be set to target's cflags
+
+	set flag(defines) [pget agv::profile($lang).defineflag]
+	set flag(incdir) [pget agv::profile($lang).incdirflag]
+	set flag(libdir) [pget agv::profile($lang).libdirflag]
+	set flag(std) [pget agv::profile($lang).std_option]
+
+	set transmap(std) [pget agv::profile($lang).std_values]
+
+	# Set up the existing cflags
+	set outflags_old [pget flagmap.$mainkey]
+	set outflags_new ""
+
+	foreach flagtype [array names flag] {
+		foreach val [dict:at $flagmap $flagtype] {
+			if { [info exists transmap($flagtype)] } {
+				set traval [TranslateValue $val $transmap($flagtype)]
+				if { $traval == "" } {
+					error "Flag -$flagtype: value '$val' is invalid"
+				}
+				set val $traval
+			}
+			set e $flag($flagtype)$val
+			if { $e ni $outflags_old && $e ni $outflags_new } {
+				lappend outflags_new $e
 			}
 		}
 	}
+
+	if { $order == "prepend" } {
+		return [concat $outflags_new $outflags_old]
+	} else {
+		return [concat $outflags_old $outflags_new]
+	}
+}
+
+proc GetUnifiedProfile-cflags lang {
+
+	# XXX In Tcl 8.5, dict filter/key can get ONLY ONE KEY PATTERN.
+	# So, do filtering multiple times anyway :(
+
+	set flagmap [dict:filterkey $agv::profile($lang) cflags defines incdir std]
+	set cflags [TranslateFlags $lang $flagmap cflags]
 
 	$::g_debug " --- Profile-defined cflags for $lang: $cflags"
 
@@ -168,18 +229,8 @@ proc GetUnifiedProfile-cflags lang {
 
 proc GetUnifiedProfile-ldflags lang {
 
-	set libdir_flag [pget agv::profile($lang).libdirflag]
-
-	set ldflags [pget agv::profile($lang).ldflags]
-
-	set ldflags_front ""
-	foreach val [pget agv::profile($lang).libdir] {
-		set e [set libdir_flag]$val
-		if { $e ni $ldflags } {
-			lappend ldflags_front $e
-		}
-	}
-	set ldflags [concat $ldflags_front $ldflags]
+	set flagmap [dict:filterkey $agv::profile($lang) ldflags libdir std]
+	set ldflags [TranslateFlags $lang $flagmap ldflags prepend]
 
 	$::g_debug " --- Profile-defined ldflags for $lang: $ldflags"
 
@@ -198,43 +249,49 @@ proc ProcessFlags target {
 
 	set lang [dict get $db language]
 
-	set defines_flag [pget agv::profile($lang).defineflag]
-	set incdir_flag [pget agv::profile($lang).incdirflag]
-	set libdir_flag [pget agv::profile($lang).libdirflag]
+	set flagmap [dict:filterkey $db cflags defines incdir std]
+	dict set agv::target($target) cflags [TranslateFlags $lang $flagmap cflags]
 
-	set defines [dict:at $db defines]
-	set incdir [dict:at $db incdir]
-	set libdir [dict:at $db libdir]
+	set flagmap [dict:filterkey $db ldflags libdir std]
+	dict set agv::target($target) ldflags [TranslateFlags $lang $flagmap ldflags prepend]
 
-	set cflags [dict:at $db cflags]
-
-	foreach flagtype {defines incdir} {
-		foreach val [dict:at $db $flagtype] {
-			set e [set ${flagtype}_flag]$val
-			if { $e ni $cflags } {
-				lappend cflags $e
-			}
-		}
-	}
-
-	set ldflags [dict:at $db ldflags]
-	set need_ldflags ""
-
-	foreach val [dict:at $db libdir] {
-		set e ${libdir_flag}$val
-		if { $e ni $ldflags } {
-			lappend need_ldflags $e
-		}
-	}
-
-	if { $need_ldflags != "" } {
-		set ldflags [concat $need_ldflags $ldflags]
-	}
-
-	#puts stderr "($target) Extra cflags from special options: $cflags (from defines: $defines incdir: $incdir lang: [dict:at $db language])"
-
-	dict set agv::target($target) cflags $cflags
-	dict set agv::target($target) ldflags $ldflags
+# --- 	set defines_flag [pget agv::profile($lang).defineflag]
+# --- 	set incdir_flag [pget agv::profile($lang).incdirflag]
+# --- 	set libdir_flag [pget agv::profile($lang).libdirflag]
+# --- 
+# --- 	set defines [dict:at $db defines]
+# --- 	set incdir [dict:at $db incdir]
+# --- 	set libdir [dict:at $db libdir]
+# --- 
+# --- 	set cflags [dict:at $db cflags]
+# --- 
+# --- 	foreach flagtype {defines incdir} {
+# --- 		foreach val [dict:at $db $flagtype] {
+# --- 			set e [set ${flagtype}_flag]$val
+# --- 			if { $e ni $cflags } {
+# --- 				lappend cflags $e
+# --- 			}
+# --- 		}
+# --- 	}
+# --- 
+# --- 	set ldflags [dict:at $db ldflags]
+# --- 	set need_ldflags ""
+# --- 
+# --- 	foreach val [dict:at $db libdir] {
+# --- 		set e ${libdir_flag}$val
+# --- 		if { $e ni $ldflags } {
+# --- 			lappend need_ldflags $e
+# --- 		}
+# --- 	}
+# --- 
+# --- 	if { $need_ldflags != "" } {
+# --- 		set ldflags [concat $need_ldflags $ldflags]
+# --- 	}
+# --- 
+# --- 	#puts stderr "($target) Extra cflags from special options: $cflags (from defines: $defines incdir: $incdir lang: [dict:at $db language])"
+# --- 
+# --- 	dict set agv::target($target) cflags $cflags
+# --- 	dict set agv::target($target) ldflags $ldflags
 }
 
 proc ShellWrap arg {
@@ -1939,6 +1996,16 @@ proc agp-prepare-database {target {parent ""}} {
 	return true
 }
 
+# XXX BUGS!!!
+# 1. For ag-instantiate, source should be relative to source directory,
+# target (including generated) should be in the build directory (unless
+# explicitly defined).
+# 2. The rule generated to enclose the generated instantiated file does
+# not take into account the need to create all directories in the path
+# of this file.
+# 3. The ResolveOutput1 function is buggy: only //PATH form is changed
+# into $SOURCEDIR/PATH, b:PATH and s:PATH are not seen due to incorrect
+# condition.
 proc ag-instantiate {source {target ""} {varspec @}} {
 
 	if { $target == "" } {

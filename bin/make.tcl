@@ -2146,6 +2146,35 @@ proc autoclean-test {rule args} {
 	puts stderr "Autoclean would delete: $ac"
 }
 
+# Utilities
+proc dict:at {dic args} {
+	if { [llength $dic]%2 == 1 } {
+		error "This doesn't look like a dictionary: '$dic'"
+	}
+	if { ![dict exists $dic {*}$args] } {
+		return ""
+	}
+
+	return [dict get $dic {*}$args]
+}
+
+# The dict filter/key in Tcl 8.5 allows only ONE KEY pattern.
+# We have to do do multiple times filtering.
+# Only Tcl 8.6 allows multiple keys.
+# Unfortunately the filtering is done by glob, and this doesn't allow alternatives.
+if { $tcl_version < 8.6 } {
+	proc dict:filterkey {dict args} {
+		set out ""
+		foreach k $args {
+			lappend out {*}[dict filter $dict key $k]
+		}
+		return $out
+	}
+} else {
+	proc dict:filterkey {dict args} { [return dict filter $dict key {*}$args] }
+}
+
+
 proc pexpand {arg {ulevel 2}} {
 	# This trick should expand the list in place and pack
 	# it back to the list. This replaces all first-level whitespaces
@@ -2467,6 +2496,8 @@ set public_export [puncomment {
 	vlog
 
 	# Utility functions
+	dict:at
+	dict:filterkey
 	plremove
 	pset
 	pset+
