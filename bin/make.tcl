@@ -1467,8 +1467,8 @@ proc make target {
 
 			if { ![info exists db_actions($target)] && ![info exists db_phony($target)] } {
 				puts stderr "+++ After regeneration, '$target' no longer exists. Sorry. Exiting."
-				puts "Actions found: [array get db_actions]"
-				puts "Phoneys found: [array get db_phony]"
+				puts stderr "Actions found: [array get db_actions]"
+				puts stderr "Phoneys found: [array get db_phony]"
 				return false
 			}
 			# This means that this was running with a queue purged of everything except makefile.
