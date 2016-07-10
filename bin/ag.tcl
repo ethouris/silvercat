@@ -88,6 +88,9 @@ namespace eval agv {
 	variable srcdir
 	variable statedir .
 	namespace export { srcdir statedir }
+
+	variable libpath ""
+	namespace export libpath
 }
 
 namespace import agv::p::GenFileBase
@@ -550,6 +553,42 @@ proc DetectType target {
 	# recognizable extension, return empty string
 	# as unrecognized.
 	return
+}
+
+proc ag-require args {
+
+	set optional 0
+
+	if { [lindex $args 0] == "-optional" } {
+		set args [lrange $args 1 end]
+		set optional 1
+	}
+
+	set ibrk 0
+	foreach a $args {
+		foreach p $agv::libpath {
+			if { $ibrk } {
+				break
+			}
+			set n [file join $p $a]
+			if { [file exists $n] } {
+				source $n
+				set ibrk 1
+				continue
+			}
+		}
+		if { $ibrk } {
+			set ibrk 0
+			continue
+		}
+
+		# This means it wasn't found
+		if { $optional } {
+			return false
+		}
+		set in [expr { ($agv::libpath == "") ? ": no AG_LIB_PATH nor ../lib or ../share found" : " in: $agv::libpath" }]
+		error "Silvercat package '$a' not found$in"
+	}
 }
 
 proc ag-profile {name args} {
@@ -2214,6 +2253,41 @@ proc ag-export names {
 package provide ag 0.8
 set g_debug mkv::p::pass
 set ag_debug_on 0
+
+# Default ag lib path
+set def_ag_lib_path ""
+if { !$tcl_interactive } {
+	set here [file dirname $argv0]
+	set path1 [file join $here .. lib silvercat]
+	set path2 [file join $here .. share silvercat]
+
+	if { [file isdirectory $path1] } {
+		lappend def_ag_lib_path [file normalize $path1]
+	}
+
+	if { [file isdirectory $path2] } {
+		lappend def_ag_lib_path [file normalize $path2]
+	}
+}
+
+if { [info exists ::env(AG_LIB_PATH)] } {
+	foreach p $::env(AG_LIB_PATH) {
+		lappend agv::libpath [file nornalize $p]
+	}
+} elseif { $def_ag_lib_path != "" } {
+	set agv::libpath $def_ag_lib_path
+}
+
+set wd [pwd]
+
+foreach p $agv::libpath {
+	cd $p
+	if { [file exists startup] } {
+		source startup
+	}
+}
+
+cd $wd
 
 if { !$tcl_interactive } {
 

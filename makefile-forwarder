@@ -1,0 +1,14 @@
+# This is a "makefile placeholder", which simply redirects the call to 'make' into 'agmake'.
+# Take care that this will only work if the options are same for make and agmake.
+# Make will reject the call if options are not recognized, even if they are correct for agmake.
+
+ANYTHINGELSE:=$(filter-out all,$(MAKECMDGOALS))
+
+CMDLINE=$(shell cat /proc/$$PPID/cmdline | sed 's,\x0, ,g')
+
+
+all $(ANYTHINGELSE):
+	@echo "NOTE: This build uses Silvercat. Use 'agmake' to start build, not 'make'."
+	agmake $(wordlist 2,99,$(CMDLINE))
+
+
