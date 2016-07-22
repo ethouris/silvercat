@@ -1,19 +1,33 @@
 #!/usr/bin/tclsh
 
-# Get definitions of make.tcl as library
-# XXX (find some better way to do it)
-set was_interactive $tcl_interactive
-set tcl_interactive 1
-set gg_makepath [file dirname [info script]]/make.tcl
-source $gg_makepath
-set tcl_interactive $was_interactive
 
 # Redefine MAKE so that the correct path is used
 namespace eval mkv {
-	proc MAKE {} {
-		return [file normalize $::gg_makepath]
+	namespace eval p {
+
+		# Prologue
+		set me [info script]
+		set here [file dirname $me]
+
+		set gg_makepath $here/make.tcl
+		
+		# Import make's utilities
+		source $here/mkv.p.utilities.tcl
+		source $here/mkv.p.builtin.tcl
+
+		namespace export {*}$public_export_util {*}$public_export_builtin
+		set public_import ""
+		foreach n [concat $public_export_util $public_export_builtin] {
+			lappend public_import "mkv::p::$n"
+		}
 	}
+	proc MAKE {} {
+		return [file normalize $::mkv::p::gg_makepath]
+	}
+
 }
+
+namespace import {*}$mkv::p::public_import
 
 namespace eval agv {
 	set version 0.1 ;# just to define something
@@ -250,6 +264,7 @@ proc ProcessFlags target {
 	set lang [dict get $db language]
 
 	set flagmap [dict:filterkey $db cflags defines incdir std]
+
 	dict set agv::target($target) cflags [TranslateFlags $lang $flagmap cflags]
 
 	set flagmap [dict:filterkey $db ldflags libdir std]
