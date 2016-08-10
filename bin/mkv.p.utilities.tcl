@@ -23,7 +23,7 @@ proc pset {name arg1 args} {
 
     set var [pexpand $arg1]
     foreach a $args {
-	append var " $a"
+		append var " [pexpand $a]"
     }
 	return $var
 }
@@ -276,6 +276,7 @@ proc number-cores {} {
 	# of cores. This should be done some system-dependent
 	# way, so far we'll just use
 	# - on Linux-compliant systems (including Cygwin), use /proc/cpuinfo
+	# - on Darwin, use sysctl hw.ncpu
 	# - on others, return 2.
 
 	switch -glob -- $::tcl_platform(os) {
@@ -422,14 +423,26 @@ proc process-options {argv optargd} {
 				break ; # meaning, continue iterations
 			}
 
-			if { [string index $e 0] == "-" } {
+			# Options start from - unless this is only -.
+			if { [string index $e 0] == "-" && $e != "-" } {
 				# Grab the next character:
 				# - if this is "-", then take the whole word as option.
 				# - otherwise, take a "one letter option"; if there are more
 				# characters, treat it as its argument.
 				if { [string index $e 1] != "-" } {
+
+					# Option form -OARGUMENT (one dash, followed by other things)
+					# MAKE e = "-O" follow = "ARGUMENT"
+
 					set follow [string range $e 2 end]
 					set e [string range $e 0 1]
+				} elseif { [set pos [string first = $e 2]] != -1 } {
+
+					# Otherwise we have --OPTION, check if you have --OPTION=ARGUMENT
+					# If so, then make: e = "--OPTION" follow = "ARGUMENT"
+
+					set follow [lrange $e $pos+1 end]
+					set e [lrange $e 0 $pos-1]
 				}
 				
 				#puts stderr "OPTION EXTRACTED: '$e' follow=$follow"
@@ -487,15 +500,64 @@ proc process-options {argv optargd} {
 proc pass args { return $args }
 
 
-proc dict:at {dic args} {
-	if { [llength $dic]%2 == 1 } {
-		error "This doesn't look like a dictionary: '$dic'"
+
+proc dict:assert dic {
+	set llen [llength $dic]
+	if { $llen%2 == 1 } {
+		if { $llen > 80 } {
+			set dic [string range $dic 0 80]...
+		}
+		error "input doesn't look like a dictionary: '$dic'"
 	}
+}
+
+proc dict:at {dic args} {
+	dict:assert $dic
 	if { ![dict exists $dic {*}$args] } {
 		return ""
 	}
 
 	return [dict get $dic {*}$args]
+}
+
+proc dict:sel {dic args} {
+	dict:assert $dic
+
+	set pipe [lsearch $args |]
+
+	# Special case: set 'since' to 0 if both pipe was first
+	# element or wasn't supplied.
+	set since [expr {$pipe+1}]
+
+	# If pipe was the first key, skip it.
+	if { $since == 1 } {
+		set since 0
+		set args [lrange $args 1 end]
+	}
+
+	if { $since == 0 } {
+		set input $dic
+	} else {
+		set input [dict get $dic {*}[lrange $args 0 $since-2]]
+		set args [lrange $args $since end]
+	}
+
+	set output ""
+	foreach x $args {
+		if { $x == "\\|" } {
+			set x |
+		}
+		lappend output [dict get $input $x]
+	}
+	return $output
+}
+
+proc dict:layout {layout list} {
+	set output ""
+	foreach k $layout v $list {
+		dict set output $k $v
+	}
+	return $output
 }
 
 # The dict filter/key in Tcl 8.5 allows only ONE KEY pattern.
@@ -547,6 +609,8 @@ set public_export_util [puncomment {
 	number-cores
 	dict:at
 	dict:filterkey
+	dict:sel
+	dict:layout
 }]
 
 namespace export {*}$public_export_util

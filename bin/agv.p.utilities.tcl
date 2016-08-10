@@ -226,7 +226,7 @@ proc PrepareGeneralTarget {} {
 	# The "reconfigure" target is somewhat special and MUST BE FIRST, always.
 	# If found, move it to the first one.
 	if { "reconfigure" in $subtargets } {
-		set subtargets [concat reconfigure [lsearch -all -inline -not -exact $subtargets reconfigure]]
+		set subtargets [concat reconfigure [plremove $subtargets reconfigure]]
 	}
 
 	vlog " --: ALL TARGETS: $subtargets"

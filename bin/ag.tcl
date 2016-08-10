@@ -1626,6 +1626,8 @@ proc ag-do-genrules target {
 	# For genrules, add also reconfigure rule to regenerate Makefile.tcl.
 	ag reconfigure -type custom -output Makefile.tcl -flags noclean -sources $::agfile \
 		-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr] $cmdf]}
+
+	vlog "([pwd]) ALL DEFINED TARGETS:\n\t[array names agv::target]"
 		
 	# Complete lacking values that have to be generated.
 	if { ![agp-prepare-database $target] } {
@@ -1895,6 +1897,25 @@ proc agp-prepare-database {target {parent ""}} {
 	if { $target == "all" && ![info exists agv::target(all)] } {
 		vlog "--- Synthesizing 'all' target"
 		agv::p::PrepareGeneralTarget
+	} else {
+		# The user probably has defined the 'all' target on their own.
+		# Check if the "reconfigure" target has been added to deps,
+		# because the user was very likely to have forgotten it.
+
+		# dict update is very useful. Syntax is:
+		# dict update <dict-variable> (<keyname> <refvarname>)... <body>
+		# This defines a series of <refvarname> which refers to a key in the dictionary.
+		# Inside the body you can read and write the <refvarname> and this will
+		# reflect the changes under given <keyname> in the dict.
+		# The scope of the <refvarname> variable is only within <body>.
+
+		dict update agv::target(all) depends d {
+			if { "reconfigure" ni $d } {
+				# dict lappend could be nice, but this is not what we want.
+				# reconfigure must be first
+				set d [concat reconfigure $d]
+			}
+		}
 	}
 
 	if { ![CheckDefinedTarget $target] } {
@@ -1906,16 +1927,17 @@ proc agp-prepare-database {target {parent ""}} {
 		return false
 	}
 
-	vlog "PROCESSING DEPENDS of $target"
+	set targets_depends [dict:at $agv::target($target) depends]
+	vlog "PROCESSING DEPENDS of $target (DIRECT): $targets_depends \{"
 
-	foreach dep [dict:at $agv::target($target) depends] {
+	foreach dep $targets_depends {
 		vlog " ... DEP OF '$target': '$dep'"
 		if { ![agp-prepare-database $dep $target] } {
 			return false
 		}
 	}
 
-	vlog "END DEPENDS OF $target"
+	vlog "\} END DEPENDS OF $target"
 
 	set type [dict:at $agv::target($target) type]
 	set cat [dict:at $agv::target($target) install]
