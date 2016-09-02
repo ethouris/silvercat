@@ -1,19 +1,33 @@
 #!/usr/bin/tclsh
 
-# Get definitions of make.tcl as library
-# XXX (find some better way to do it)
-set was_interactive $tcl_interactive
-set tcl_interactive 1
-set gg_makepath [file dirname [info script]]/make.tcl
-source $gg_makepath
-set tcl_interactive $was_interactive
 
 # Redefine MAKE so that the correct path is used
 namespace eval mkv {
-	proc MAKE {} {
-		return [file normalize $::gg_makepath]
+	namespace eval p {
+
+		# Prologue
+		set me [info script]
+		set here [file dirname $me]
+
+		set gg_makepath $here/make.tcl
+		
+		# Import make's utilities
+		source $here/mkv.p.utilities.tcl
+		source $here/mkv.p.builtin.tcl
+
+		namespace export {*}$public_export_util {*}$public_export_builtin
+		set public_import ""
+		foreach n [concat $public_export_util $public_export_builtin] {
+			lappend public_import "mkv::p::$n"
+		}
 	}
+	proc MAKE {} {
+		return [file normalize $::mkv::p::gg_makepath]
+	}
+
 }
+
+namespace import {*}$mkv::p::public_import
 
 namespace eval agv {
 	set version 0.1 ;# just to define something
@@ -253,6 +267,7 @@ proc ProcessFlags target {
 	set lang [dict get $db language]
 
 	set flagmap [dict:filterkey $db cflags defines incdir std]
+
 	dict set agv::target($target) cflags [TranslateFlags $lang $flagmap cflags]
 
 	set flagmap [dict:filterkey $db ldflags libdir std]
@@ -1650,6 +1665,8 @@ proc ag-do-genrules target {
 	# For genrules, add also reconfigure rule to regenerate Makefile.tcl.
 	ag reconfigure -type custom -output Makefile.tcl -flags noclean -sources $::agfile \
 		-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr] $cmdf]}
+
+	vlog "([pwd]) ALL DEFINED TARGETS:\n\t[array names agv::target]"
 		
 	# Complete lacking values that have to be generated.
 	if { ![agp-prepare-database $target] } {
@@ -1919,6 +1936,25 @@ proc agp-prepare-database {target {parent ""}} {
 	if { $target == "all" && ![info exists agv::target(all)] } {
 		vlog "--- Synthesizing 'all' target"
 		agv::p::PrepareGeneralTarget
+	} else {
+		# The user probably has defined the 'all' target on their own.
+		# Check if the "reconfigure" target has been added to deps,
+		# because the user was very likely to have forgotten it.
+
+		# dict update is very useful. Syntax is:
+		# dict update <dict-variable> (<keyname> <refvarname>)... <body>
+		# This defines a series of <refvarname> which refers to a key in the dictionary.
+		# Inside the body you can read and write the <refvarname> and this will
+		# reflect the changes under given <keyname> in the dict.
+		# The scope of the <refvarname> variable is only within <body>.
+
+		dict update agv::target(all) depends d {
+			if { "reconfigure" ni $d } {
+				# dict lappend could be nice, but this is not what we want.
+				# reconfigure must be first
+				set d [concat reconfigure $d]
+			}
+		}
 	}
 
 	if { ![CheckDefinedTarget $target] } {
@@ -1930,16 +1966,17 @@ proc agp-prepare-database {target {parent ""}} {
 		return false
 	}
 
-	vlog "PROCESSING DEPENDS of $target"
+	set targets_depends [dict:at $agv::target($target) depends]
+	vlog "PROCESSING DEPENDS of $target (DIRECT): $targets_depends \{"
 
-	foreach dep [dict:at $agv::target($target) depends] {
+	foreach dep $targets_depends {
 		vlog " ... DEP OF '$target': '$dep'"
 		if { ![agp-prepare-database $dep $target] } {
 			return false
 		}
 	}
 
-	vlog "END DEPENDS OF $target"
+	vlog "\} END DEPENDS OF $target"
 
 	set type [dict:at $agv::target($target) type]
 	set cat [dict:at $agv::target($target) install]

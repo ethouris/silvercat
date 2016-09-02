@@ -7,12 +7,23 @@ package require Tcl 8.5
 # Debug
 #package require Itcl
 
+
+
 namespace eval mkv {
 
 set debug mkv::p::pass
 
 
 namespace eval p {
+
+		# Prologue
+		set me [info script]
+		set here [file dirname $me]
+
+		# Ingredients
+
+		source $here/mkv.p.utilities.tcl
+		source $here/mkv.p.builtin.tcl
 
 # Forwarder for standard-method running cmdline app
 proc run args {
@@ -57,36 +68,9 @@ if { [info exists ::env(SHELL)] } { set shell $::env(SHELL) }
 # May need to be configurable somehow (it's /C on windows cmd)
 set shellcmdopt -c
 
-variable gg_debug_indent 0
 
 variable keep_going 0
 
-
-proc debug_indent {} {
-	variable gg_debug_indent
-	return [string repeat \t $gg_debug_indent]
-}
-
-proc debug_indent+ {} {
-	variable gg_debug_indent
-	incr gg_debug_indent
-}
-
-proc debug_indent- {} {
-	variable gg_debug_indent
-	incr gg_debug_indent -1
-}
-
-proc debug str {
-	puts stderr [debug_indent]$str
-}
-
-proc pass args { return $args }
-
-
-#namespace export debug
-#namespace export debug_indent+
-#namespace export debug_indent-
 
 # state of actions
 variable escaped
@@ -483,121 +467,6 @@ proc pprun {tracername channels {vblank {}}} {
 }
 
 
-proc process-options {argv optargd} {
-
-	array set optargs $optargd
-
-	# Set first all boolean options to false
-	foreach {on ov} $optargd {
-		if { [string index $ov 0] == "*" } {
-			set varname [string range $ov 1 end]
-			upvar $varname r_$varname
-			#puts stderr "OPTION VARIABLE: ::$varname (bool: 0)"
-			if { ![info exists r_$varname] } {
-				set r_$varname 0
-			}
-		} else {
-			upvar $ov r_$ov
-			#puts stderr "OPTION VARIABLE: ::$ov (string: '')"
-			if { ![info exists r_$ov] } {
-				set r_$ov ""
-			}
-		}
-	}
-
-	set args ""
-	set variables ""
-
-	set in_option ""
-
-	foreach e $argv {
-
-		set follow ""
-		set continue 1
-		# This is for the case when the whole body needs to be repeated
-		# without getting to the next iteration
-		while { $continue } {
-
-			# This variable is set only if there are more than 0 optargs for this option
-			# The in_option contains: <name of the option> <how many arguments to grab>
-			if { $in_option != "" } {
-				lassign $in_option on ox
-				set os [llength $optargs($on)]
-				set pos [expr {$os-$ox}]
-				set varname [lindex $optargs($on) $pos]
-				set r_$varname $e
-				#puts stderr "OPTION: ::$varname = $e"
-				incr ox -1
-				if { $ox == 0 } {
-					set in_option ""
-				} else {
-					set in_option [list $on $ox]
-				}
-				break ; # meaning, continue iterations
-			}
-
-			if { [string index $e 0] == "-" } {
-				# Grab the next character:
-				# - if this is "-", then take the whole word as option.
-				# - otherwise, take a "one letter option"; if there are more
-				# characters, treat it as its argument.
-				if { [string index $e 1] != "-" } {
-					set follow [string range $e 2 end]
-					set e [string range $e 0 1]
-				}
-				
-				#puts stderr "OPTION EXTRACTED: '$e' follow=$follow"
-
-				if { [info exists optargs($e)] } {
-					set oa $optargs($e)
-					if { [string index $oa 0] == "*" } {
-						# boolean option. set to 1,default is 0
-						set varname [string range $oa 1 end]
-						set r_$varname 1
-						#puts stderr "OPTION: ::$varname = true (boolean)"
-
-						if { $follow != "" } {
-							# If there was any string following the boolean option,
-							# make it look like another option.
-							set e "-$follow"
-							set follow ""
-							#puts stderr "OPTION FOLLOWING: $e"
-							continue ; # repeat current iteration
-						}
-						break ;# continue iterations
-					}
-
-					# Otherwise set the hook for the next iteration
-					set in_option [list $e [llength $oa]]
-
-					if { $follow != "" } {
-						set e $follow
-						set follow ""
-						#puts stderr "OPTION REPEATED: $e"
-						continue ;# repeat current iteration, don't get argument from the argument list
-					}
-
-					break ; # meaning, continue iterations
-				}
-
-				# This is for command-line so this is ok.
-				error "No such option: $e"
-			}
-
-			set varval [split $e =]
-			if { [llength $varval] == 1 } {
-				lappend args $e
-			} else {
-				lappend variables [lindex $varval 0] [lindex $varval 1]
-			}
-
-			break
-		}
-	}
-
-	return [list $args $variables]
-}
-
 proc InterpretDepends { rule deps {r_depfiles ""} } {
 	if { $r_depfiles != "" } {
 		upvar $r_depfiles depfiles
@@ -824,24 +693,6 @@ proc check_generic_upd_first {target} {
 	return false
 }
 
-# This function recognizes if the dependency specification is in the
-# "make" format or in "Tclmake" format (only the source files and include
-# files in one line). If "make" format is found, translate it to Tclmake format.
-proc TranslateDeps {indeps} {
-	# deps that don't have : at the end of the first word
-	set first [lindex [split $indeps " "] 0]
-	if { [string index $first end] != ":" } {
-		return $indeps
-	}
-
-	# First, remove these stupid line breaks
-	set deps [string map {"\\\n" " "} $indeps]
-
-	# Second, delete the first word which is the name of the target
-	# (we'll have the name set explicitly)
-	return [lrange $deps 1 end]
-}
-
 
 proc gendep {srcdir depfile args} {
 	set wd [pwd]
@@ -903,85 +754,15 @@ proc getflags {target} {
 	return [pget db_flags($target)]
 }
 
-proc flatten args {
-	set target ""
-	foreach el $args {
-		append target "[string map {\n { }} $el] "
-	}
-	return $target
-}
-
-proc pluniq ls {
-	set output ""
-
-	foreach l $ls {
-		if { $l ni $output } {
-			lappend output $l
-		}
-	}
-	return $output
-}
-
-proc puncomment text {
-	set lines [split $text \n]
-	set output {}
-	foreach line $lines {
-		set linetrimmed [string trimleft $line]
-		if { [string index $linetrimmed 0] != "#" } {
-		        lappend output $line
-		}
-	}
-	return [join $output \n]
-}
-
-proc plist1 arg {
-	set out ""
-	set arg [string map {"\\\n" ""} $arg]
-
-	 set lines [split $arg \n]
-	 foreach l $lines {
-		 #puts stderr "LINE: $l"
-		 set lt [string trimleft $l]
-		 if { [string index $lt 0] == "#" } {
-		         continue
-		 }
-
-		# Escape the braces
-		set l [string map {"\{" "\\\{" "\}" "\\\}" ";" "\\;"} $l]
-		 set ol [uplevel "list $l"]
-		 #puts stderr "OUTPUT LINE: $ol"
-		 lappend out $ol
-		 #puts stderr "STATE: $out"
-	 }
- 
-	 #puts "RESULT: $out"
- 
-	 return [join $out \n]
-}
-
-proc plist args {
-	if { [llength $args] == 1 } {
-		return [uplevel [list [namespace current]::plist1 [lindex $args 0]]]
-	}
-
-	set out ""
-
-	foreach a $args {
-		lappend out [uplevel [list [namespace current]::plist1 $a]]
-	}
-
-	return $out
-}
-
 proc rules {rulelist action} {
 	set rulelist [puncomment $rulelist]
 	set firstrule [lindex $rulelist 0]
 	set rules [lrange $rulelist 1 end]
 
-	eval "[flatten rule $firstrule] {$action}"
+	eval "[pflat rule $firstrule] {$action}"
 	foreach rule $rules {
 		set link [list !link [lindex $firstrule 0]]
-		eval "[flatten rule $rule] {$link}"
+		eval "[pflat rule $rule] {$link}"
 	}
 }
 
@@ -1086,26 +867,6 @@ proc depends {args} {
 # -                 incr $varname -1
 # -         }
 # - }
-
-variable depth
-set depth 0
-variable verbose
-set verbose 0
-
-proc vlog text {
-	variable verbose
-	variable depth
-
-	if { !$verbose } return
-
-	set head ""
-
-	for {set i 0} {$i < $depth} {incr i} {
-		append head "* "
-	}
-
-	puts stderr "$head $text"
-}
 
 proc build_make_tree {target whoneedstarget} {
 
@@ -1990,7 +1751,7 @@ proc resolve_action {actual_target target whoneedstarget} {
 			set mkv::p::action_performed 1
 			# apply standard make options
 
-			set action [flatten $action]
+			set action [pflat $action]
 
 			# Check only for "link" request
 			set link ""
@@ -2146,288 +1907,6 @@ proc autoclean-test {rule args} {
 	puts stderr "Autoclean would delete: $ac"
 }
 
-# Utilities
-proc dict:at {dic args} {
-	if { [llength $dic]%2 == 1 } {
-		error "This doesn't look like a dictionary: '$dic'"
-	}
-	if { ![dict exists $dic {*}$args] } {
-		return ""
-	}
-
-	return [dict get $dic {*}$args]
-}
-
-# The dict filter/key in Tcl 8.5 allows only ONE KEY pattern.
-# We have to do do multiple times filtering.
-# Only Tcl 8.6 allows multiple keys.
-# Unfortunately the filtering is done by glob, and this doesn't allow alternatives.
-if { $tcl_version < 8.6 } {
-	proc dict:filterkey {dict args} {
-		set out ""
-		foreach k $args {
-			lappend out {*}[dict filter $dict key $k]
-		}
-		return $out
-	}
-} else {
-	proc dict:filterkey {dict args} { [return dict filter $dict key {*}$args] }
-}
-
-
-proc pexpand {arg {ulevel 2}} {
-	# This trick should expand the list in place and pack
-	# it back to the list. This replaces all first-level whitespaces
-	# into single spaces.
-	set cmd "subst {{$arg}}"
-	#puts stderr "EXPANDING BY: $cmd"
-	set code [catch {list {*}[uplevel $ulevel [list eval $cmd]]} result]
-	#puts stderr "EXPANDED: $result"
-	if {$code} {
-		puts stderr "*** ERROR: can't expand: $result"
-		puts stderr "*** available variables: [uplevel $ulevel [list info vars]]"
-		error "Expanding '$arg'"
-	}
-
-	return [lindex $result 0]
-}
-
-proc pset {name arg1 args} {
-    upvar $name var
-
-    set var [pexpand $arg1]
-    foreach a $args {
-	append var " $a"
-    }
-	return $var
-}
-
-proc plremove {list item} {
-	return [lsearch -not -exact -all -inline $list $item]
-}
-
-proc pset+ {name arg1 args} {
-    upvar $name var
-    append var " [pexpand $arg1]"
-    foreach a $args {
-	append var " $a"
-	 }
-	return $var
-}
-
-proc pinit {name args} {
-	upvar $name var
-	if { [info exists var] } {
-		return $var
-	}
-
-	uplevel pset $name {*}$args
-	
-	return $var
-}
-
-proc phas {name} {
-    upvar $name lname
-    if {![info exists lname]} {
-	return 0
-    }
-    return [string is true $lname]
-}
-
-proc pget {name {default ""}} {
-
-	# If part of the name is indexed array, then
-	# shift to its end before looking for a dot.
-	# That is, don't include the index value in dot search.
-
-	set endpar [string first ")" $name]
-	if { $endpar != -1 } {
-		set before [string range $name 0 $endpar]
-		set name [string range $name $endpar+1 end]
-	} else {
-		set before ""
-	}
-
-	if { [string first . $name] != -1 } {
-		set path [lassign [split $name .] name]
-	} else {
-		set path ""
-	}
-
-	# Restore name that was taken part from
-	if { $endpar != -1 } {
-		set name "$before$name"
-	}
-
-    upvar $name lname
-    if {![info exists lname]} {
-	return $default
-    }
-
-	if { $path != "" } {
-
-		if { [llength $lname] % 2 == 1 } {
-		        # This is an odd list, so cannot be a dict
-		        return $default
-		}
-
-		if { ![dict exists $lname {*}$path] } {
-		        return $default
-		}
-		return [dict get $lname {*}$path]
-	}
-
-    return $lname
-}
-
-proc palias {name body} {
-	set procbody "return \[$body {*}\$args\]"
-	namespace inscope :: proc $name args $procbody
-}
-
-proc pdef {name args} {
-	if { [llength $args] == 1 } {
-		set args [lindex $args 0]
-	}
-	namespace inscope :: proc $name {} "return \[uplevel concat $args\]"
-}
-
-proc pdefv {name args} {
-	set e [catch {expr $args} result]
-	if { $e } {
-		puts stderr "NOTE: '$args' can't be evaluated: $result"
-		set result $args
-	} 
-	namespace inscope :: proc $name {} [list return $result]
-}
-
-proc pdefx {name arg} {
-	namespace inscope :: proc $name {} "return \[uplevel expr {$arg}\]"
-}
-
-proc pwrite {filename contents} {
-	set fd [open $filename w]
-	puts $fd $contents
-	close $fd
-}
-
-proc pread {filename} {
-	set fd [open $filename r]
-	set con [read $fd]
-	close $fd
-	return $con
-}
-
-proc pupdate {filename contents} {
-	if { [file exists $filename] } {
-		set oldcon [pread $filename]
-		if { [string trim $oldcon] == [string trim $contents] } {
-		        return 0
-		}
-	}
-	pwrite $filename $contents
-	return 1
-}
-
-# This function is directly copied from 'apply' Tcl manpage.
-# Just wanted to be clear about it, although it doesn't kick, but...
-proc pmap {lambda list} {
-	set result {}
-	if { [llength $lambda] == 1 } {
-		# Then it's a command name
-		foreach item $list {
-		        lappend result [$lambda $item]
-		}
-	} else {
-		foreach item $list {
-		        lappend result [apply $lambda $item]
-		}
-	}
-	return $result
-}
-
-proc pfind {args} {
-	# First, test if the last one is a list of directories or a mask
-	set last [lindex $args end]
-	if { [string first * $last] != -1 || [string first "\[" $last] != -1 || [string first ? $last] != -1 } {
-		# This is a mask and it cannot be a directory.
-		set masks $args
-		set directories .
-	} else {
-		set masks [lrange $args 0 end-1]
-		set directories [lindex $args end]
-	}
-
-	set outlist ""
-	foreach d $directories {
-		foreach m $masks {
-		        if { $d == "." } {
-		                set p $m
-		        } else {
-		                set p $d/$m
-		        }
-		        lappend outlist {*}[glob -nocomplain $p]
-		}
-	}
-
-	return $outlist
-}
-
-proc psearch {files args} {
-	set out ""
-
-	foreach file $files {
-		foreach dir $args {
-		        lappend out {*}[glob -nocomplain [file join $dir $file]]
-		}
-	}
-
-	return $out
-}
-
-proc prelocate {path {wd .}} {
-
-	if { $wd == "." } {
-		set wd [pwd]
-	} else {
-		set wd [file normalize $wd]
-	}
-
-	set norm [file normalize $path]
-
-	if { $norm == $wd } {
-		return .
-	}
-
-	set common 0
-	set norm_parts [file split $norm]
-	set b_parts [file split $wd]
-	set max [expr {max([llength $norm_parts],[llength $b_parts])}]
-	#puts "prelativize: NORM: $norm_parts B: $b_parts -- looking for diffs up to $max"
-	while { [lindex $norm_parts $common] == [lindex $b_parts $common] } {
-		incr common
-		if { $common == $max } {
-		        break
-		}
-	}
-
-	set shift_norm_parts [lrange $norm_parts $common end]
-	set overhead [expr {[llength $b_parts]-$common}]
-	set uppath ""
-	#$mkv::debug "Adding up-dir overhead: $overhead"
-	if { $overhead > 0 } {
-		set uppath [lrepeat $overhead ..]
-	}
-	set rpath [file join {*}$uppath {*}$shift_norm_parts]
-
-	if { $rpath == "" } {
-		return .
-	}
-
-	#$mkv::debug "Norma-localize in '$wd' $norm: $rpath"
-	return $rpath
-}
-
 
 # utilities (for debug stuff)
 
@@ -2449,33 +1928,6 @@ proc tribool_logical in {
 	return indeterminate
 }
 
-proc number_cores {} {
-	# This should return some system-dependent number
-	# of cores. This should be done some system-dependent
-	# way, so far we'll just use
-	# - on Linux-compliant systems (including Cygwin), use /proc/cpuinfo
-	# - on others, return 2.
-
-	switch -glob -- $::tcl_platform(os) {
-		CYGWIN* - Linux {
-		        set nc [exec grep "^processor\[ \t\]:" /proc/cpuinfo | wc -l]
-		}
-
-		Darwin {
-		        set nr [exec sysctl hw.ncpu]
-		        set nc [string trim [lindex [split $nr :] 1]]
-		}
-
-		default {
-		        set nc 2
-		}
-	}
-
-	if { ![string is integer $nc] || $nc < 2 } {
-		return 2
-	}
-	return $nc
-}
 
 proc finished_program {var ix op} {
 	puts stderr "+++ Leaving '[file normalize $::mkv::directory]'"
@@ -2491,6 +1943,8 @@ set public_export [puncomment {
 	dep-rule
 	make
 	submake
+	setflags
+	getflags
 
 	# Logging
 	vlog
@@ -2498,33 +1952,12 @@ set public_export [puncomment {
 	# Utility functions
 	dict:at
 	dict:filterkey
-	plremove
-	pset
-	pset+
-	pinit
-	pget
-	phas
-	palias
-	pdef
-	pdefv
-	pdefx
-	pwrite
-	pread
-	pupdate
-	pexpand
-	pfind
-	psearch
-	prelativize
-	plist
-	pmap
-	prelocate
-	puncomment
 	autoclean
 	autoclean-test
-	process-options
-	setflags
-	getflags
 }]
+
+# Add utilities from mkv.p.utilities.tcl
+lappend public_export {*}$public_export_util {*}$public_export_builtin
 
 set public_import ""
 foreach n $public_export {
@@ -2613,7 +2046,7 @@ proc main argv {
 	set mkv::targets $cmd_args
 
 	if { $jobs == "j" } {
-		set jobs [mkv::p::number_cores]
+		set jobs [mkv::p::number-cores]
 	}
 
 	if { ![string is integer $jobs] || $jobs < 1 } {
