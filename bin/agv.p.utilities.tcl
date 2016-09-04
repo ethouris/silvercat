@@ -186,10 +186,10 @@ proc PrepareGeneralTarget {} {
 		if { $type in {program library custom} } {
 			$::g_debug " --> Added to 'all' (because $type)"
 			lappend subtargets $t
-		} elseif { $type == "directory" } {
+		} elseif { $type == {directory} } {
 			$::g_debug " --> Added to 'all' as $t/all (because $type)"
 			CheckDefinedTarget $t/all  ;# Create it lazily
-			lappend subtargets $t/all
+			lappend subtargets $t $t/all
 		} else {
 			$::g_debug " --| Not added to 'all' (because $type)"
 		}

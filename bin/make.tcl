@@ -1219,12 +1219,15 @@ proc make target {
 		if { $makefile_regenerated } {
 			puts stderr "+++ Restarting the make process due to rebuilt '$mkv::makefile'"
 			reload_makefile
+			# Clear the done list
+			set q_done ""
 
 			# LOL, after reloading this target might be no longer valid. If so, then you can only
 			# say sorry.
 			set target $start_target
 			variable db_actions
 			variable db_phony
+			
 
 			if { ![info exists db_actions($target)] && ![info exists db_phony($target)] } {
 				puts stderr "+++ After regeneration, '$target' no longer exists. Sorry. Exiting."
@@ -1825,6 +1828,7 @@ proc rolling_autoclean {rule debug flagged} {
 	}
 
 	set excluded 0
+	set enforced 0
 	if { $flagged != "" } {
 		foreach f $flagged {
 			set not 0
@@ -1835,9 +1839,14 @@ proc rolling_autoclean {rule debug flagged} {
 
 			if { [lsearch [pget db_flags($rule)] $f] == -1 } {
 				# Flag not found
-				set excluded [expr {!$not}]
+				#puts stderr "For '$rule', flag $f NOT found, expected to [expr {$not ?{NOT}:{}}] be found"
+				set excluded [expr {$excluded || !$not}]
+				set enforced 0
 			} else {
+				#puts stderr "For '$rule', flag $f FOUND, expected to [expr {$not ?{NOT}:{}}] be found"
+				# Flag found, so don't exclude 
 				set excluded $not
+				set enforced [expr {$enforced || !$not}]
 			}
 			if { $excluded } {
 				break
@@ -1861,7 +1870,12 @@ proc rolling_autoclean {rule debug flagged} {
 			} else {
 				set genshow ""
 			}
-			$debug "WON'T DELETE: $rule - no dependencies$genshow"
+			if { $enforced } {
+				$debug "WOULD DELETE: $rule - no dependencies$genshow, but enforced by flags: $flagged"
+				lappend autoclean_candidates $rule
+			} else {
+				$debug "WON'T DELETE: $rule - no dependencies$genshow"
+			}
 		}
 	} else {
 		if { ![info exists db_actions($rule)] && $generic == "" } {
@@ -1890,14 +1904,48 @@ proc rolling_autoclean {rule debug flagged} {
 	return [lsort -decreasing -unique $autoclean_candidates]
 }
 
+proc is-dir-nonempty d {
+	set dircon [glob -nocomplain -tails -dir $d * .*]
+	# Linear searching because normally . and .. appear at the very beginning
+	set rem 0
+	set dirconout ""
+	for {set i 0} {$i < [llength $dircon]} {incr i} {
+		set ed [lindex $dircon $i]
+		if {$rem == 2} {
+			#Stop checking, copy just one to mark nonempty
+			lappend dirconout $ed
+			break
+		}
+		if {$ed in ". .." } {
+			incr rem
+			continue
+		}
+		lappend dirconout $ed
+		break ;# we just need one other than . .. to prove nonempty.
+	}
+
+	return [expr {$dirconout != ""}]
+}
+
 proc autoclean {rule args} {
 	set mkv::p::gg_debug_indent 0
 	set ac [rolling_autoclean $rule $mkv::debug $args]
 	if { $ac != "" } {
 		puts stderr "Autoclean deletes: $ac"
-		if { [catch {file delete {*}$ac} result] } {
-		        puts stderr "*** ERROR: can't delete '$ac'"
+
+		foreach d $ac {
+			if { [file isdirectory $d] } {
+				if { [is-dir-nonempty $d] } {
+					puts stderr "*** Leaving directory '$d': not empty. Deletion MAY be unwanted."
+					continue
+				}
+			}
+
+			if { [catch {file delete {*}$d} result] } {
+				puts stderr "*** ERROR: can't delete '$d': $result"
+			}
 		}
+
 	}
 }
 

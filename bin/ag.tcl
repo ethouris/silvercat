@@ -1663,7 +1663,7 @@ proc ag-do-genrules target {
 	#%exit
 
 	# For genrules, add also reconfigure rule to regenerate Makefile.tcl.
-	ag reconfigure -type custom -output Makefile.tcl -flags noclean -sources $::agfile \
+	ag reconfigure -type custom -output Makefile.tcl -flags noclean distclean -sources $::agfile \
 		-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr] $cmdf]}
 
 	vlog "([pwd]) ALL DEFINED TARGETS:\n\t[array names agv::target]"
@@ -1722,10 +1722,18 @@ proc GenerateMakefile {target fd} {
 	# Rules is itself also a dictionary.
 	# Key is target file, value is dependencies and command at the end.
 
-	foreach {tarfile data} $rules {
-		puts $fd "rule $tarfile $data"
+	if { $rules != "" } {
+		foreach {tarfile data} $rules {
+			puts $fd "rule $tarfile $data"
+			if { $flags != "" } {
+				puts $fd "setflags $tarfile $flags"
+			}
+		}
+	} else {
+		# Apply flags to the target, if any, for the target name
 		if { $flags != "" } {
-			puts $fd "setflags $tarfile $flags"
+			puts $fd "# Not defining rules for '$target' (type: $type) - none generated."
+			puts $fd "setflags $target $flags"
 		}
 	}
 
@@ -1790,7 +1798,7 @@ proc SynthesizeClean {target} {
 		# It's needed to spit it out as an overall clean target dependency.
 		lappend agv::target($target) cleantarget $dir/$cleanname
 
-		return "rule $dir/$cleanname {\n\t!tcl submake -C $dir $cleanname\n}\nphony $dir/$cleanname"
+		return "rule $dir/$cleanname {\n\t%submake -C $dir $cleanname\n}\nphony $dir/$cleanname"
 	}
 
 	set cleandeps ""
@@ -1807,7 +1815,11 @@ proc SynthesizeClean {target} {
 	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target' (with extra $cleandeps)"
 	set orule "rule $cleanname $cleandeps {\n\t%autoclean $target $cleanflags\n}\nphony $cleanname"
 	if { $tarname == "all" } {
-		append orule "\nrule distclean clean {\n\t%autoclean $target\n\t%autoclean $target distclean\n}"
+		append orule "\nrule distclean clean \{\n"
+		foreach d [pget agv::p::directories] {
+			append orule "\t%submake -C $d distclean\n"
+		}
+		append orule "\t%autoclean $target\n\t%autoclean $target distclean\n\}"
 	}
 
 	return $orule
@@ -2193,7 +2205,7 @@ proc ag-subdir1 target {
 		}
 	}
 
-	ag $target -type directory
+	ag $target -type directory -flags distclean
 	if { $agfile != "" } {
 		ag $target -agfile $agfile
 	}
