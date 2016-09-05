@@ -2,6 +2,13 @@
 CONFIGURE
 =========
 
+0. DISCLAIMER
+-------------
+
+This document describes a concept. Nothing that it describes is currently implemented,
+nor is this document a complete descrption of anything.
+
+
 1. Config database
 ------------------
 
@@ -93,6 +100,11 @@ is done, which means that it won't be newly set by ag-check-have) by using --wit
 has then the following syntax:
 
     --with-<pkgname>-includes=PATH --with-<pkgname>-libs=PATH
+
+or, if the standard-layout directories are used (lib and include), you can simplify it to:
+
+    -with-<pkgname>-prefix=PATH
+	# uses PATH/lib for libs and PATH/include for includes
 
 Note that you can also create an alias package name, which can translate the used package name
 into a valid package name available in pkg-config database. Searching in alias database has higher
