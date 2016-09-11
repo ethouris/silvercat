@@ -373,7 +373,7 @@ proc FindSilverFile {agfile {agdir ""}} {
 
 # XXX This should be platform-dependent!
 proc CreateLibraryFilename {target type} {
-	if { $type == "runtime" } {
+	if { $type == "dynamic" } {
 		return lib$target.so
 	}
 
@@ -1178,21 +1178,40 @@ proc Process:program target {
 		dict set agv::target($target) output $outfile
 	}
 
-	ProcessCompileLink program $target $outfile
+	ProcessCompileLink program normal $target $outfile
 	Process:phony $target
 }
 
 proc Process:library target {
 
 	# NOTE: This immediate "archive" should be extracted
-	# from "libtype" key.
-	set outfile [pget agv::target($target).output]
-	if { $outfile == "" } {
-		set outfile [CreateLibraryFilename $target archive]
-		dict set agv::target($target) output $outfile
+	# from "libspec" key.
+
+	set libspec [pget agv::target($target).libspec]
+	if { $libspec == "" } {
+		set libspec static
 	}
 
-	ProcessCompileLink library $target $outfile
+	set ipos 0
+
+	set outfiles ""
+	set output [pget agv::target($target).output]
+
+	foreach type $libspec {
+
+		set outfile [lindex $output $ipos]
+		if { $outfile == "" } {
+			set outfile [CreateLibraryFilename $target $type]
+			lappend outfiles $outfile
+		}
+
+		incr ipos
+
+		ProcessCompileLink library $type $target $outfile
+	}
+	if { $outfiles != "" } {
+		dict set agv::target($target) output $outfiles
+	}
 	Process:phony $target
 }
 
@@ -1328,7 +1347,7 @@ proc GenerateInstallTarget:library {target prefix} {
 	set agv::target($target) $db
 }
 
-proc ProcessCompileLink {type target outfile} {
+proc ProcessCompileLink {type subtype target outfile} {
 
 	# The ProcessLanguage does only language check for all sources
 	# and defines the languages for every source file as well as for
@@ -1362,7 +1381,7 @@ proc ProcessCompileLink {type target outfile} {
 
 	$::g_debug "After-sources processed database for $target:"
 	DebugDisplayDatabase agv::target $target
-	set rule [GenerateLinkRule:$type $db $outfile]
+	set rule [GenerateLinkRule:$type $subtype $db $outfile]
 	dict set rules $outfile $rule
 
 	# Add a phony rule that redirects the symbolic name to physical file,
@@ -1468,15 +1487,46 @@ proc GenerateCompileRule {db lang objfile source deps} {
 	return $rule
 }
 
-proc GetTargetFile target {
-	set filename [ResolveOutput1 [dict:at $agv::target($target) output]]
-	if { $filename == "" } {
-		$::g_debug "ERROR: no filename set in this database:"
-		DebugDisplayDatabase agv::target $target
-		error "Output file not defined for $target"
+proc GetTargetFile {target spec} {
+
+	set output [dict:at $agv::target($target) output]
+
+	if { $spec != "" } {
+		# Extract filename according to the specification.
+		set type [dict:at $agv::target($target) libspec]
+		if { $type == "" } {
+			set type static
+		}
+
+		if { [llength $type] < 2 } {
+			if { $spec != $type } {
+				error "Requested dependency of '$target/$spec': no such spec found in the target"
+			}
+			# output is already set to the required value
+		} else {
+			set pos [lsearch $type $spec]
+			if { $pos == -1 } {
+				error "Getting filename for $target spec:$spec: no such specialization found in libspec '$type'"
+			}
+			set output [lindex $output $pos]
+			set spec [lindex $type $pos]
+		}
 	}
 
-	return $filename
+	set outs ""
+
+	foreach o $output {
+		set filename [ResolveOutput1 $o]
+		if { $filename == "" } {
+			$::g_debug "ERROR: no filename set in this database:"
+			DebugDisplayDatabase agv::target $target
+			error "Output file not defined for $target"
+		}
+
+		lappend outs $filename
+	}
+
+	return [list $outs $spec]
 	#set dir [file dirname $target]
 	#return [file join $dir $filename]
 }
@@ -1542,9 +1592,13 @@ proc GetDependentLibraryTargets target {
 	set langs ""
 
 	foreach d $depends {
-		if { ![CheckDefinedTarget $d] } {
+
+		$::g_debug "Getting DEP: '$d'"
+		lassign [CheckDefinedTarget $d] d spec
+		if { $d == "" } {
 			error "Target '$d' (dependency of $target) is not defined"
 		}
+		$::g_debug "CheckDefinedTarget: DEP=$d SPEC=$spec"
 
 		set type [dict:at $agv::target($d) type]
 
@@ -1555,9 +1609,19 @@ proc GetDependentLibraryTargets target {
 		}
 
 		if { $type == "library" } {
-			set o [GetTargetFile $d]
-			$::g_debug " -- LIBRARY: output=[pget agv::target($d).output] ($o)"
+			set slibs ""
+			lassign [GetTargetFile $d $spec] o spec
+			$::g_debug " -- LIBRARY DEP '$d': output=[pget agv::target($d).output] ($o) SPEC: $spec"
 			lappend libs $o
+			set ldflags ""
+			if { $spec == "static" } {
+				# Static libraries must carry over all its ldflags to the target
+				set slibs [dict:at $agv::target($d) ldflags]
+				$::g_debug " -- static library $d - importing its ldflags: $slibs"
+			} else {
+				$::g_debug " -- dynamic library $d - not importing ldflags"
+			}
+
 			set langs [dict:at $agv::target($d) language]
 			$::g_debug " --- Target '$d' provides libraries: $libs (language: $langs)"
 
@@ -1565,17 +1629,19 @@ proc GetDependentLibraryTargets target {
 			# XXX consider unwinding - recursion in Tcl is limited and may
 			# result in internal error!
 			lassign [GetDependentLibraryTargets $d] adlibs adlangs
-			set libs [concat $adlibs $libs]
+			set libs [concat $adlibs $libs $slibs]
 			lappend langs {*}$adlangs
 		} else {
 			$::g_debug " --- Target of type '$type' does not provide dependent libraries."
 		}
 	}
 
+	$::g_debug " --- RESULTING DEP LDFLAGS FOR '$target': $libs"
+
 	return [list $libs $langs]
 }
 
-proc GenerateLinkRule:program {db outfile} {
+proc GenerateExecutableLinkRule {type db outfile} {
 
 	# Check dependent targets. If this target has any dependent targets of type library,
 	# add its library specification to the flags.
@@ -1589,8 +1655,17 @@ proc GenerateLinkRule:program {db outfile} {
 	set depends [dict:at $db depends]
 	set ldflags [CompleteFlags $db $lang ldflags]
 
+	if { $type == "library" } {
+		set linker [pget agv::profile($lang).linkdl]
+		if { $linker == "" } {
+			# Check if you can glue link and dlflags
+			set linker "[pget agv::profile($lang).link] [pget agv::profile($lang).dlflags]"
+			# We don't care if it is valid or not.
+		}
+	} else {
+		set linker [dict get $agv::profile($lang) link]
+	}
 
-	set linker [dict get $agv::profile($lang) link]
 	set oflag [dict get $agv::profile($lang) link_oflag]
 
 	$::g_debug "Generating link rule for '$outfile' ldflags: $ldflags libs: $libs"
@@ -1607,14 +1682,31 @@ proc GenerateLinkRule:program {db outfile} {
 	return $rule
 }
 
-# XXX ONLY FOR TESTING!!!
-# This version creates just the static library out of given sources
+proc GenerateLinkRule:program {subtype db outfile} {
+	return [GenerateExecutableLinkRule program $db $outfile]
+}
+
 # NOTE: static libraries are just archives with *.o files, they don't
 # have dependencies - at worst they will be resolved at link time with
 # dynamic libraries or executables.
-proc GenerateLinkRule:library {db outfile} {
+proc GenerateLinkRule:library {libtype db outfile} {
+
+	if { $libtype == "dynamic" } {
+		return [GenerateExecutableLinkRule library $db $outfile]
+	}
+
+	# The 'libspec' key can contain 'static' and 'dynamic'.
+	# If there's none, it defaults to 'static'.
+	# If both are supplied, create link rules for both!
+
+	set lang [pget db.language]
+	set arcmd [dict:at $agv::profile($lang) archive]
+	if { $arcmd == "" } {
+		error "Can't create rules for static library - profile key 'archive' returns no commands"
+	}
+
 	set objects [dict:at $db objects]
-	set command "ar rcs $outfile $objects"
+	set command "$arcmd $outfile $objects"
 	set rule "$objects {\n\t$command\n}"
 	return $rule
 }
@@ -1887,14 +1979,22 @@ proc CheckDefinedTarget target {
 
 	# If the target exists - it's already done.
 	if { [info exists agv::target($target)] } {
-		return true
+		# It this was a library, then return the first default
+		if { [dict:at $agv::target($target) type] == "library" } {
+			set spec [lindex [dict:at $agv::target($target) libspec] 0]
+			if { $spec == "" } {
+				set spec static
+			}
+			return [list $target $spec]
+		}
+		return $target
 	}
 
 	# Maybe it's undefined because it's directory based.
 	set parts [file split $target]
 	if { [llength $parts] < 2 } {
 		# Not a directory-based target, so it must be explicitly defined
-		return false
+		return
 	}
 
 	# It is directory based.
@@ -1902,11 +2002,26 @@ proc CheckDefinedTarget target {
 	set dir [lindex $parts 0]
 	if { ![info exists agv::target($dir)] } {
 		# XXX Maybe do lazy-define of the target?
-		error "Target '$target' is subdir-based, but no target '$dir' is defined (use ag-subdir to define)"
+		error "Target '$target' is parent/child form, but no target '$dir' is defined (use ag-subdir to define)"
 	}
 
-	if { [dict:at $agv::target($dir) type] != "directory" } {
-		error "Target '$target' is subdir-based, but '$dir' is not a directory target"
+	set type [dict:at $agv::target($dir) type]
+
+	switch -- $type {
+		default {
+			error "Target '$target' is parent/child form, but '$dir' is not a directory or library target"
+		}
+
+		library {
+			if { [lindex $parts 1] ni {static dynamic} } {
+				error "Target '$target' is a library, but specialization '[lindex $parts 1]' is unknown (expected: static or dynamic)"
+			}
+			return $parts
+		}
+
+		directory {
+			# Simply go on.
+		}
 	}
 
 	# Ok, having that confirmed, synthesize the target
@@ -1931,7 +2046,7 @@ proc CheckDefinedTarget target {
 			dict set agv::target($target) output $output
 		}
 	}
-	return true
+	return $target
 }
 
 proc agp-prepare-database {target {parent ""}} {
@@ -1969,7 +2084,7 @@ proc agp-prepare-database {target {parent ""}} {
 		}
 	}
 
-	if { ![CheckDefinedTarget $target] } {
+	if { [CheckDefinedTarget $target] == "" } {
 		set par ""
 		if { $parent != "" } {
 			set par " (as a dependency of $parent)"

@@ -29,8 +29,8 @@ following functional prefix are used:
 * --with - specifies some detail of already accepted alternative, such as path
   or alternative specification. The `with` prefix should be used for something
   that is already enabled by `--enable` or used by `--use`, or when it's turned
-  on by default. Anything specified by --with must have some existing default value.
-  Default is enforced with --without specification or --with-OPTION=default.
+  on by default. Anything specified by `--with` must have some existing default value.
+  Default is enforced with `--without` specification or `--with-OPTION=default`.
 
 All these options later fill details in the ag-config database. Access is gained
 through the following command, for example:
@@ -48,13 +48,13 @@ options in `have` and `with` databases to override or add system settings.
 2. Builtin configuration features
 ---------------------------------
 
-* --with-buildtype:
+* `--with-buildtype`:
    * release (default)
    * debug
    * debug-opt
-* --with-profile: enforce Silvercat to load given profile (multiple profiles can be passed)
-* --with-agpath: add paths to Silvercat shared files (profiles and frameworks used by ag-load)
-* --have-pkg: check if pkg-config provides package with given name
+* `--with-profile`: enforce Silvercat to load given profile (multiple profiles can be passed)
+* `--with-agpath`: add paths to Silvercat shared files (profiles and frameworks used by ag-load)
+* `--have-pkg`: check if pkg-config provides package with given name
 
 
 3. Typical scenarios for configure
@@ -64,7 +64,7 @@ options in `have` and `with` databases to override or add system settings.
 
 There are a couple of standard tests (particular modules may enhance these test abilities).
 The most important test - and the most generic one - is pkg-config. There's also a standard
-feature test, --have-pkg.
+feature test, `--have-pkg`.
 
 You put in the config sheet the following statement:
 
@@ -72,9 +72,9 @@ You put in the config sheet the following statement:
 
 This will cause the following databases to be updated:
 
-* `have` will be added a key named 'pkg:<package>'.
-* `with` will be added a key named 'includes:<package>' that extracts the include path and flags
-* `with` will be added a key named 'libs:<package>' that extracts the library path and flags
+* `have` will be added a key named '`pkg:<package>`'.
+* `with` will be added a key named '`includes:<package>`' that extracts the include path and flags
+* `with` will be added a key named '`libs:<package>`' that extracts the library path and flags
 
 Note that the package can be mandatory or optional, as well as the `enable` flag for that package
 may exist and be set to false, in which case the check isn't being done. So, all the above updates
@@ -103,8 +103,8 @@ has then the following syntax:
 
 or, if the standard-layout directories are used (lib and include), you can simplify it to:
 
-    -with-<pkgname>-prefix=PATH
-	# uses PATH/lib for libs and PATH/include for includes
+    --with-<pkgname>-prefix=PATH
+    # uses PATH/lib for libs and PATH/include for includes
 
 Note that you can also create an alias package name, which can translate the used package name
 into a valid package name available in pkg-config database. Searching in alias database has higher

@@ -1,0 +1,12 @@
+
+ag-profile gcc-native
+
+# Force generating cached-ruled dependencies
+ag-profile c++ -depopt {= }
+
+ag-profile posix-install
+ag-profile general -depspec cached -imgen target-path
+
+ag lib -type library -libspec dynamic -s ../file2.cc -h ../file.h -ldflags -- -lm
+ag prg -type program -s ../file1.cc ../file2.cc -depends lib
+

@@ -38,7 +38,7 @@ ag-profile posix-install   ;# Profile for installation rules
 
 # ag answer {
 # 	-type 		program
-# 	-category 	bin
+# 	-install 	bin
 # 	-sources 	file1.cc file2.cc
 # 	-headers 	file.h
 # 	-packages   zlib

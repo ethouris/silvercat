@@ -9,6 +9,7 @@ set singles {
 	depspec
 	preproc
 	command
+	libtype
 }
 
 set profiles {
@@ -23,7 +24,9 @@ set profiles {
 			compile_oflag "Usually -o"
 			link "Command to produce executable file"
 			link_oflag "Usually -o"
-			linkdl "(optional) Command to produce dynamic library file (defaults to link)"
+			linkdl "(optional) Command to produce dynamic library file (defaults to link with dlflag)"
+			dlflag "Flag that should be added when compiling a dynamic library, using 'link'"
+			archive "Command to create static libraries (archives)"
 
 			# { The format of the output data for gendep should be as it's generated for Makefile, that is:
 			#	 - The first word in the line is the target name followed by a colon
@@ -77,6 +80,7 @@ set profiles {
 			libdirflag -L
 			incdirflag -I
 			std_option "-std="
+			archive "ar rcs"
 		}
 		c++ {
 			compile "g++ -c"
