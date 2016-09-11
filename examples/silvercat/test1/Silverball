@@ -7,6 +7,7 @@ ag-profile c++ -depopt {= }
 ag-profile posix-install
 ag-profile general -depspec cached -imgen target-path
 
-ag lib -type library -libspec dynamic -s ../file2.cc -h ../file.h -ldflags -- -lm
-ag prg -type program -s ../file1.cc ../file2.cc -depends lib
+ag lib -type library -libspec static -s ../file2.cc -h ../file.h -ldflags -- -lm
+ag lib2 -type library -libspec static -s ../file3.cc -depends lib -ldflags -- -lcrypto
+ag prg -type program -s ../file1.cc -depends lib2
 
