@@ -47,6 +47,9 @@ variable q_pending
 # List of targets that have been scheduled, but haven't been finished
 variable q_running ""
 
+# Target on which the failure was triggered
+variable failtarget ""
+
 # structure {target status}, where status is
 # 0 - succeeded (dependent targets can be started)
 # 1 - failed first
@@ -868,7 +871,7 @@ proc depends {args} {
 # -         }
 # - }
 
-proc build_make_tree {target whoneedstarget} {
+proc build_make_tree {parentstack target whoneedstarget} {
 
 	variable db_depends
 	variable db_generic
@@ -879,154 +882,179 @@ proc build_make_tree {target whoneedstarget} {
 	variable db_stale
 	variable q_done
 	variable depth
-	
-	$mkv::debug "--- building tree for $target ---"
 
-	# Deny making targets, which already failed
-	if { [lsearch $mkv::p::failed $target] != -1 } {
-		vlog "Target $target denied, because already failed"
-		error "Derived failure from $target"
-	}
+	# This needs to trace whatever has interrupted this
+	# process directly
 
-	set status 1
-	set hasdepends [info exists db_depends($target)] 
-	set prereq ""
+	set failgoal $target
+	set catch [catch {
 
-	if { !$hasdepends } {
-		vlog "No direct depends for '$target', checking for generic depends"
-		set generic [find_generic $target]
-		if { $generic != "" } {
-			incr depth
-			set depnames [generate_depends $target $generic $db_depends($generic)]
-			incr depth -1
-			if { $depnames != "" } {
-				set hasdepends 1
-			}
-			if { [info exists db_prereq($generic)] } {
+		set cyclepos [lsearch -exact $parentstack $target]
+		if { $cyclepos != -1 } {
+			# This is error - dependency cycle.
+			# Build cycle information, display, throw error.
+
+			set cycleinfo [lrange $parentstack $cyclepos end]
+			puts stderr "ERROR: DEPENDENCY CYCLE: [join $cycleinfo " --> "] --> $target"
+			error "Dependency cycle found at target '$target'"
+		}
+
+		$mkv::debug "--- building tree for $target --- (parents: $parentstack)"
+
+		# Deny making targets, which already failed
+		if { [lsearch $mkv::p::failed $target] != -1 } {
+			vlog "Target $target denied, because already failed"
+			error "Derived failure from $target"
+		}
+
+		set status 1
+		set hasdepends [info exists db_depends($target)] 
+		set prereq ""
+
+		if { !$hasdepends } {
+			vlog "No direct depends for '$target', checking for generic depends"
+			set generic [find_generic $target]
+			if { $generic != "" } {
 				incr depth
-				set prereq [generate_depends $target $generic $db_prereq($generic)]
+				set depnames [generate_depends $target $generic $db_depends($generic)]
 				incr depth -1
+				if { $depnames != "" } {
+					set hasdepends 1
+				}
+				if { [info exists db_prereq($generic)] } {
+					incr depth
+					set prereq [generate_depends $target $generic $db_prereq($generic)]
+					incr depth -1
+				}
+				vlog "Found generic '$generic' with deps: '$depnames' and prereq '$prereq'"
 			}
-			vlog "Found generic '$generic' with deps: '$depnames' and prereq '$prereq'"
-		}
-	} else {
-		set depnames $db_depends($target)
-		if { [info exists db_prereq($target)] } {
-			set prereq $db_prereq($target)
-		}
-	}
-
-	set result "(reason unknown)"
-	set failgoal ""
-	if { $hasdepends } {
-		vlog "($target) Has dependencies: $depnames"
-
-		# Resolve possible file-contained dependencies
-
-		set depends [getdeps $target $depnames]
-		foreach depend $depends {
-		        $mkv::debug "Considering $depend as dependency for $target"
-		        debug_indent+
-		        set res [catch {build_make_tree $depend $target} result]
-		        debug_indent-
-		        $mkv::debug "... <--- back at '$target'"
-		        if { $res } {
-		                $mkv::debug "ERROR: CODE=$::errorCode INFO=$::errorInfo"
-		                set status 0
-		                $mkv::debug "Making $depend failed, so $target won't be made"
-		                if { $mkv::p::keep_going } {
-		                        vlog "- although continuing with other targets (-k)"
-		                } else {
-							set failgoal $depend
-							break
-		                }
-		        }
-		}
-
-		vlog "($target) Has prerequisites: $prereq"
-
-		# For prereq, just make sure that they exist.
-		foreach p $prereq {
-		        vlog "Considering $p as prerequisite for $target"
-		        if { ![file exists $p] } {
-		                incr depth
-		                mkv::p::debug_indent+
-		                set res [catch {build_make_tree $p $target} result]
-		                mkv::p::debug_indent-
-		                $mkv::debug "... <--- back at '$target'"
-		                incr depth -1
-		                if { $res } {
-		                        $mkv::debug "ERROR: ''$result'' $::errorCode $::errorInfo"
-		                        set status 0
-		                        vlog "Making $p failed, so $target won't be made"
-		                        if { $mkv::p::keep_going } {
-		                                vlog "- although continuing with other targets (-k)"
-								} else {
-									set failgoal $p
-									break
-		                        }
-		                }
-		        }
-		}
-	}
-
-	 if { $status == 0 } {
-		 error "FAILED '$target' at '$failgoal' due to:\n+++ $result"
-	 }
-
-	# If a phony target doesn't have action, it won't be checked for generic action, too.
-    # --- if { [info exists db_phony($target)] && ![info exists db_actions($target)] } {
-    # ---         vlog "Target '$target' is phony and has no action - skipping"
-    # --- 
-    # ---         # Update the need database HERE because pure phony target will be no longer
-    # ---         # processed. Not doing it for normal target because this will undergo
-    # ---         # further processing.
-    # ---         set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
-    # ---         return
-    # --- }
-
-	set stale 0
-	
-	set need_build 0
-	set reason "is wrong"
-	if { [info exists db_phony($target)] } {
-		set need_build 1
-		set reason "is phony"
-	} elseif { ![file exists $target] } {
-		set need_build 1
-		set reason "is missing"
-	}
-
-	if { $need_build } {
-		vlog "File '$target' $reason - resolving action for '$target' (@[pwd])"
-		if { ![enqueue_target $target $target $whoneedstarget] } {
-	    	error "Action resolution failure for '$target'"
-		}
-	} elseif { $hasdepends } {
-		vlog "Checking if $target is fresh:"
-		foreach depend $depends {
-	    vlog "... against $depend [expr {[info exists db_phony($depend)] ? "(PHONY)":""}]..."
-		    set stale [is_target_stale $target $depend]
-		        if { $stale } {
-		        vlog "File '$target' is stale against '$depend', will be made"
-		                dict set db_stale($target) $depend 1
-		        break
-		    }
-		}
-
-		if { $stale || [info exists db_phony($target)] } {
-		        vlog "Resolving make action for $target (stale against $depend)"
-		        if {![enqueue_target $target $target $whoneedstarget]} {
-		                error "Action resolution failure for $target"
-		        }
 		} else {
-		        vlog "File $target is fresh, so won't be made"
-		        # Good, but it it's fresh, then mark it as done.
-		        lappend q_done $target
+			set depnames $db_depends($target)
+			if { [info exists db_prereq($target)] } {
+				set prereq $db_prereq($target)
+			}
 		}
-	} else {
-		vlog "File $target exists and has no dependencies, so won't be made"
+
+		set result "(reason unknown)"
+		if { $hasdepends } {
+			vlog "($target) Has dependencies: $depnames"
+
+			# Resolve possible file-contained dependencies
+
+			set depends [getdeps $target $depnames]
+			foreach depend $depends {
+				$mkv::debug "Considering $depend as dependency for $target (parents: $parentstack)"
+				debug_indent+
+				set res [catch {build_make_tree [concat $parentstack $target] $depend $target} result]
+				debug_indent-
+				$mkv::debug "... <--- back at '$target'"
+				if { $res } {
+					$mkv::debug "ERROR: CODE=$::errorCode INFO={$::errorInfo}"
+					set status 0
+					$mkv::debug "Making $depend failed, so $target won't be made"
+					if { $mkv::p::keep_going } {
+						vlog "- although continuing with other targets (-k)"
+					} else {
+						set failgoal $depend
+						break
+					}
+				}
+			}
+
+			vlog "($target) Has prerequisites: $prereq"
+
+			# For prereq, just make sure that they exist.
+			foreach p $prereq {
+				vlog "Considering $p as prerequisite for $target"
+				if { ![file exists $p] } {
+					incr depth
+					mkv::p::debug_indent+
+					set res [catch {build_make_tree [concat $parentstack $target] $p $target} result]
+					mkv::p::debug_indent-
+					$mkv::debug "... <--- back at '$target'"
+					incr depth -1
+					if { $res } {
+						$mkv::debug "ERROR: ''$result'' $::errorCode $::errorInfo"
+						set status 0
+						vlog "Making $p failed, so $target won't be made"
+						if { $mkv::p::keep_going } {
+							vlog "- although continuing with other targets (-k)"
+						} else {
+							set failgoal $p
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if { $status == 0 } {
+			error "FAILED '$target' at '$failgoal' due to:\n+++ $result"
+		}
+
+		# If a phony target doesn't have action, it won't be checked for generic action, too.
+		# --- if { [info exists db_phony($target)] && ![info exists db_actions($target)] } {
+			# ---         vlog "Target '$target' is phony and has no action - skipping"
+			# --- 
+			# ---         # Update the need database HERE because pure phony target will be no longer
+			# ---         # processed. Not doing it for normal target because this will undergo
+			# ---         # further processing.
+			# ---         set db_need($whoneedstarget) [lsort -unique [concat $target [pget db_need($whoneedstarget)]]]
+			# ---         return
+			# --- }
+
+		set stale 0
+
+		set need_build 0
+		set reason "is wrong"
+		if { [info exists db_phony($target)] } {
+			set need_build 1
+			set reason "is phony"
+		} elseif { ![file exists $target] } {
+			set need_build 1
+			set reason "is missing"
+		}
+
+		if { $need_build } {
+			vlog "File '$target' $reason - resolving action for '$target' (@[pwd])"
+			if { ![enqueue_target $target $target $whoneedstarget] } {
+				error "Action resolution failure for '$target'"
+			}
+		} elseif { $hasdepends } {
+			vlog "Checking if $target is fresh:"
+			foreach depend $depends {
+				vlog "... against $depend [expr {[info exists db_phony($depend)] ? "(PHONY)":""}]..."
+				set stale [is_target_stale $target $depend]
+				if { $stale } {
+					vlog "File '$target' is stale against '$depend', will be made"
+					dict set db_stale($target) $depend 1
+					break
+				}
+			}
+
+			if { $stale || [info exists db_phony($target)] } {
+				vlog "Resolving make action for $target (stale against $depend)"
+				if {![enqueue_target $target $target $whoneedstarget]} {
+					error "Action resolution failure for $target"
+				}
+			} else {
+				vlog "File $target is fresh, so won't be made"
+				# Good, but it it's fresh, then mark it as done.
+				lappend q_done $target
+			}
+		} else {
+			vlog "File $target exists and has no dependencies, so won't be made"
+		}
+	} result]
+
+	if { $catch } {
+		if { $mkv::p::failtarget == "" } {
+			set mkv::p::failtarget $failgoal
+		}
+		# Propagate the result
+		return -code $catch $result
 	}
+	return $result
 }
 
 proc make target {
@@ -1055,8 +1083,8 @@ proc make target {
 	# This is only for a case when there's a need to repeat this process.
 	while 1 {
 
-		if { [catch {build_make_tree $target ""} result] } {
-			puts stderr "+++ Syntax error at '$target'\n+++ $result"
+		if { [catch {build_make_tree "" $target ""} result] } {
+			puts stderr "+++ Rule definition error at '$target'\n+++ $result"
 			return false
 		}
 
@@ -2165,7 +2193,7 @@ proc main argv {
 					#puts stderr "FAILURE: $::errorInfo"
 					error $res1 $::errorInfo
 				} elseif { !$res1 } {
-					error "Stopped on $tar"
+					error "Stopped on '$mkv::p::failtarget' target"
 				}
 
 			}
