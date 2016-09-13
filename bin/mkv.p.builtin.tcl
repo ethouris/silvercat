@@ -4,6 +4,15 @@ set depth 0
 variable verbose
 set verbose 0
 
+variable default_makefiles {
+	Silvermakefile
+	silvermakefile
+	AGMakefile
+	agmakefile
+	Makefile.tcl
+	makefile.tcl
+}
+
 proc vlog text {
 	variable verbose
 	variable depth

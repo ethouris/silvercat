@@ -2150,6 +2150,18 @@ proc main argv {
 	cd $makefiledir
 
 	if { $mkv::makefile == "" } {
+		foreach f $mkv::p::default_makefiles {
+			if { [file exists $f] } {
+				set mkv::makefile $f
+				break
+			}
+		}
+
+		if { $mkv::makefile == "" } {
+			puts stderr "No makefile found among the following possible names:"
+			puts stderr [join $mkv::p::default_makefiles " "]
+			error "No makefile found"
+		}
 		if { [file exists Makefile.tcl] } {
 		        set mkv::makefile Makefile.tcl
 		} elseif { [file exists makefile.tcl] } {

@@ -1,0 +1,11 @@
+
+ag-profile gcc-native
+
+
+ag-profile posix-install
+ag-profile general -depspec cached -imgen target-path
+
+ag file2.o -type object -s ../file2.cc -h ../file.h -ldflags -- -lm
+ag lib2 -type library -libspec static -s ../file3.cc -depends file2.o -ldflags -- -lcrypto
+ag prg -type program -s ../file1.cc -depends lib2
+
