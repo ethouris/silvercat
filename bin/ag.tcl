@@ -148,6 +148,10 @@ proc RealSourcePath target {
 	return $out
 }
 
+proc FixShadowPath val {
+	return [prelocate [RealSourcePath $val] $agv::builddir $agv::toplevel]
+}
+
 proc IsSubTarget target {
 	set p [file split $target]
 	if { [llength $p] != 1 } {
@@ -216,6 +220,13 @@ proc TranslateFlags { lang flagmap mainkey {order append} } {
 					error "Flag -$flagtype: value '$val' is invalid"
 				}
 				set val $traval
+			}
+
+			# Transform the path into relative-topdir-based, if the
+			# flag is *dir (currently: incdir, libdir, but potential
+			# others may be added, too).
+			if { [string match *dir $flagtype] } {
+				set val [FixShadowPath $val]
 			}
 			set e $flag($flagtype)$val
 			if { $e ni $outflags_old && $e ni $outflags_new } {
@@ -1084,7 +1095,7 @@ proc ProcessSources target {
 				if { ![dict exists $rules $depfile] } {
 					set cflags [CompleteFlags $db $lang cflags]
 					set depcmd [CreateDepGenCommand $lang $cflags [prelocate $s_abs $agv::srcdir]]
-					set rule "$s {\n\t!tcl gendep [prelocate $agv::srcdir $agv::builddir] $depfile $depcmd\n}"
+					set rule "$s {\n\t%gendep [prelocate $agv::srcdir $agv::builddir] $depfile $depcmd\n}"
 					dict set rules $depfile $rule
 				}
 			}
@@ -1102,7 +1113,7 @@ proc ProcessSources target {
 			set incs [dict get $info includes]
 			set deps $s
 			foreach i $incs {
-				lappend deps [prelocate [RealSourcePath $i] $agv::builddir]
+				lappend deps [FixShadowPath $i]
 			}
 		}
 
@@ -1286,7 +1297,7 @@ proc Process:custom target {
 
 	set rsrc ""
 	foreach s $sources {
-		lappend rsrc [prelocate [RealSourcePath $s] $agv::builddir]
+		lappend rsrc [FixShadowPath $s]
 	}
 
 	set rule [list {*}$rsrc "\n\t$command\n"]
@@ -1586,18 +1597,24 @@ proc ResolveOutput1 o {
 	# - relative path: should be relative to builddir, keep it as is
 	# - absolute path: keep it as is
 	# - -- exception: path started with // is special!
-	if { [string range $o 0 1] != "//" } {
+
+	set initial [string range $o 0 1]
+
+	if { $initial != "//" } {
 		return $o
 	}
 
 	set rest [string range $o 2 end]
-	lassign [split $rest :] prefix file
-	if { $prefix == "" } {
-		return ""
-	} elseif { $file == "" } {
-		set file $prefix
-		set prefix "s"
+
+	set parts [file split $rest]
+	set first [lindex $parts 0]
+	lassign [split $first :] prefix part0
+	if { $part0 == "" } {
+		set part0 $prefix
+		set prefix s
 	}
+
+	set restpath [file join $part0 {*}[lrange $parts 1 end]]
 
 	set apath ""
 
@@ -1610,6 +1627,10 @@ proc ResolveOutput1 o {
 			set apath $agv::builddir
 		}
 
+		t {
+			set apath $agv::toplevel
+		}
+
 		default {
 			set var "agv::${prefix}dir"
 			if { [info exists $var] } {
@@ -1619,10 +1640,10 @@ proc ResolveOutput1 o {
 	}
 
 	if { $apath == "" } {
-		error "Invalid special-path specification: $prefix (in $o) - use 's:' or 'b:'"
+		error "Invalid special-path specification: $prefix (in $o) - use '//SPEC:', where SPEC is s, b, t"
 	}
 
-	set relpath [prelocate [file join $apath $file] $agv::builddir]
+	set relpath [prelocate [file join $apath $restpath] $agv::builddir]
 
 	return $relpath
 }
@@ -1997,6 +2018,22 @@ proc ag-do-make {target} {
 		return
 	}
 
+	# Now the make script is no longer fully sourced into ag.tcl.
+	# If you want to run make, it's better done in a separate interpreter.
+
+	interp create ag-interp-make
+
+	ag-interp-make eval set argv0 $mkv::p::gg_makepath
+
+	# Fake interactive mode so that make.tcl is used as library
+	# (the [main] command isn't executed)
+	ag-interp-make eval set tcl_interactive 1
+	
+	# Source-in the make commands
+	ag-interp-make eval source $mkv::p::gg_makepath
+
+	#ag-interp-make eval set mkv::debug puts
+
 	set rules [dict:at $agv::target($target) rules]
 
 	# Now define the rules according to the 
@@ -2004,8 +2041,8 @@ proc ag-do-make {target} {
 
 	if { $phony != "" } {
 		foreach {rule deps} $phony {
-			vlog "Preparing phony: $rule $deps"
-			phony $rule {*}$deps
+			vlog "Preparing phony: ($rule) ($deps)"
+			ag-interp-make eval phony $rule {*}$deps
 		}
 	}
 
@@ -2015,15 +2052,17 @@ proc ag-do-make {target} {
 	# Key is target file, value is dependencies and command at the end.
 
 	foreach {tarfile data} $rules {
-		vlog "Preparing rule: $tarfile [lrange $data 0 end-1]"
-		rule $tarfile {*}$data
+		vlog "Preparing rule: ($tarfile) ([lrange $data 0 end-1]) ([lindex $data end])"
+		ag-interp-make eval [concat rule $tarfile $data]
 	}
 
-	rule $target-clean "
-	!tcl autoclean $target
-	"
+	ag-interp-make eval [concat rule $target-clean "
+	%autoclean $target
+	"]
 
-	make {*}$exp_targets
+	ag-interp-make eval make {*}$exp_targets
+
+	interp delete ag-interp-make
 
 	return 0
 }
@@ -2098,7 +2137,7 @@ proc CheckDefinedTarget target {
 	set agv::target($target) [plist {
 		name $target
 		type custom
-		command "!tcl submake -C $dir $subtarget"
+		command "%submake -C $dir $subtarget"
 	}]
 
 	# Take the output from the foreign target. Some processing parts
@@ -2125,26 +2164,28 @@ proc agp-prepare-database {target {parent ""}} {
 	}
 
 	# Auto-generate target "all", if not defined
-	if { $target == "all" && ![info exists agv::target(all)] } {
-		vlog "--- Synthesizing 'all' target"
-		agv::p::PrepareGeneralTarget
-	} else {
-		# The user probably has defined the 'all' target on their own.
-		# Check if the "reconfigure" target has been added to deps,
-		# because the user was very likely to have forgotten it.
+	if { $target == "all" } {
+		if { ![info exists agv::target(all)] } {
+			vlog "--- Synthesizing 'all' target"
+			agv::p::PrepareGeneralTarget
+		} else {
+			# The user probably has defined the 'all' target on their own.
+			# Check if the "reconfigure" target has been added to deps,
+			# because the user was very likely to have forgotten it.
 
-		# dict update is very useful. Syntax is:
-		# dict update <dict-variable> (<keyname> <refvarname>)... <body>
-		# This defines a series of <refvarname> which refers to a key in the dictionary.
-		# Inside the body you can read and write the <refvarname> and this will
-		# reflect the changes under given <keyname> in the dict.
-		# The scope of the <refvarname> variable is only within <body>.
+			# dict update is very useful. Syntax is:
+			# dict update <dict-variable> (<keyname> <refvarname>)... <body>
+			# This defines a series of <refvarname> which refers to a key in the dictionary.
+			# Inside the body you can read and write the <refvarname> and this will
+			# reflect the changes under given <keyname> in the dict.
+			# The scope of the <refvarname> variable is only within <body>.
 
-		dict update agv::target(all) depends d {
-			if { "reconfigure" ni $d } {
-				# dict lappend could be nice, but this is not what we want.
-				# reconfigure must be first
-				set d [concat reconfigure $d]
+			dict update agv::target(all) depends d {
+				if { "reconfigure" ni $d } {
+					# dict lappend could be nice, but this is not what we want.
+					# reconfigure must be first
+					set d [concat reconfigure $d]
+				}
 			}
 		}
 	}
@@ -2276,6 +2317,11 @@ proc agp-prepare-database {target {parent ""}} {
 # condition.
 proc ag-instantiate {source {target ""} {varspec @}} {
 
+	# The source file is stated to be relative to source directory,
+	# but 'target' is stated to be relative to build directory.
+	# If the target is specified and the path doesn't start from //,
+	# the //b: is added
+
 	if { $target == "" } {
 		if { [file extension $source] == ".in" } {
 			set target [file rootname $source]
@@ -2284,7 +2330,10 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 		}
 	}
 
-	set fd [open $source r]
+	set realsource [RealSourcePath $source]
+	set realtarget [FixShadowPath $target]
+
+	set fd [open $realsource r]
 	set contents [read $fd]
 	close $fd
 
@@ -2334,7 +2383,14 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 
 	puts stderr "Instantiating '$source' into '$target'"
 
-	set fd [open $target w]
+	set tardir [file dirname $realtarget]
+	if { ![file exists $tardir] } {
+		file mkdir $tardir
+	} elseif { ![file isdirectory $tardir] } {
+		error "ag-instantiate: PATH '$realtarget' cannot be created (file in the way)"
+	}
+
+	set fd [open $realtarget w]
 	# Would put some comment with information who has
 	# instantiated that, however it can be any kind of file.
 	puts $fd $contents
@@ -2356,7 +2412,7 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 
 	# Now that it has been instantiated, mark this file as target to be cleaned.
 	# Simply add generation target for it, without target
-	ag $target_name -type custom -output //$target -s $source $::agfile -flags noclean distclean -command [list %error File '$target' can be only regenerated by 'reconfigure'.]
+	ag $target_name -type custom -output $target -s $source $::agfile -flags noclean distclean -command [list %error File '$target' can be only regenerated by 'reconfigure'.]
 }
 
 proc ag-subdir args {
@@ -2394,7 +2450,7 @@ proc ag-subdir1 target {
 
 	set osd $agv::srcdir
 	set od $agv::statedir
-	set sd [prelocate [file join $od $target]]  ;# may change ./tar into tar
+	set sd [prelocate [file join $od $target] . $agv::toplevel]  ;# may change ./tar into tar
 	set local_builddir [file normalize [file join $agv::builddir $sd]]
 	#puts stderr "SUBDIR: sd=$sd od=$od wd=[pwd] builddir=[pget agv::builddir]"
 	if { [file exists $local_builddir] } {

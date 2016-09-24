@@ -53,7 +53,7 @@ ag answer -packages zlib-1.2
 ag answer -sources file1.cc file2.cc
 ag answer -depends party/test
 
-ag answer -defines DEBUG -incdir $env(HOME)/.local/include -libdir $env(HOME)/.local/lib
+ag answer -defines DEBUG -incdir $env(HOME)/.local/include lib -libdir $env(HOME)/.local/lib lib
 
 ag ff -type library -install lib -sources file2.cc -headers file.h
 # Ups, file2 should be removed from the answer file!

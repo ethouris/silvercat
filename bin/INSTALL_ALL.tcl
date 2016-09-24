@@ -9,7 +9,7 @@ if { $argv == "" } {
 }
 
 
-proc prelocate {path {wd .}} {
+proc prelocate {path {wd .} {top ""}} {
 
 	if { $wd == "." } {
 		set wd [pwd]
@@ -21,6 +21,23 @@ proc prelocate {path {wd .}} {
 
 	if { $norm == $wd } {
 		return .
+	}
+
+	if { $top != "" } {
+		# This means that we want the relative path only
+		# up to given "toplevel directory". If the 'norm'
+		# path is not path that leads down the toplevel
+		# directory, return absolute path.
+
+		if { [file pathtype $top] ni {absolute} } {
+			set top [file normalize $top]
+		}
+
+		if { [string first $top $norm] != 0 } {
+			# equal to 0 means that $norm starts exactly from $top
+			# Here it's not, which means, return absolute path
+			return $norm
+		}
 	}
 
 	set common 0
