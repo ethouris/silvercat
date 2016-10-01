@@ -102,6 +102,13 @@ set VERSION 1.0.2
 set CONFIGPATH /usr/local/share/ag
 ag-instantiate config.h.in  ;#//source-config.h
 
+# Target on demand, target file in source dir.
+ag tags -type custom -o //tags -command {
+	cd $agv::srcdir && ctags -R .
+}
+
+ag tags -runon demand
+
 # The first argument is always the target to be built.
 # It is usually a symbolic name, not necessarily the name
 # of the file.

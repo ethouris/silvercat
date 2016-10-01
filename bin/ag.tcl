@@ -1857,7 +1857,7 @@ proc ag-do-genrules target {
 	# always available as a target having everything else
 	# as dependency.
 	if { $target == "" } {
-		set target all
+		set target .
 	}
 	set makefile [file join $mkv::directory Makefile.tcl]
 
@@ -1942,38 +1942,43 @@ proc GenerateMakefile {target fd} {
 	set agv::p::exported_var ""
 	set agv::p::exported_proc ""
 
-	set rules [dict:at $agv::target($target) rules]
-	set type [dict:at $agv::target($target) type]
-	set flags [dict:at $agv::target($target) flags]
+	if { $target != "." } {
 
-	# Rules is itself also a dictionary.
-	# Key is target file, value is dependencies and command at the end.
+		set rules [dict:at $agv::target($target) rules]
+		set type [dict:at $agv::target($target) type]
+		set flags [dict:at $agv::target($target) flags]
 
-	if { $rules != "" } {
-		foreach {tarfile data} $rules {
-			puts $fd "rule $tarfile $data"
+		# Rules is itself also a dictionary.
+		# Key is target file, value is dependencies and command at the end.
+
+		if { $rules != "" } {
+			foreach {tarfile data} $rules {
+				puts $fd "rule $tarfile $data"
+				if { $flags != "" } {
+					puts $fd "setflags $tarfile $flags"
+				}
+			}
+		} else {
+			# Apply flags to the target, if any, for the target name
 			if { $flags != "" } {
-				puts $fd "setflags $tarfile $flags"
+				puts $fd "# Not defining rules for '$target' (type: $type) - none generated."
+				puts $fd "setflags $target $flags"
 			}
 		}
+
+		# First rules, then phony. Later phonies may override earlier rules.
+		set phony [dict:at $agv::target($target) phony]
+
+		if { $phony != "" } {
+			foreach {rule deps} $phony {
+				puts $fd "phony $rule $deps"
+			}
+		}
+
+		puts $fd ""
 	} else {
-		# Apply flags to the target, if any, for the target name
-		if { $flags != "" } {
-			puts $fd "# Not defining rules for '$target' (type: $type) - none generated."
-			puts $fd "setflags $target $flags"
-		}
+		$::g_debug "NOTE: not generating any rules for toplevel target"
 	}
-
-	# First rules, then phony. Later phonies may override earlier rules.
-	set phony [dict:at $agv::target($target) phony]
-
-	if { $phony != "" } {
-		foreach {rule deps} $phony {
-			puts $fd "phony $rule $deps"
-		}
-	}
-
-	puts $fd ""
 
 	lappend agv::genrules_done $target
 
@@ -2218,11 +2223,11 @@ proc agp-prepare-database {target {parent ""}} {
 		set agv::profile(default) ""
 	}
 
-	# Auto-generate target "all", if not defined
-	if { $target == "all" } {
+	# Auto-generate targets "all" and ".", if not defined
+	if { $target == "all" || $target == "." } {
 		if { ![info exists agv::target(all)] } {
-			vlog "--- Synthesizing 'all' target"
-			agv::p::PrepareGeneralTarget
+			vlog "--- Synthesizing 'all' and '.' targets"
+			agv::p::PrepareGeneralTargets
 		} else {
 			# The user probably has defined the 'all' target on their own.
 			# Check if the "reconfigure" target has been added to deps,

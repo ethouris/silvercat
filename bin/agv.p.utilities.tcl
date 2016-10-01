@@ -173,7 +173,7 @@ proc ReorderTargets subtargets {
 	return $tree
 }
 
-proc PrepareGeneralTarget {} {
+proc PrepareGeneralTargets {} {
 	# This procedure should collect all targets of
 	# type 'program' or 'library' and create a phony
 	# target named 'all' that has them all as dependencies
@@ -182,20 +182,27 @@ proc PrepareGeneralTarget {} {
 	# Extract only targets of type program or library
 	foreach t [array names agv::target] {
 		set type [dict:at $agv::target($t) type]
-		$::g_debug "Target '$t', type $type:"
+		set runon [dict:at $agv::target($t) runon]
+		set addtargets ""
+		$::g_debug "Target '$t', type $type, runon $runon:"
+
 		if { $type in {program library custom} } {
 			$::g_debug " --> Added to 'all' (because $type)"
-			lappend subtargets $t
+			set addtargets $t
 		} elseif { $type == {directory} } {
 			$::g_debug " --> Added to 'all' as $t/all (because $type)"
 			CheckDefinedTarget $t/all  ;# Create it lazily
-			lappend subtargets $t $t/all
+			set addtargets "$t $t/all"
 		} else {
 			$::g_debug " --| Not added to 'all' (because $type)"
 		}
+
+		if { $addtargets != "" } {
+			lappend subtargets {*}$addtargets
+		}
 	}
 
-	vlog " --: ALL TARGETS: $subtargets"
+	vlog " --: TOTAL EXTRACTED TARGETS: $subtargets"
 	set subtargets [ReorderTargets $subtargets]
 
 	set otargets ""
@@ -229,8 +236,23 @@ proc PrepareGeneralTarget {} {
 		set subtargets [concat reconfigure [plremove $subtargets reconfigure]]
 	}
 
-	vlog " --: ALL TARGETS: $subtargets"
-	ag all -type phony -depends {*}$subtargets
+	# Ok, now construct alltargets that consist only of targets
+	# that are not set -runon demand.
+
+	set alltargets ""
+	set extratargets ""
+	foreach t $subtargets {
+		if { [dict:at $agv::target($t) runon] != "demand" } {
+			lappend alltargets $t
+		} else {
+			lappend extratargets $t
+		}
+	}
+
+	vlog " --: TOTAL TARGETS: $subtargets"
+	vlog " --: ALL TARGETS: $alltargets"
+	ag all -type phony -depends {*}$alltargets
+	ag . -type phony -depends all {*}$extratargets
 }
 
 proc GetHeaderSuffixes {languages} {
