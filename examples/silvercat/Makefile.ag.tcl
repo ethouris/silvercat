@@ -64,12 +64,13 @@ ag answer -sources {- file2.cc}
 #ag answer -ldflags -- -L.  -lff
 
 # Setting a dependency on a target that was previously defined as of type library,
-# and when the target is a program, this statement makes the program to be linked
-# against the library built for that target. If you want to make the target simply
-# dependent on a library target, but not to be linked against it, make an intermediate
-# phony target and link them with dependencies. The phony target will not ship libraries,
-# so linkage against the library won't happen, and phony target being dependent on
-# a library only does forwarding when compiling.
+# and when the target is a program or dynamic library, this statement makes the
+# it to be linked against the library built for that target. If you want
+# to make the target simply dependent on a library target, but not to be linked
+# against it, make an intermediate phony target and link them with
+# dependencies. The phony target will not ship libraries, so linkage against
+# the library won't happen, and phony target being dependent on a library only
+# does forwarding when compiling.
 ag answer -depends ff
 
 # Define explicitly includes in this file. When this is not defined,
@@ -78,13 +79,22 @@ ag answer -depends ff
 #ag-info file2.cc -includes ""
 
 
-# Headers will still be extracted to -noinst-headers if detected by deps checker
+# Headers will still be extracted if detected by deps checker
 # (or declared explicitly in the fileinfo database for that file),
 # however they will be added to -noinst-header!
 # Although this is meaningless because header files are not to be installed for
 # the program-type target. That only happens for library-type targets.
+
+# This declaration is required in library devel packages to declare
+# the "public" and "protected" headers (protected are headers not to
+# be included directly by the user program, but intermediately by
+# a public header).
 #ag answer -headers file.h
 
+# Istantiation of a header from header template.
+set VERSION 1.0.2
+set CONFIGPATH /usr/local/share/ag
+ag-instantiate config.h.in  ;#//source-config.h
 
 # The first argument is always the target to be built.
 # It is usually a symbolic name, not necessarily the name

@@ -149,7 +149,12 @@ proc RealSourcePath target {
 }
 
 proc FixShadowPath val {
-	return [prelocate [RealSourcePath $val] $agv::builddir $agv::toplevel]
+	set rp [RealSourcePath $val]
+
+	vlog "FixShadowPath: real-source($val) = $rp"
+	vlog "... prelocate to $agv::builddir up to $agv::toplevel"
+
+	return [prelocate $rp $agv::builddir $agv::toplevel]
 }
 
 proc IsSubTarget target {
@@ -1592,7 +1597,19 @@ proc GetTargetFile {target spec} {
 	#return [file join $dir $filename]
 }
 
-proc ResolveOutput1 o {
+## This function resolves the declared output file into the
+## expected relative path to be put into Makefile.
+# The path is expected to be relative and the default base
+# path for this file is the source path, as per @a defaultprefix,
+# or this path can explicitly specify that it should be in the
+# normalized directory: // or //s: for source, //b: for build,
+# //t: for toplevel, or any custom //PREFIX: if agv::PREFIXdir
+# variable is defined.
+#
+# WINDOWS NOTES: Drive based path c:/sources/file.cc will work
+# normally because it's not //-based. However UNC paths won't work,
+# you should mount the path to a local drive to be able to use it.
+proc ResolveOutput1 {o {defaultprefix s}} {
 	# Output files are expected to be:
 	# - relative path: should be relative to builddir, keep it as is
 	# - absolute path: keep it as is
@@ -1601,7 +1618,12 @@ proc ResolveOutput1 o {
 	set initial [string range $o 0 1]
 
 	if { $initial != "//" } {
-		return $o
+		if { $defaultprefix == "s" } {
+			return $o
+		}
+
+		# Otherwise apply the prefix artificially and continue processing
+		set o //${defaultprefix}:$o
 	}
 
 	set rest [string range $o 2 end]
@@ -1635,6 +1657,8 @@ proc ResolveOutput1 o {
 			set var "agv::${prefix}dir"
 			if { [info exists $var] } {
 				set apath [set $var]
+			} else {
+				error "Prefix '//${prefix}: requires agv::${prefix}dir variable to be defined."
 			}
 		}
 	}
@@ -2314,7 +2338,12 @@ proc agp-prepare-database {target {parent ""}} {
 # of this file.
 # 3. The ResolveOutput1 function is buggy: only //PATH form is changed
 # into $SOURCEDIR/PATH, b:PATH and s:PATH are not seen due to incorrect
-# condition.
+# condition --- FIXED: no, this is wrong. The path should begin with
+# either // (then without any colons inside), or //b: or //s: or //t:
+# or even with a custom prefix //NAME: if agv::NAMEdir is defined. Note
+# that Windows path such as C:/foreign/source/late.cc does not treat C:
+# as prefix because it doesn't start from // anyway. UNC paths are therefore
+# not supported, you should mount the path to a local drive.
 proc ag-instantiate {source {target ""} {varspec @}} {
 
 	# The source file is stated to be relative to source directory,
@@ -2330,8 +2359,22 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 		}
 	}
 
+	vlog "Instantiate: $source -> $target"
+
 	set realsource [RealSourcePath $source]
-	set realtarget [FixShadowPath $target]
+
+	set wd [pwd]
+	cd $agv::builddir
+
+	# Use ResolveOutput1 to provide the correct path to the target file.
+	# Exceptionally, this file is by default to be put into the build directory,
+	# just as all output files do.
+	# Users may override this default location by using the explicit // prefix.
+	set realtarget [file normalize [ResolveOutput1 $target b]]
+	vlog "Real source: $realsource"
+	vlog "Real target: $realtarget"
+	vlog "Base path: [pwd] - going back to $wd"
+	cd $wd
 
 	set fd [open $realsource r]
 	set contents [read $fd]
