@@ -1,5 +1,6 @@
 
-set singles {
+
+set keytype(single) {
 	compile
 	compile_oflag
 	link
@@ -8,8 +9,12 @@ set singles {
 	gendep
 	depspec
 	preproc
-	command
 	libtype
+}
+
+set keytype(command) {
+	command
+	clean
 }
 
 set profiles {

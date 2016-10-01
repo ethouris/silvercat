@@ -783,7 +783,8 @@ proc AccessDatabase {array target args} {
 		dict set agv_db($target) name $target
 	}
 
-	set singles [pget agv::p::singles]
+	set singles [pget agv::p::keytype(single)]
+	set commandlike [pget agv::p::keytype(command)]
 
 	# Get old options
 	set db $agv_db($target)
@@ -880,32 +881,56 @@ proc AccessDatabase {array target args} {
 		set o [pexpand $o 3]
 		$::g_debug "TO SET '$lastopt' (after ): $o"
 		# This time it's nothing special. At least try to strip one level,
-		# in case when user did -option {value1 value2}
-		if { ![catch {llength $o} size] } {
-			if { $size == 1 } {
-				set o [lindex $o 0]
+		# in case when user did -option \{value1 value2\}
+
+		if { $lastopt in $commandlike } {
+
+			# Do a command-like processing.
+			# Keep \n intact, cumulate, merge by lines.
+			# Just strip initial and terminal \n, then
+			# link commands by \n.
+			set len [string length $o]
+			set p 0
+			while { [string index $o $p] == "\n" && $p < $len } {
+				incr p
 			}
-			if { $push_front } {
-				set options($lastopt) [concat $o $options($lastopt)]
-			} elseif { $lastopt in $singles } {
-				if { [info exists options($lastopt)] } {
-					vlog " +++ $lastopt is expected as single - OVERRIDING existing value '$options($lastopt)' with $o"
-				}
-				set options($lastopt) $o
-			} else {
-				lappend options($lastopt) {*}$o
-			} 
+			set e 0
+			while { [string index $o end-$e] == "\n" && $e < $len } {
+				incr e
+			}
+			set o [string range $o $p end-$e]
+			if { [pget options($lastopt)] == "" } {
+				set options($lastopt) "\n"
+			}
+			append options($lastopt) "$o\n"
+
 		} else {
-			# Happened to be a text not convertible to a list.
-			# Well, happens. Just append to the existing value.
-			if { [info exists options($lastopt)] } {
-				if { $push_front } {
-					set options($lastopt) "$o $options($lastopt)"
-				} else {
-					append options($lastopt) " $o"
+			if { ![catch {llength $o} size] } {
+				if { $size == 1 } {
+					set o [lindex $o 0]
 				}
+				if { $push_front } {
+					set options($lastopt) [concat $o $options($lastopt)]
+				} elseif { $lastopt in $singles } {
+					if { [info exists options($lastopt)] } {
+						vlog " +++ $lastopt is expected as single - OVERRIDING existing value '$options($lastopt)' with $o"
+					}
+					set options($lastopt) $o
+				} else {
+					lappend options($lastopt) {*}$o
+				} 
 			} else {
-				set options($lastopt) $o
+				# Happened to be a text not convertible to a list.
+				# Well, happens. Just append to the existing value.
+				if { [info exists options($lastopt)] } {
+					if { $push_front } {
+						set options($lastopt) "$o $options($lastopt)"
+					} else {
+						append options($lastopt) " $o"
+					}
+				} else {
+					set options($lastopt) $o
+				}
 			}
 		}
 		# Do nothing in case when calculating lenght resulted in exception.
@@ -2015,7 +2040,13 @@ proc SynthesizeClean {target} {
 	}
 
 	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target' (with extra $cleandeps)"
-	set orule "rule $cleanname $cleandeps {\n\t%autoclean $target $cleanflags\n}\nphony $cleanname"
+	set cleancmd "\n\t%autoclean $target $cleanflags\n"
+	set customclean [dict:at $agv::target($target) clean]
+	if { $customclean != "" } {
+		vlog "... HAVE CUSTOM CLEAN: {\n$customclean}"
+		set cleancmd $customclean
+	}
+	set orule "rule $cleanname $cleandeps {$cleancmd}\nphony $cleanname"
 	if { $tarname == "all" } {
 		append orule "\nrule distclean clean \{\n"
 		foreach d [pget agv::p::directories] {

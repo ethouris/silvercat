@@ -73,6 +73,12 @@ ag answer -sources {- file2.cc}
 # does forwarding when compiling.
 ag answer -depends ff
 
+# Custom clean rule
+ag ff -clean {
+	rm -f libff.a
+	%autoclean ff
+}
+
 # Define explicitly includes in this file. When this is not defined,
 # Silvercat will try to autodetect includes by running gendep-mapped command.
 #ag-info file1.cc -includes file.h
