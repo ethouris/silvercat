@@ -87,7 +87,7 @@ namespace eval agv {
 	# Install prefix.
 	# Will be set to the profile's default, unless overridden.
 	proc prefix {} {
-		return [ag-profile general ?prefix]
+		return [ag-profile general ?install:prefix]
 	}
 
 	# Per-file set information
@@ -639,10 +639,8 @@ proc ag-profile {name args} {
 			return $results
 		}
 		# Otherwise continue and spread the requests to all other languages.
-		# Get all language names except "default"
-		set name [array names agv::profile]
-		set name [lsearch -all -inline -not $name default]
-		set name [lsearch -all -inline -not $name structure]
+		# Get all language names except "default" and "structure".
+		set name [plremove [array names agv::profile] default structure]
 	}
 
 	if { $name == "" } {
@@ -1322,15 +1320,21 @@ proc Process:custom target {
 	set outfile [ResolveOutput [dict:at $db output]]
 	set sources [dict:at $db sources]
 	set command [dict:at $db command]
+	set deps [dict:at $db depends]
 
-	
+	# Check dependencies if they are defined.
+	foreach d $deps {
+		if { [CheckDefinedTarget $d] == "" } {
+			error "Target '$d' (dependency of '$target' type custom) is not defined"
+		}
+	}
 
 	set rsrc ""
 	foreach s $sources {
 		lappend rsrc [FixShadowPath $s]
 	}
 
-	set rule [list {*}$rsrc "\n\t$command\n"]
+	set rule [list {*}$deps {*}$rsrc "\n\t$command\n"]
 	foreach o $outfile {
 		dict set rules $o $rule
 	}
@@ -1492,9 +1496,9 @@ proc ProcessCompileLink {type subtype target outfile} {
 	#$::g_debug "DATABASE: agv::profile\[default\]"
 	#DebugDisplayDatabase agv::profile default
 
-	set prefix [dict:at $agv::profile(default) prefix]
+	set prefix [dict:at $agv::profile(default) install:prefix]
 	if { $prefix == "" } {
-		puts stderr "+++ AG WARNING: 'prefix' not found - not generating install targets"
+		puts stderr "+++ AG WARNING: 'istall:prefix' not found in profile - not generating install targets"
 	} else {
 		GenerateInstallTarget:$type $target $prefix
 	}

@@ -28,8 +28,20 @@ proc pset {name arg1 args} {
 	return $var
 }
 
-proc plremove {list item} {
-	return [lsearch -not -exact -all -inline $list $item]
+proc RegexpJoinWords {a1 args} {
+	set out "^($a1"
+	foreach a $args {
+		append out "|$a"
+	}
+	append out ")$"
+	return $out
+}
+
+proc plremove {list item args} {
+	if { $args == "" } {
+		return [lsearch -not -all -inline -exact $list $item]
+	}
+	return [lsearch -not -all -inline -regexp $list [RegexpJoinWords $item {*}$args]]
 }
 
 proc pset+ {name arg1 args} {

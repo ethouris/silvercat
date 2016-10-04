@@ -55,7 +55,7 @@ ag answer -depends party/test
 
 ag answer -defines DEBUG -incdir $env(HOME)/.local/include lib -libdir $env(HOME)/.local/lib lib
 
-ag ff -type library -install lib -sources file2.cc -headers file.h
+ag ff -type library -install lib -sources file2.cc -headers file.h -libspec static dynamic
 # Ups, file2 should be removed from the answer file!
 ag answer -sources {- file2.cc}
 # This demonstrated how to add values that have "-" as the first character
@@ -103,7 +103,7 @@ set CONFIGPATH /usr/local/share/ag
 ag-instantiate config.h.in  ;#//source-config.h
 
 # Target on demand, target file in source dir.
-ag tags -type custom -o //tags -command {
+ag tags -type custom -o //tags -depends ff -command {
 	cd $agv::srcdir && ctags -R .
 }
 
