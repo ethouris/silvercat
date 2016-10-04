@@ -103,7 +103,7 @@ set CONFIGPATH /usr/local/share/ag
 ag-instantiate config.h.in  ;#//source-config.h
 
 # Target on demand, target file in source dir.
-ag tags -type custom -o //tags -depends ff -command {
+ag tags -type custom -o //tags -clean none -command {
 	cd $agv::srcdir && ctags -R .
 }
 

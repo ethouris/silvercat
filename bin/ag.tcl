@@ -2006,6 +2006,11 @@ proc GenerateMakefile {target fd} {
 
 proc SynthesizeClean {target} {
 	set type [dict:at $agv::target($target) type]
+	set customclean [dict:at $agv::target($target) clean]
+	if { [string trim $customclean] == "none" } {
+		vlog "Synthesizing clean: custom clean rule says 'none' - not generating any clean for '$target'"
+		return "# Not synthesizing clean rule for '$target' - unwanted."
+	}
 
 	set parts [file split $target]
 	# use [join <parts> /] not [file join] because the latter
@@ -2050,7 +2055,6 @@ proc SynthesizeClean {target} {
 
 	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target' (with extra $cleandeps)"
 	set cleancmd "\n\t%autoclean $target $cleanflags\n"
-	set customclean [dict:at $agv::target($target) clean]
 	if { $customclean != "" } {
 		vlog "... HAVE CUSTOM CLEAN: {\n$customclean}"
 		set cleancmd $customclean

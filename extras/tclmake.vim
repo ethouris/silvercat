@@ -32,7 +32,7 @@ TclmakeDefineCommand ag-export
 
 
 syn keyword silvercatSwitch contained -s -sources -h -headers -nh -noinst-headers -hidir -cflags -L -ldflags -lflags -libs
-\ -packages -I -incdir -D -defines -depends -type -install -libspec -features -o -output -command
+\ -packages -I -incdir -D -defines -depends -type -install -libspec -features -o -output -command -clean
 \ -depspec -imgen 
 
 hi def link silvercatSwitch Special
