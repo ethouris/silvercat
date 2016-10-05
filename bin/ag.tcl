@@ -1203,7 +1203,7 @@ proc ProcessSources target {
 	# Extract existing headers
 	set th [dict:at $db headers]
 	set tnh [dict:at $db noinst-headers]
-	set hdrs [agv::p::lsuniq $hdrs]
+	set hdrs [pluniq $hdrs]
 	foreach h $hdrs {
 		if { $h ni $tnh && $h ni $th } {
 			lappend tnh $h

@@ -2,19 +2,6 @@
 
 # Before adding anything here, mind that you are here in the agv::p namespace!
 
-proc lsuniq {ls} {
-	set out ""
-	foreach e $ls {
-		if { $e ni $out } {
-			lappend out $e
-		}
-	}
-
-	return $out
-}
-
-namespace export lsuniq
-
 proc GenFileBase {method target srcfile} {
 	return [gen-imfile-$method $target $srcfile]
 }
@@ -268,7 +255,7 @@ proc GetHeaderSuffixes {languages} {
 		}
 	}
 
-	set languages [lsuniq [concat $languages $extralangs]]
+	set languages [pluniq [concat $languages $extralangs]]
 
 	foreach l $languages {
 		set sufl [dict:at $agv::p::langextmap $l-header]
