@@ -4,7 +4,7 @@
 source $VIMRUNTIME/syntax/tcl.vim
 
 if index(split(&iskeyword, ","), "-") == -1 
-	let &iskeyword .= ",-"
+	setlocal iskeyword+=-
 endif
 
 command! -nargs=1 TclmakeDefineCommand :syn region tcltkCommand matchgroup=tcltkWidgetColor start="\<<args>\>" matchgroup=NONE skip="^\s*$" end="]\|[^\\]*\s*$"he=e-1  contains=tclLineContinue,silvercatSwitch,tclNumber,tclVarRef,tclString,tcltkCommand,tclEmbeddedStatement
