@@ -66,7 +66,7 @@ set profiles {
 
 	posix-install {
 		default {
-			prefix /usr/local
+			install:prefix /usr/local
 			installdir:bin {$prefix/bin}
 			# { XXX Mind that probably on 64-bit systems,
 			# the 64-bit libraries are installed in lib64,
