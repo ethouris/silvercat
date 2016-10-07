@@ -1638,16 +1638,26 @@ proc GetTargetFile {target spec} {
 # WINDOWS NOTES: Drive based path c:/sources/file.cc will work
 # normally because it's not //-based. However UNC paths won't work,
 # you should mount the path to a local drive to be able to use it.
-proc ResolveOutput1 {o {defaultprefix s}} {
-	# Output files are expected to be:
-	# - relative path: should be relative to builddir, keep it as is
-	# - absolute path: keep it as is
-	# - -- exception: path started with // is special!
+proc ResolveOutput1 {o {defaultprefix b}} {
+
+	# The output path is expected to be a relative path
+	# to builddir, unless it's a path outside the toplevel,
+	# in which case it should be absolute.
+
+	# The path should be:
+	# - without special prefix, then it's treated as relative
+	#   to $defaultprefix (as if it had //$defaultprefix: prefix)
+	# - with //, //s:, //b:, //t: they are treated as residing there,
+	#   so the path should be relocated to be relative to build dir.
 
 	set initial [string range $o 0 1]
 
 	if { $initial != "//" } {
-		if { $defaultprefix == "s" } {
+
+		# If this is a builddir, with prefix=builddir
+		# expected relative to builddir, then simplt
+		# return it as is.
+		if { $defaultprefix == "b" } {
 			return $o
 		}
 
@@ -1658,11 +1668,19 @@ proc ResolveOutput1 {o {defaultprefix s}} {
 	set rest [string range $o 2 end]
 
 	set parts [file split $rest]
+	#puts "PARTS: $parts"
 	set first [lindex $parts 0]
 	lassign [split $first :] prefix part0
-	if { $part0 == "" } {
+	#puts "FIRST: '$first' PREFIX: '$prefix' PART0: '$part0'"
+
+	if { $prefix == $first } {
+		# No : found - treat it as part of the path
 		set part0 $prefix
 		set prefix s
+	} elseif { $part0 == "" } {
+		# We have //x:/rest/of/path
+		set part0 [lindex $parts 1]
+		set parts [lrange $parts 1 end]
 	}
 
 	set restpath [file join $part0 {*}[lrange $parts 1 end]]
