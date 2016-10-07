@@ -1498,7 +1498,7 @@ proc ProcessCompileLink {type subtype target outfile} {
 
 	set prefix [dict:at $agv::profile(default) install:prefix]
 	if { $prefix == "" } {
-		puts stderr "+++ AG WARNING: 'istall:prefix' not found in profile - not generating install targets"
+		puts stderr "+++ AG WARNING: 'install:prefix' not found in profile - not generating install targets"
 	} else {
 		GenerateInstallTarget:$type $target $prefix
 	}
