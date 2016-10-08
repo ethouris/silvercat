@@ -2055,7 +2055,7 @@ proc SynthesizeClean {target} {
 		set cleanname $tarname-clean
 	}
 
-	if { $tarname != "all" && $type ni {program library custom} } {
+	if { $tarname ni {all .} && $type ni {program library custom} } {
 		return "# Not synthesizing clean target for $type $target"
 	} 
 
@@ -2073,28 +2073,49 @@ proc SynthesizeClean {target} {
 
 	set cleandeps ""
 	set cleanflags ""
-	if { $tarname == "all" } {
+	if { $tarname in {all .} } {
+		#append orule "# Gen clean for '$tarname' -- deps are: [ag $tarname ?depends]\n"
 		# This is a synthetic 'all' target, so take clean names from
 		# all dependent targets, if any. They must be dependencies of clean.
-		foreach d [ag all ?depends] {
+		foreach d [ag $tarname ?depends] {
 			lappend cleandeps {*}[dict:at $agv::target($d) cleantarget]
 		}
 		set cleanflags "-noclean"
 	}
 
 	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target' (with extra $cleandeps)"
-	set cleancmd "\n\t%autoclean $target $cleanflags\n"
 	if { $customclean != "" } {
 		vlog "... HAVE CUSTOM CLEAN: {\n$customclean}"
 		set cleancmd $customclean
+	} elseif { $tarname == "." } {
+
+		# The . target will not generate anything in makefile, so %autoclean . will fail.
+		# You have to drive autoclean from every dependent target
+		# XXX Check it this doesn't have to be a more general rule and instead
+		# this should't be checked whether the target has a chance to get generated.
+		set cleancmd "\n"
+		foreach d [ag . ?depends] {
+			append cleancmd "\t%autoclean $d $cleanflags\n"
+		}
+	} else {
+		set cleancmd "\n\t%autoclean $target $cleanflags\n"
 	}
-	set orule "rule $cleanname $cleandeps {$cleancmd}\nphony $cleanname"
+	append orule "rule $cleanname $cleandeps {$cleancmd}\nphony $cleanname"
 	if { $tarname == "all" } {
+		append orule "\nrule all-distclean all-clean \{\n"
+		foreach d [pget agv::p::directories] {
+			append orule "\t%submake -C $d all-distclean\n"
+		}
+		append orule "\t%autoclean $target\n\t%autoclean $target distclean\n\}"
+	} elseif { $tarname == "." } {
 		append orule "\nrule distclean clean \{\n"
 		foreach d [pget agv::p::directories] {
 			append orule "\t%submake -C $d distclean\n"
 		}
-		append orule "\t%autoclean $target\n\t%autoclean $target distclean\n\}"
+		foreach d [ag . ?depends] {
+			append orule "\t%autoclean $d\n\t%autoclean $d distclean\n"
+		}
+		append orule "\}"
 	}
 
 	return $orule
