@@ -1,7 +1,7 @@
 #!/usr/bin/tclsh
 
 
-# Redefine MAKE so that the correct path is used
+# Import and fix several utilities from agmake.
 namespace eval mkv {
 	namespace eval p {
 
@@ -9,7 +9,7 @@ namespace eval mkv {
 		set me [info script]
 		set here [file dirname $me]
 
-		set gg_makepath $here/make.tcl
+		set gg_makepath $here/agmake
 		
 		# Import make's utilities
 		source $here/mkv.p.utilities.tcl
@@ -30,7 +30,7 @@ namespace eval mkv {
 namespace import {*}$mkv::p::public_import
 
 namespace eval agv {
-	set version 0.1 ;# just to define something
+	set version 0.9 ;# just to define something
 
 	set gg_agpath [file normalize [info script]]
 	variable runmode ""
@@ -57,6 +57,10 @@ namespace eval agv {
 	variable directories
 	namespace export directories
 
+	# This variable isn't used to mark that rules for targets
+	# have been generated (this is mkv::generated). This agv::generated
+	# is used to collect files that have been generated together
+	# with Makefile.tcl, so if they are lacking, you should run reconfigure.
 	variable generated
 	namespace export generated
 
@@ -956,6 +960,13 @@ proc ag {target args} {
 	# Turn target name into path-based target, if a relative
 	# state directory was set.
 	#$::g_debug "*** request prelocate by 'ag' for '$target'"
+
+	# There may be problems with targets which's name start from dash
+	# that concerns options handling.
+	if { [string index $target 0] == "-" } {
+		error "Target name cannot start from '-'"
+	}
+
 	set tar [file join $agv::statedir $target]
 	set target [prelocate $tar]
 
@@ -2038,7 +2049,7 @@ proc SynthesizeClean {target} {
 
 	vlog "Makefile: checking for clean for '$tarname' in $dir ($type)"
 
-	if { $tarname == "all" } {
+	if { $tarname == "." } {
 		set cleanname clean
 	} else {
 		set cleanname $tarname-clean
@@ -2391,16 +2402,7 @@ proc agp-prepare-database {target {parent ""}} {
 	return true
 }
 
-# XXX BUGS!!!
-# 1. For ag-instantiate, source should be relative to source directory,
-# target (including generated) should be in the build directory (unless
-# explicitly defined).
-# 2. The rule generated to enclose the generated instantiated file does
-# not take into account the need to create all directories in the path
-# of this file.
-# 3. The ResolveOutput1 function is buggy: only //PATH form is changed
-# into $SOURCEDIR/PATH, b:PATH and s:PATH are not seen due to incorrect
-# condition --- FIXED: no, this is wrong. The path should begin with
+# The path should begin with
 # either // (then without any colons inside), or //b: or //s: or //t:
 # or even with a custom prefix //NAME: if agv::NAMEdir is defined. Note
 # that Windows path such as C:/foreign/source/late.cc does not treat C:
@@ -2433,9 +2435,6 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 	# just as all output files do.
 	# Users may override this default location by using the explicit // prefix.
 	set realtarget [file normalize [ResolveOutput1 $target b]]
-	vlog "Real source: $realsource"
-	vlog "Real target: $realtarget"
-	vlog "Base path: [pwd] - going back to $wd"
 	cd $wd
 
 	set fd [open $realsource r]
@@ -2486,7 +2485,9 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 
 	}
 
-	puts stderr "Instantiating '$source' into '$target'"
+	set reltarget [prelocate $realtarget $agv::builddir $agv::toplevel]
+
+	puts stderr "+++ Instantiating '[prelocate $realsource $agv::builddir]' into '$reltarget'"
 
 	set tardir [file dirname $realtarget]
 	if { ![file exists $tardir] } {
@@ -2504,7 +2505,8 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 	# DON'T generate target under the $target name. Targets that have
 	# slash inside are treated as target inside a directory and will cause
 	# generation of redirection instead of generation in place.
-	set target_name [string map {../ _ ./ {} / -} $target]
+	# XXX Shouldn't this use the -imgen option from profile?
+	set target_name [GenFileBase path ag-instantiate $reltarget]
 
 	# Prevent target duplication
 	if { [info exists agv::target($target_name)] } {
@@ -2640,7 +2642,7 @@ proc ag-export names {
 	}
 }
 
-package provide ag 0.8
+package provide ag $agv::version
 set g_debug mkv::p::pass
 set ag_debug_on 0
 
@@ -2807,14 +2809,14 @@ if { $topdir != "" } {
 	set agv::toplevel [pwd]
 }
 
-puts stderr "READING DATABASE @[prelocate [pwd] $agv::toplevel]"
+puts stderr "+++ Reading database: [prelocate [pwd] $agv::toplevel]"
 
 # Do sourcing in the original directory of the file.
 # This is important so that all file references are relative
 # to the directory in which this file resides.
 source $agfile
 
-puts stderr "PROCESSING TO GENERATE MAKEFILE @[prelocate [pwd] $agv::toplevel]"
+puts stderr "+++ Processing runmode '$agv::runmode':  @[prelocate [pwd] $agv::toplevel]"
 
 #set mkv::directory .
 

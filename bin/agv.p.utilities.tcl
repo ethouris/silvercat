@@ -9,10 +9,17 @@ proc GenFileBase {method target srcfile} {
 namespace export GenFileBase
 
 proc gen-imfile-path {target srcfile} {
+	if { [string index $srcfile 0] == "/" } {
+		set pos 1
+		while {[string index $srcfile $pos] == "/" } {
+			incr pos
+		}
+		set srcfile "_-[string range $srcfile $pos end]"
+	}
 	return [string map {../ _ ./ {} / -} [file rootname $srcfile]]
 }
 
-proc gen-imfile-name {target srcrile} {
+proc gen-imfile-name {target srcfile} {
 	return [file rootname [file tail $srcfile]]
 }
 

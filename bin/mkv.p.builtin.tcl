@@ -3,6 +3,8 @@ variable depth
 set depth 0
 variable verbose
 set verbose 0
+variable generated
+set generated ""
 
 variable default_makefiles {
 	Silvermakefile
