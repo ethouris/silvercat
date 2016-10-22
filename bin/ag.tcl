@@ -1670,6 +1670,11 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 
 	if { $initial != "//" } {
 
+		if { [file pathtype $o] == "absolute" } {
+			$::g_debug "... ABSOLUTE PATH. Relocating to '$agv::builddir'"
+			return [prelocate $o $agv::builddir]
+		}
+
 		# If this is a builddir, with prefix=builddir
 		# expected relative to builddir, then simply
 		# return it as is.
