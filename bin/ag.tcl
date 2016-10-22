@@ -1754,8 +1754,6 @@ proc GetDependentLibraryTargets target {
 
 	foreach d $depends {
 
-		lappend deps $d
-
 		$::g_debug "Getting DEP: '$d'"
 		lassign [CheckDefinedTarget $d] d spec
 		if { $d == "" } {
@@ -1793,22 +1791,27 @@ proc GetDependentLibraryTargets target {
 			# XXX consider unwinding - recursion in Tcl is limited and may
 			# result in internal error!
 			lassign [GetDependentLibraryTargets $d] adlibpacks adlangs addeps
+			$::g_debug "LIBPACKS from dep '$d': $adlibpacks"
+			lappend deps {*}$addeps 
 			if { $spec == "static" } {
-				foreach p $adlibpacks {
-					lassign $p deplibfile dflags
-					lappend deps $deplibfile
-				}
+				lappend deps $libofile
+
+			} else {
+				lappend deps $d
 			}
 
 			# Ok, according to the libpack rule, REQUESTER PROVIDER order should be kept.
 			# So, the dependent libpacks land just after this one.
-			lappend libpacks [concat $libpack $adlibpacks]
+			lappend libpacks {*}[concat [list $libpack] $adlibpacks]
 			lappend langs {*}$adlangs
 		} elseif { $type == "object"} {
 			lappend libpacks [dict get $agv::target($d) output]
 			# XXX Object file may also have dependencies!
+			lappend deps $d
 		} else {
 			$::g_debug " --- Target of type '$type' does not provide dependent libraries."
+			lappend deps $d
+
 		}
 	}
 
@@ -1836,12 +1839,20 @@ proc IntegrateLibraryPacks {libpacks} {
 	set libfiles ""
 	set libflags ""
 
+	$::g_debug "LIBPACKS:\n$libpacks"
+	set revpacks [lreverse $libpacks]
+	$::g_debug "REV-LIBPACKS:\n$revpacks"
+
 	foreach pack [lreverse $libpacks] {
 		lassign $pack file flags
+		$::g_debug "IntegrateLibraryPacks: reviewing pack: file=$file flags=$flags"
 		set efflags ""
 		foreach f $flags {
 			if { $f ni $libflags } {
 				lappend efflags $f
+				$::g_debug " ... adding flag '$f'"
+			} else {
+				$::g_debug " ... NOT adding flag '$f' (already present)"
 			}
 		}
 
@@ -1849,6 +1860,9 @@ proc IntegrateLibraryPacks {libpacks} {
 
 		if { $file ni $libfiles } {
 			set libfiles [concat $file $libfiles]
+			$::g_debug " ... adding file $file"
+		} else {
+			$::g_debug " ... NOT adding file $file - already present"
 		}
 	}
 
