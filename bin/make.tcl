@@ -25,12 +25,6 @@ namespace eval p {
 		source $here/mkv.p.utilities.tcl
 		source $here/mkv.p.builtin.tcl
 
-# Forwarder for standard-method running cmdline app
-proc run args {
-	vlog "+run: $args"
-	exec 2>@stderr >@stdout {*}$args
-}
-
 variable db_depends
 variable db_actions
 variable db_generic
@@ -1288,7 +1282,7 @@ proc submake args {
 	
 	lappend opt {*}$args
 
-	run {*}$makeexec {*}$opt
+	prun {*}$makeexec {*}$opt
 }
 
 

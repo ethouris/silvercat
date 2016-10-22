@@ -1,7 +1,7 @@
 #!/usr/bin/tclsh
 
 
-# Redefine MAKE so that the correct path is used
+# Import and fix several utilities from agmake.
 namespace eval mkv {
 	namespace eval p {
 
@@ -9,7 +9,7 @@ namespace eval mkv {
 		set me [info script]
 		set here [file dirname $me]
 
-		set gg_makepath $here/make.tcl
+		set gg_makepath $here/agmake
 		
 		# Import make's utilities
 		source $here/mkv.p.utilities.tcl
@@ -30,7 +30,7 @@ namespace eval mkv {
 namespace import {*}$mkv::p::public_import
 
 namespace eval agv {
-	set version 0.1 ;# just to define something
+	set version 0.9 ;# just to define something
 
 	set gg_agpath [file normalize [info script]]
 	variable runmode ""
@@ -57,6 +57,10 @@ namespace eval agv {
 	variable directories
 	namespace export directories
 
+	# This variable isn't used to mark that rules for targets
+	# have been generated (this is mkv::generated). This agv::generated
+	# is used to collect files that have been generated together
+	# with Makefile.tcl, so if they are lacking, you should run reconfigure.
 	variable generated
 	namespace export generated
 
@@ -956,6 +960,13 @@ proc ag {target args} {
 	# Turn target name into path-based target, if a relative
 	# state directory was set.
 	#$::g_debug "*** request prelocate by 'ag' for '$target'"
+
+	# There may be problems with targets which's name start from dash
+	# that concerns options handling.
+	if { [string index $target 0] == "-" } {
+		error "Target name cannot start from '-'"
+	}
+
 	set tar [file join $agv::statedir $target]
 	set target [prelocate $tar]
 
@@ -1203,7 +1214,7 @@ proc ProcessSources target {
 	# Extract existing headers
 	set th [dict:at $db headers]
 	set tnh [dict:at $db noinst-headers]
-	set hdrs [agv::p::lsuniq $hdrs]
+	set hdrs [pluniq $hdrs]
 	foreach h $hdrs {
 		if { $h ni $tnh && $h ni $th } {
 			lappend tnh $h
@@ -1498,7 +1509,7 @@ proc ProcessCompileLink {type subtype target outfile} {
 
 	set prefix [dict:at $agv::profile(default) install:prefix]
 	if { $prefix == "" } {
-		puts stderr "+++ AG WARNING: 'istall:prefix' not found in profile - not generating install targets"
+		puts stderr "+++ AG WARNING: 'install:prefix' not found in profile - not generating install targets"
 	} else {
 		GenerateInstallTarget:$type $target $prefix
 	}
@@ -1638,16 +1649,26 @@ proc GetTargetFile {target spec} {
 # WINDOWS NOTES: Drive based path c:/sources/file.cc will work
 # normally because it's not //-based. However UNC paths won't work,
 # you should mount the path to a local drive to be able to use it.
-proc ResolveOutput1 {o {defaultprefix s}} {
-	# Output files are expected to be:
-	# - relative path: should be relative to builddir, keep it as is
-	# - absolute path: keep it as is
-	# - -- exception: path started with // is special!
+proc ResolveOutput1 {o {defaultprefix b}} {
+
+	# The output path is expected to be a relative path
+	# to builddir, unless it's a path outside the toplevel,
+	# in which case it should be absolute.
+
+	# The path should be:
+	# - without special prefix, then it's treated as relative
+	#   to $defaultprefix (as if it had //$defaultprefix: prefix)
+	# - with //, //s:, //b:, //t: they are treated as residing there,
+	#   so the path should be relocated to be relative to build dir.
 
 	set initial [string range $o 0 1]
 
 	if { $initial != "//" } {
-		if { $defaultprefix == "s" } {
+
+		# If this is a builddir, with prefix=builddir
+		# expected relative to builddir, then simplt
+		# return it as is.
+		if { $defaultprefix == "b" } {
 			return $o
 		}
 
@@ -1658,11 +1679,19 @@ proc ResolveOutput1 {o {defaultprefix s}} {
 	set rest [string range $o 2 end]
 
 	set parts [file split $rest]
+	#puts "PARTS: $parts"
 	set first [lindex $parts 0]
 	lassign [split $first :] prefix part0
-	if { $part0 == "" } {
+	#puts "FIRST: '$first' PREFIX: '$prefix' PART0: '$part0'"
+
+	if { $prefix == $first } {
+		# No : found - treat it as part of the path
 		set part0 $prefix
 		set prefix s
+	} elseif { $part0 == "" } {
+		# We have //x:/rest/of/path
+		set part0 [lindex $parts 1]
+		set parts [lrange $parts 1 end]
 	}
 
 	set restpath [file join $part0 {*}[lrange $parts 1 end]]
@@ -2080,13 +2109,13 @@ proc SynthesizeClean {target} {
 
 	vlog "Makefile: checking for clean for '$tarname' in $dir ($type)"
 
-	if { $tarname == "all" } {
+	if { $tarname == "." } {
 		set cleanname clean
 	} else {
 		set cleanname $tarname-clean
 	}
 
-	if { $tarname != "all" && $type ni {program library custom} } {
+	if { $tarname ni {all .} && $type ni {program library custom} } {
 		return "# Not synthesizing clean target for $type $target"
 	} 
 
@@ -2104,28 +2133,49 @@ proc SynthesizeClean {target} {
 
 	set cleandeps ""
 	set cleanflags ""
-	if { $tarname == "all" } {
+	if { $tarname in {all .} } {
+		#append orule "# Gen clean for '$tarname' -- deps are: [ag $tarname ?depends]\n"
 		# This is a synthetic 'all' target, so take clean names from
 		# all dependent targets, if any. They must be dependencies of clean.
-		foreach d [ag all ?depends] {
+		foreach d [ag $tarname ?depends] {
 			lappend cleandeps {*}[dict:at $agv::target($d) cleantarget]
 		}
 		set cleanflags "-noclean"
 	}
 
 	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target' (with extra $cleandeps)"
-	set cleancmd "\n\t%autoclean $target $cleanflags\n"
 	if { $customclean != "" } {
 		vlog "... HAVE CUSTOM CLEAN: {\n$customclean}"
 		set cleancmd $customclean
+	} elseif { $tarname == "." } {
+
+		# The . target will not generate anything in makefile, so %autoclean . will fail.
+		# You have to drive autoclean from every dependent target
+		# XXX Check it this doesn't have to be a more general rule and instead
+		# this should't be checked whether the target has a chance to get generated.
+		set cleancmd "\n"
+		foreach d [ag . ?depends] {
+			append cleancmd "\t%autoclean $d $cleanflags\n"
+		}
+	} else {
+		set cleancmd "\n\t%autoclean $target $cleanflags\n"
 	}
-	set orule "rule $cleanname $cleandeps {$cleancmd}\nphony $cleanname"
+	append orule "rule $cleanname $cleandeps {$cleancmd}\nphony $cleanname"
 	if { $tarname == "all" } {
+		append orule "\nrule all-distclean all-clean \{\n"
+		foreach d [pget agv::p::directories] {
+			append orule "\t%submake -C $d all-distclean\n"
+		}
+		append orule "\t%autoclean $target\n\t%autoclean $target distclean\n\}"
+	} elseif { $tarname == "." } {
 		append orule "\nrule distclean clean \{\n"
 		foreach d [pget agv::p::directories] {
 			append orule "\t%submake -C $d distclean\n"
 		}
-		append orule "\t%autoclean $target\n\t%autoclean $target distclean\n\}"
+		foreach d [ag . ?depends] {
+			append orule "\t%autoclean $d\n\t%autoclean $d distclean\n"
+		}
+		append orule "\}"
 	}
 
 	return $orule
@@ -2433,16 +2483,7 @@ proc agp-prepare-database {target {parent ""}} {
 	return true
 }
 
-# XXX BUGS!!!
-# 1. For ag-instantiate, source should be relative to source directory,
-# target (including generated) should be in the build directory (unless
-# explicitly defined).
-# 2. The rule generated to enclose the generated instantiated file does
-# not take into account the need to create all directories in the path
-# of this file.
-# 3. The ResolveOutput1 function is buggy: only //PATH form is changed
-# into $SOURCEDIR/PATH, b:PATH and s:PATH are not seen due to incorrect
-# condition --- FIXED: no, this is wrong. The path should begin with
+# The path should begin with
 # either // (then without any colons inside), or //b: or //s: or //t:
 # or even with a custom prefix //NAME: if agv::NAMEdir is defined. Note
 # that Windows path such as C:/foreign/source/late.cc does not treat C:
@@ -2475,9 +2516,6 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 	# just as all output files do.
 	# Users may override this default location by using the explicit // prefix.
 	set realtarget [file normalize [ResolveOutput1 $target b]]
-	vlog "Real source: $realsource"
-	vlog "Real target: $realtarget"
-	vlog "Base path: [pwd] - going back to $wd"
 	cd $wd
 
 	set fd [open $realsource r]
@@ -2528,7 +2566,9 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 
 	}
 
-	puts stderr "Instantiating '$source' into '$target'"
+	set reltarget [prelocate $realtarget $agv::builddir $agv::toplevel]
+
+	puts stderr "+++ Instantiating '[prelocate $realsource $agv::builddir]' into '$reltarget'"
 
 	set tardir [file dirname $realtarget]
 	if { ![file exists $tardir] } {
@@ -2546,7 +2586,8 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 	# DON'T generate target under the $target name. Targets that have
 	# slash inside are treated as target inside a directory and will cause
 	# generation of redirection instead of generation in place.
-	set target_name [string map {../ _ ./ {} / -} $target]
+	# XXX Shouldn't this use the -imgen option from profile?
+	set target_name [GenFileBase path ag-instantiate $reltarget]
 
 	# Prevent target duplication
 	if { [info exists agv::target($target_name)] } {
@@ -2682,7 +2723,7 @@ proc ag-export names {
 	}
 }
 
-package provide ag 0.8
+package provide ag $agv::version
 set g_debug mkv::p::pass
 set ag_debug_on 0
 
@@ -2849,14 +2890,14 @@ if { $topdir != "" } {
 	set agv::toplevel [pwd]
 }
 
-puts stderr "READING DATABASE @[prelocate [pwd] $agv::toplevel]"
+puts stderr "+++ Reading database: [prelocate [pwd] $agv::toplevel]"
 
 # Do sourcing in the original directory of the file.
 # This is important so that all file references are relative
 # to the directory in which this file resides.
 source $agfile
 
-puts stderr "PROCESSING TO GENERATE MAKEFILE @[prelocate [pwd] $agv::toplevel]"
+puts stderr "+++ Processing runmode '$agv::runmode':  @[prelocate [pwd] $agv::toplevel]"
 
 #set mkv::directory .
 
