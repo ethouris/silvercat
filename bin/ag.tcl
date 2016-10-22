@@ -1712,10 +1712,20 @@ proc ResolveOutput output {
 proc GetDependentLibraryTargets target {
 	set depends [dict:at $agv::target($target) depends]  
 	$::g_debug "Getting dependent targets for '$target': $depends"
-	set libs ""
+	set libpacks ""
 	set langs ""
 
+	# Deps should contain more-less the same as $depends, but
+	# when there's a dependency in a form of a static library,
+	# this should add the library file directly (instead of the
+	# target) together with all this library's dependent libraries
+	# and -l flags.
+
+	set deps ""
+
 	foreach d $depends {
+
+		lappend deps $d
 
 		$::g_debug "Getting DEP: '$d'"
 		lassign [CheckDefinedTarget $d] d spec
@@ -1734,9 +1744,8 @@ proc GetDependentLibraryTargets target {
 
 		if { $type == "library" } {
 			set slibs ""
-			lassign [GetTargetFile $d $spec] o spec
-			$::g_debug " -- LIBRARY DEP '$d': output=[pget agv::target($d).output] ($o) SPEC: $spec"
-			lappend libs $o
+			lassign [GetTargetFile $d $spec] libofile spec
+			$::g_debug " -- LIBRARY DEP '$d': output=[pget agv::target($d).output] ($libofile) SPEC: $spec"
 			set ldflags ""
 			if { $spec == "static" } {
 				# Static libraries must carry over all its ldflags to the target
@@ -1746,40 +1755,91 @@ proc GetDependentLibraryTargets target {
 				$::g_debug " -- dynamic library $d - not importing ldflags"
 			}
 
+			set libpack [list $libofile $slibs]
+
 			set langs [dict:at $agv::target($d) language]
-			$::g_debug " --- Target '$d' provides libraries: $libs (language: $langs)"
+			$::g_debug " --- Target '$d' provides libraries: $libpack (language: $langs)"
 
 			# Recursive call
 			# XXX consider unwinding - recursion in Tcl is limited and may
 			# result in internal error!
-			lassign [GetDependentLibraryTargets $d] adlibs adlangs
-			set libs [concat $adlibs $libs $slibs]
+			lassign [GetDependentLibraryTargets $d] adlibpacks adlangs addeps
+			if { $spec == "static" } {
+				foreach p $adlibpacks {
+					lassign $p deplibfile dflags
+					lappend deps $deplibfile
+				}
+			}
+
+			# Ok, according to the libpack rule, REQUESTER PROVIDER order should be kept.
+			# So, the dependent libpacks land just after this one.
+			lappend libpacks [concat $libpack $adlibpacks]
 			lappend langs {*}$adlangs
 		} elseif { $type == "object"} {
-			lappend libs [dict get $agv::target($d) output]
+			lappend libpacks [dict get $agv::target($d) output]
+			# XXX Object file may also have dependencies!
 		} else {
 			$::g_debug " --- Target of type '$type' does not provide dependent libraries."
 		}
 	}
 
-	$::g_debug " --- RESULTING DEP LDFLAGS FOR '$target': $libs"
+	$::g_debug " --- RESULTING DEP LDFLAGS FOR '$target': $libpacks"
 
-	return [list $libs $langs]
+	return [list $libpacks $langs $deps]
+}
+
+proc IntegrateLibraryPacks {libpacks} {
+	# This expects libpacks in the following form:
+	# {library-files library-flags}...
+	# If these libraries mentioned in the library-files have
+	# dependencies, they must be satisfied in packs following
+	# this one.
+	#
+	# Now the role of this function is to make them all unique
+	# and in order, provided that REQUESTER PROVIDER order must
+	# be preserved always for static libraries.
+	#
+	# In particular it means that you should review the packs
+	# from the last to the first, and if in the next reviewed
+	# pack something repeats, it must be ignored. This concerns
+	# separately flags and separately library files
+
+	set libfiles ""
+	set libflags ""
+
+	foreach pack [lreverse $libpacks] {
+		lassign $pack file flags
+		set efflags ""
+		foreach f $flags {
+			if { $f ni $libflags } {
+				lappend efflags $f
+			}
+		}
+
+		set libflags [concat $efflags $libflags]
+
+		if { $file ni $libfiles } {
+			set libfiles [concat $file $libfiles]
+		}
+	}
+
+	return [concat $libfiles $libflags]
 }
 
 proc GenerateExecutableLinkRule {type db outfile} {
 
 	# Check dependent targets. If this target has any dependent targets of type library,
 	# add its library specification to the flags.
-	lassign [GetDependentLibraryTargets [dict:at $db name]] libs langs
+	lassign [GetDependentLibraryTargets [dict:at $db name]] libpacks langs depends
 	lappend langs {*}[dict:at $db language]
 	set langs [lsort -unique $langs]
 	set lang [agv::p::GetCommonLanguage $langs]
 	vlog "GLR/p: Common language for '$langs': $lang"
 
 	set objects [dict:at $db objects]
-	set depends [dict:at $db depends]
 	set ldflags [CompleteFlags $db $lang ldflags]
+
+	set libs [IntegrateLibraryPacks $libpacks]
 
 	if { $type == "library" } {
 		set linker [pget agv::profile($lang).linkdl]

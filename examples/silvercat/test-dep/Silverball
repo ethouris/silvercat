@@ -1,0 +1,13 @@
+ag-profile gcc-native
+ag-profile posix-install
+ag-profile c++ -depspec cached
+
+# Ok. file1, file2, file3.
+# File3 will form a static library.
+# File2 will form a dynamic library, dependent on file3.
+# File1 will form a program dependent on File2 library.
+
+ag slib -type library -libspec static -s ../file3.cc -h ../file.h -ldflags -- -lm
+ag dlib -type library -libspec dynamic -s ../file2.cc -h -depends slib -ldflags -- -lcrypto
+ag prg -type program -s ../file1.cc -depends dlib
+

@@ -90,7 +90,7 @@ set profiles {
 		c++ {
 			compile "g++ -c"
 			link "g++"
-			linkdl "g++ -dynamic"
+			linkdl "g++ -shared"
 			gendep "g++ -MM"
 			std_values {
 				c++ c++03
@@ -112,7 +112,7 @@ set profiles {
 		c {
 			compile "gcc -c"
 			link "gcc"
-			linkdl "gcc -dynamic"
+			linkdl "gcc -shared"
 			gendep "gcc -MM"
 			std_values {
 				c c90
@@ -133,7 +133,7 @@ set profiles {
 		c++ {
 			compile "clang++ -c"
 			link "clang++"
-			linkdl "clang++ -dynamic"
+			linkdl "clang++ -shared"
 			gendep "clang++ -MM"
 			depspec auto
 			std_values {
@@ -153,7 +153,7 @@ set profiles {
 		c {
 			compile "clang -c"
 			link "clang"
-			linkdl "clang -dynamic"
+			linkdl "clang -shared"
 			gendep "clang -MM"
 			depspec auto
 			std_values {

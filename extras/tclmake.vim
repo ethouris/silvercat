@@ -1,7 +1,24 @@
 " A more-less trial version of syntax highlight for vim
 " Usable for both Tclmake and Silvercat files.
 
-source $VIMRUNTIME/syntax/tcl.vim
+if version < 600
+  syntax clear
+elseif exists("b:current_syntax")
+  if b:current_syntax == "tclmake"
+     " We're done here
+     finish
+  elseif b:current_syntax == "tcl"
+	" We've passed Tcl syntax, but not yet this file. Continue
+  else
+	" We have something else, so clear syntax and apply Tcl syntax first
+	syntax clear
+	unlet b:current_syntax
+	source $VIMRUNTIME/syntax/tcl.vim
+  endif
+else
+	source $VIMRUNTIME/syntax/tcl.vim
+endif
+
 
 if index(split(&iskeyword, ","), "-") == -1 
 	let &iskeyword .= ",-"

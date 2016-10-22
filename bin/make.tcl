@@ -302,7 +302,7 @@ proc pprun {tracername channels {vblank {}}} {
 				}
 
 				set external "$mkv::p::shell $mkv::p::shellcmdopt {$cmd} 2>@stderr"
-				$mkv::debug "RUNNING: {$external} NUMBER OF JOBS: $njobs"
+				$mkv::debug "RUNNING: {$external} id=$id fd=$fd; NUMBER OF JOBS: $njobs"
 
 				set fd [open "|$external"]
 				dict set res $id fd $fd
@@ -331,7 +331,9 @@ proc pprun {tracername channels {vblank {}}} {
 				# Do this action for external processes only.
 				if { $iseof } {
 
-					# Turn of O_NDELAY or otherwise the error won't be seen!
+					$mkv::debug "FOUND EOF id=$id fd=$fd cmd=[dict get $res $id running]"
+
+					# Turn off O_NDELAY or otherwise the error won't be seen!
 					fconfigure $fd -blocking 1
 
 					set infotext "\[[expr {$id+1}]\] "
@@ -340,7 +342,7 @@ proc pprun {tracername channels {vblank {}}} {
 					set err [catch {close $fd} cres copts]
 					set code [dict get $copts -code]
 					if { $code != 0 } {
-						append infotext " ***Error "
+						append infotext " +++Error "
 						set ec [pget copts.-errorcode]
 						if { [lindex $ec 0] == "CHILDSTATUS" } {
 							set ec [lindex $ec 2]
@@ -1148,7 +1150,7 @@ proc make target {
 					$mkv::debug "      : $rk -- $rv"
 				}
 				set lres [expr [llength $res]/2]
-				set lremain [expr $mkv::p::maxjobs-$lres]
+				set lremain [expr {$mkv::p::maxjobs-$lres}]
 				$mkv::debug "+++ Channels used: $lres remaining: $lremain"
 				if { $lremain < 0 } {
 					error "INTERNAL ERROR! (lres $lres > maxjobs $mkv::p::maxjobs, res.size = [llength $res])"
