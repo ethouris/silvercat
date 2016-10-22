@@ -8,6 +8,6 @@ ag-profile posix-install
 ag-profile general -depspec cached -imgen target-path
 
 ag lib -type library -libspec static -s ../file2.cc -h ../file.h -ldflags -- -lm
-ag lib2 -type library -libspec static -s ../file3.cc -depends lib -ldflags -- -lcrypto
+ag lib2 -type library -libspec static -s ../file3.cc -depends lib -I //s:include -ldflags -- -lcrypto
 ag prg -type program -s ../file1.cc -depends lib2
 

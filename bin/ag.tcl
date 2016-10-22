@@ -235,7 +235,9 @@ proc TranslateFlags { lang flagmap mainkey {order append} } {
 			# flag is *dir (currently: incdir, libdir, but potential
 			# others may be added, too).
 			if { [string match *dir $flagtype] } {
-				set val [FixShadowPath $val]
+				$::g_debug "RESOLVING '$flagtype': $val"
+				set val [ResolveOutput $val s]
+				$::g_debug " ... : $val"
 			}
 			set e $flag($flagtype)$val
 			if { $e ni $outflags_old && $e ni $outflags_new } {
@@ -1328,7 +1330,8 @@ proc Process:custom target {
 
 	set rules [dict:at $db rules]
 	set phony [dict:at $db phony]
-	set outfile [ResolveOutput [dict:at $db output]]
+	set output [dict:at $db output]
+	set outfile [ResolveOutput $output]
 	set sources [dict:at $db sources]
 	set command [dict:at $db command]
 	set deps [dict:at $db depends]
@@ -1651,6 +1654,8 @@ proc GetTargetFile {target spec} {
 # you should mount the path to a local drive to be able to use it.
 proc ResolveOutput1 {o {defaultprefix b}} {
 
+	$::g_debug "ResolveOutput1: $o (default: $defaultprefix)"
+
 	# The output path is expected to be a relative path
 	# to builddir, unless it's a path outside the toplevel,
 	# in which case it should be absolute.
@@ -1666,14 +1671,16 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 	if { $initial != "//" } {
 
 		# If this is a builddir, with prefix=builddir
-		# expected relative to builddir, then simplt
+		# expected relative to builddir, then simply
 		# return it as is.
 		if { $defaultprefix == "b" } {
+			$::g_debug "... NO PREFIX, returning unchanged: $o"
 			return $o
 		}
 
 		# Otherwise apply the prefix artificially and continue processing
 		set o //${defaultprefix}:$o
+		$::g_debug "... required s, adding prefix: $o"
 	}
 
 	set rest [string range $o 2 end]
@@ -1721,6 +1728,8 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 		}
 	}
 
+	$::g_debug "... RESOLVE: apath=$apath restpath=$restpath prefix=$prefix"
+
 	if { $apath == "" } {
 		error "Invalid special-path specification: $prefix (in $o) - use '//SPEC:', where SPEC is s, b, t"
 	}
@@ -1730,10 +1739,10 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 	return $relpath
 }
 
-proc ResolveOutput output {
+proc ResolveOutput {output {f b}} {
 	set out ""
 	foreach o $output {
-		lappend out [ResolveOutput1 $o]
+		lappend out [ResolveOutput1 $o $f]
 	}
 	return $out
 }
