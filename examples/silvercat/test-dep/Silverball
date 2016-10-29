@@ -7,7 +7,8 @@ ag-profile c++ -depspec cached
 # File2 will form a dynamic library, dependent on file3.
 # File1 will form a program dependent on File2 library.
 
-ag slib -type library -libspec static -s ../file3.cc -h ../file.h -ldflags -- -lm
-ag dlib -type library -libspec dynamic -s ../file2.cc -h -depends slib -ldflags -- -lcrypto
-ag prg -type program -s ../file1.cc -depends dlib
+ag base -type library -libspec static -s ../file3.cc -h ../file.h -ldflags -- -lm
+ag tooler -type library -libspec dynamic -s ../file2.cc -depends base -ldflags -- -lcrypto
+ag inter -type library -libspec dynamic -s ../file4.cc -depends tooler -ldflags -- -lz
+ag prg -type program -s ../file1.cc -depends inter
 
