@@ -1752,11 +1752,13 @@ proc ResolveOutput {output {f b}} {
 	return $out
 }
 
-proc GetDependentLibraryTargets target {
+proc GetDependentLibraryTargets {target {transit transit}} {
 	set depends [dict:at $agv::target($target) depends]  
 	$::g_debug "Getting dependent targets for '$target': $depends"
 	set libpacks ""
 	set langs ""
+
+	lassign [CheckDefinedTarget $target] t tspec
 
 	# Deps should contain more-less the same as $depends, but
 	# when there's a dependency in a form of a static library,
@@ -1783,6 +1785,11 @@ proc GetDependentLibraryTargets target {
 			vlog "--- taking foreign target '$d' type '$type'"
 		}
 
+		# XXX PROBLEM TO SOLVE:
+		# This procedure should not return DIRECT DEPENDENT LIBRARY FILE, only the extra dependencies.
+		# This procedure should extract the exact dependent library file on its own here, the deeper call
+		# should only return extra library packs, NOT ITSELF.
+
 		if { $type == "library" } {
 			set slibs ""
 			lassign [GetTargetFile $d $spec] libofile spec
@@ -1804,26 +1811,35 @@ proc GetDependentLibraryTargets target {
 			# Recursive call
 			# XXX consider unwinding - recursion in Tcl is limited and may
 			# result in internal error!
-			lassign [GetDependentLibraryTargets $d] adlibpacks adlangs addeps
-			$::g_debug "LIBPACKS from dep '$d': $adlibpacks"
-			lappend deps {*}$addeps 
+			if { $transit == "transit" || ( $spec == "static" && $tspec == "static") } {
+				$::g_debug "--> DESCENDING INTO '$d' to get transitive dependencies {"
+				lassign [GetDependentLibraryTargets $d notransit] adlibpacks adlangs addeps
+				$::g_debug "} LIBPACKS from dep '$d': $adlibpacks; DEPS: $addeps"
+				if { $spec == "static" } {
+					lappend deps {*}$addeps
+				}
+				# Ok, according to the libpack rule, REQUESTER PROVIDER order should be kept.
+				# So, the dependent libpacks land just after this one.
+				lappend libpacks {*}[concat [list $libpack] $adlibpacks ]
+				lappend langs {*}$adlangs
+			}
+
 			if { $spec == "static" } {
+				$::g_debug "ADDING DEP: $libofile (because static library)"
 				lappend deps $libofile
 
 			} else {
+				$::g_debug "ADDING DEP: $d (because dynamic library)"
 				lappend deps $d
 			}
 
-			# Ok, according to the libpack rule, REQUESTER PROVIDER order should be kept.
-			# So, the dependent libpacks land just after this one.
-			lappend libpacks {*}[concat [list $libpack] $adlibpacks]
-			lappend langs {*}$adlangs
 		} elseif { $type == "object"} {
 			lappend libpacks [dict get $agv::target($d) output]
 			# XXX Object file may also have dependencies!
+			$::g_debug "ADDING DEP: $d (because object file)"
 			lappend deps $d
 		} else {
-			$::g_debug " --- Target of type '$type' does not provide dependent libraries."
+			$::g_debug "ADDING DEP: $d - Target of type '$type' does not provide dependent transitive libraries."
 			lappend deps $d
 
 		}

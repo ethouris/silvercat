@@ -12,3 +12,9 @@ ag tooler -type library -libspec dynamic -s ../file2.cc -depends base -ldflags -
 ag inter -type library -libspec dynamic -s ../file4.cc -depends tooler -ldflags -- -lz
 ag prg -type program -s ../file1.cc -depends inter
 
+# Testing static library transitioning:
+# File1 forms a program dependent on 'stator' static library
+# File2 forms a static library 'stator' dependent on 'base' static library
+ag stator -type library -libspec static -s ../file2.cc -depends base -ldflags -- -lcrypto
+ag sprg -type program -s ../file1.cc -depends stator
+
