@@ -2814,6 +2814,7 @@ set ag_debug_on 0
 set g_debug mkv::p::pass
 set agfiledir ""
 set topdir ""
+set runmode genrules
 
 #puts stderr "CURRENT DIR: [pwd]"
 set agv::builddir [pwd]
@@ -2827,11 +2828,12 @@ set ag_optargs {
 	-d *ag_debug_on
 	-C agfiledir
 	-t topdir
+	-m runmode
 }
 
 lassign [process-options $argv $ag_optargs] g_args g_variables
 
-if { $help || [string trim $g_args] == "" } {
+if { $help } {
 	puts "Usage: [file tail $::argv0] genrules <target>"
 	puts stderr "Options:"
 	foreach {opt arg} $ag_optargs {
@@ -2905,7 +2907,7 @@ set ag_call [list $::argv0 genrules -f %agfile]
 
 #puts stderr "AGFILE FOUND AS: $agfile"
 
-set agv::runmode [lindex $g_args 0] ;# != "" because g_args != ""
+set agv::runmode $runmode
 
 set wd [pwd]
 cd $agfiledir
