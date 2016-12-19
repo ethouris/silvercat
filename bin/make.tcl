@@ -325,7 +325,10 @@ proc pprun {tracername channels {vblank {}}} {
 				# Do this action for external processes only.
 				if { $iseof } {
 
-					$mkv::debug "FOUND EOF id=$id fd=$fd cmd=[dict get $res $id running]"
+					# FIXED BUG: cmd was set only when starting a command,
+					# so here it could simply carry over a singular state.
+					set cmd [dict get $res $id running]
+					$mkv::debug "FOUND EOF id=$id fd=$fd cmd=$cmd"
 
 					# Turn off O_NDELAY or otherwise the error won't be seen!
 					fconfigure $fd -blocking 1
@@ -336,7 +339,7 @@ proc pprun {tracername channels {vblank {}}} {
 					set err [catch {close $fd} cres copts]
 					set code [dict get $copts -code]
 					if { $code != 0 } {
-						append infotext " +++Error "
+						append infotext " +++Error"
 						set ec [pget copts.-errorcode]
 						if { [lindex $ec 0] == "CHILDSTATUS" } {
 							set ec [lindex $ec 2]
@@ -345,7 +348,7 @@ proc pprun {tracername channels {vblank {}}} {
 							set ec -1
 						}
 						if { "ignore" in $flags } {
-							append infotext "(ignored) "
+							append infotext " (ignored)"
 						} else {
 							set deadkey $id.$deadcount
 							incr deadcount
@@ -1172,7 +1175,7 @@ proc make target {
 					if { $failedcmd != "" } {
 						vlog "+++ Target '$target' failed on: $failedcmd"
 
-						lappend failed $target
+						pluappend failed $target
 						if { $mkv::p::keep_going } {
 							vlog "+++ ... although continuing on other targets"
 						} else {
@@ -1623,7 +1626,7 @@ proc dequeue_action {nrequired} {
 
 		                # Otherwise just mark this target as failed by dependency
 		                vlog " --- Marking target '$target' failed."
-		                lappend failed $target
+		                pluappend failed $target
 		        }
 
 		        set alldone 0
@@ -2201,7 +2204,9 @@ proc main argv {
 					#puts stderr "FAILURE: $::errorInfo"
 					error $res1 $::errorInfo
 				} elseif { !$res1 } {
-					error "Stopped on '$mkv::p::failtarget' target"
+					# XXX This was displaying mkv::p::failtarget, but it was always empty.
+					# Track this down whether it should be still that one, but properly set.
+					error "Stopped on '$mkv::p::failed' target"
 				}
 
 			}

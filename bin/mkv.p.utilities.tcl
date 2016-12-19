@@ -348,6 +348,19 @@ proc pluniq ls {
 	return $output
 }
 
+proc pluappend {r_ls args} {
+	upvar $r_ls ls
+	if { ![info exists ls] } {
+		set ls ""
+	}
+	foreach a $args {
+		if { $a ni $ls } {
+			lappend ls $a
+		}
+	}
+	return $ls
+}
+
 proc puncomment text {
 	set lines [split $text \n]
 	set output {}
@@ -665,6 +678,7 @@ set public_export_util [puncomment {
 	puncomment
 	pflat
 	pluniq
+	pluappend
 	pass
 	pver
 	prun
