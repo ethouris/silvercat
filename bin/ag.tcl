@@ -1427,7 +1427,12 @@ proc GenerateInstallTarget:library {target prefix} {
 	set cmds ""
 
 	# Generate also installation for headers
-	set hdr [dict:at $db headers]
+	set src_hdr [dict:at $db headers]
+	$::g_debug "... ($target): source headers to install: $src_hdr"
+	set hdr [ResolveOutput $src_hdr s]
+
+	$::g_debug "... ($target): target headers to install: $hdr"
+
 	foreach h $hdr {
 		set hcmd [GenerateInstallCommand include $h $prefix [dict:at $db headers-subdir]]
 		append cmds $hcmd\n
@@ -1514,6 +1519,7 @@ proc ProcessCompileLink {type subtype target outfile} {
 	if { $prefix == "" } {
 		puts stderr "+++ AG WARNING: 'install:prefix' not found in profile - not generating install targets"
 	} else {
+		$::g_debug "Generating install rules for '$target' as '$type' in '$prefix'"
 		GenerateInstallTarget:$type $target $prefix
 	}
 
