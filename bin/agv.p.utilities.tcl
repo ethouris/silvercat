@@ -226,8 +226,8 @@ proc PrepareGeneralTargets {} {
 
 	# The "reconfigure" target is somewhat special and MUST BE FIRST, always.
 	# If found, move it to the first one.
-	if { "reconfigure" in $subtargets } {
-		set subtargets [concat reconfigure [plremove $subtargets reconfigure]]
+	if { "reconfigure-ifneeded" in $subtargets } {
+		set subtargets [concat reconfigure-ifneeded [plremove $subtargets reconfigure-ifneeded]]
 	}
 
 	# Ok, now construct alltargets that consist only of targets
@@ -236,15 +236,16 @@ proc PrepareGeneralTargets {} {
 	set alltargets ""
 	set extratargets ""
 	foreach t $subtargets {
-		if { [dict:at $agv::target($t) runon] != "demand" } {
+		set runon [dict:at $agv::target($t) runon]
+		if { $runon != "demand" } {
 			lappend alltargets $t
 		} else {
 			lappend extratargets $t
 		}
 	}
 
-	vlog " --: TOTAL TARGETS: $subtargets"
-	vlog " --: ALL TARGETS: $alltargets"
+	$::g_debug " --: TOTAL TARGETS: $subtargets"
+	$::g_debug " --: ALL TARGETS: $alltargets"
 	ag all -type phony -depends {*}$alltargets
 	ag . -type phony -depends all {*}$extratargets
 }

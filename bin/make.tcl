@@ -651,11 +651,11 @@ proc rule args {
 	if { $size > 2 } {
 		set depends {}
 		foreach dep [lrange $args 1 end-1] {
-		        if { $dep == "|" } {
-		                set depvar prereq
-		        } else {
-		                append $depvar "$dep "
-		        }
+			if { $dep == "|" } {
+				set depvar prereq
+			} else {
+				append $depvar "$dep "
+			}
 		}
 	}
 
@@ -689,7 +689,7 @@ proc check_generic_upd_first {target} {
 		return true
 	} else {
 		if { $first_rule == "" } {
-		        set first_rule $target
+			set first_rule $target
 		}
 	}
 	return false
@@ -920,6 +920,8 @@ proc build_make_tree {parentstack target whoneedstarget} {
 				if { $depnames != "" } {
 					set hasdepends 1
 				}
+
+				# XXX Generic phony prerequisites... should be supported?
 				if { [info exists db_prereq($generic)] } {
 					incr depth
 					set prereq [generate_depends $target $generic $db_prereq($generic)]
@@ -965,23 +967,32 @@ proc build_make_tree {parentstack target whoneedstarget} {
 			# For prereq, just make sure that they exist.
 			foreach p $prereq {
 				vlog "Considering $p as prerequisite for $target"
-				if { ![file exists $p] } {
-					incr depth
-					mkv::p::debug_indent+
-					set res [catch {build_make_tree [concat $parentstack $target] $p $target} result]
-					mkv::p::debug_indent-
-					$mkv::debug "... <--- back at '$target'"
-					incr depth -1
-					if { $res } {
-						$mkv::debug "ERROR: ''$result'' $::errorCode $::errorInfo"
-						set status 0
-						vlog "Making $p failed, so $target won't be made"
-						if { $mkv::p::keep_going } {
-							vlog "- although continuing with other targets (-k)"
-						} else {
-							set failgoal $p
-							break
-						}
+
+				# This implements "phony prerequisites". 
+				if { ![info exists $db_phony($p)] && [file exists $p] } {
+					continue
+				}
+
+				# Build make tree for targets that:
+				# - are real targets and the file doesn't exist
+				# - are phony targets
+
+				incr depth
+				mkv::p::debug_indent+
+				set res [catch {build_make_tree [concat $parentstack $target] $p $target} result]
+				mkv::p::debug_indent-
+				$mkv::debug "... <--- back at '$target'"
+				incr depth -1
+
+				if { $res } {
+					$mkv::debug "ERROR: ''$result'' $::errorCode $::errorInfo"
+					set status 0
+					vlog "Making $p failed, so $target won't be made"
+					if { $mkv::p::keep_going } {
+						vlog "- although continuing with other targets (-k)"
+					} else {
+						set failgoal $p
+						break
 					}
 				}
 			}
@@ -1030,6 +1041,16 @@ proc build_make_tree {parentstack target whoneedstarget} {
 					break
 				}
 			}
+
+			# If a phony target is a PREREQUISITE (not DEPENDENCY) of $target,
+			# then it was scheduled to build, however it should be considered
+			# not required as a prerequisite for the target, if by DEPENDS check
+			# the target isn't considered stale.
+
+			# XXX This is a little bit wrong. There should be somehow recognized
+			# as to whether this target is a prerequisite of the parent target.
+			# If the parent target was NOT scheduled for execution, this target
+			# also shouldn't be, if it's phony.
 
 			if { $stale || [info exists db_phony($target)] } {
 				vlog "Resolving make action for $target (stale against $depend)"
