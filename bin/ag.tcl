@@ -1588,6 +1588,9 @@ proc Process:pkg-config target {
 	dict set db rules install-$target [list $output "\n\tinstall $output $installdir\n"]
 	dict set db clean none
 
+	dict set db rules $target [list "\n\techo 'The pc file should be already generated'\n"]
+	dict set db flags {noclean distclean}
+
 	set agv::target($target) $db
 }
 
@@ -2457,7 +2460,8 @@ proc SynthesizeClean {target} {
 			append orule "\t%autoclean $d\n\t%autoclean $d distclean\n"
 		}
 		foreach f $agv::generated_files {
-			append orule "\trm $f\n"
+			# XXX The 'rm' command should be system dependent!
+			append orule "\trm -f $f\n"
 		}
 		append orule "\}"
 	}
