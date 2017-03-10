@@ -1712,8 +1712,8 @@ proc dequeue_action {nrequired} {
 # whoneedstarget - the target this one is needed for
 
 # If action is performed normally, both targets are the same
-# If action is taken as a link to another target, second argument
-# is the target actually built; first is only the indetifier of
+# If action is taken as a link to another target, actual_target
+# is the target actually built; target is only the indetifier of
 # the action, which should be taken.
 proc enqueue_target {actual_target target whoneedstarget} {
 	set actions [resolve_action $actual_target $target $whoneedstarget]
@@ -1723,7 +1723,7 @@ proc enqueue_target {actual_target target whoneedstarget} {
 	$mkv::debug "ENQUEUING $actual_target with ACTIONS: {$actions} NEEDED BY: $whoneedstarget"
 
 	if { [catch {enqueue_action $actual_target $actions $whoneedstarget} error] } {
-		puts stderr "ERROR ENQUEUING: $error"
+		puts stderr "+++ Error enqueuing '$actual_target': $error"
 		return false
 	}
 
@@ -1756,7 +1756,7 @@ proc resolve_action {actual_target target whoneedstarget} {
 			} else {
 				puts stderr "+++ No rule to make target '$target'"
 				lappend mkv::p::failed $target
-				return false
+				error "File not found/Target not defined: $target"
 			}
 		} else {
 			vlog "Found generic '$generic' applicable for target '$target'"

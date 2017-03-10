@@ -12,7 +12,9 @@ elseif exists("b:current_syntax")
   else
 	" We have something else, so clear syntax and apply Tcl syntax first
 	syntax clear
-	unlet b:current_syntax
+	if exists("b:current_syntax")
+		unlet b:current_syntax
+	endif
 	source $VIMRUNTIME/syntax/tcl.vim
   endif
 else
@@ -35,7 +37,7 @@ TclmakeDefineCommand setflags
 TclmakeDefineCommand getflags
 
 syn keyword tcltkCommandColor pget phas pset pset+ pinit puncomment pexpand pdef pdefx pdefv
-syn keyword tcltkCommandColor pwrite pupdate pread pmap pfind prelativize plist 
+syn keyword tcltkCommandColor pwrite pupdate pread pmap pfind prelocate plist 
 
 
 " ag.tcl
@@ -48,9 +50,10 @@ TclmakeDefineCommand ag-make
 TclmakeDefineCommand ag-export
 
 
-syn keyword silvercatSwitch contained -s -sources -h -headers -nh -noinst-headers -hidir -cflags -L -ldflags -lflags -libs
+syn keyword silvercatSwitch contained -s -sources -h -headers -nh -noinst-headers -hidir
+\ -cflags -L -ldflags -lflags -libs
 \ -packages -I -incdir -D -defines -depends -type -install -libspec -features -o -output -command -clean
-\ -depspec -imgen 
+\ -depspec -imgen -flags -runon
 
 hi def link silvercatSwitch Special
 
