@@ -735,6 +735,7 @@ proc UnaliasOption alias {
 		L { return libdir }
 		libs { return ldflags }
 		lflags { return ldflags }
+		requires { return depends }
 	}
 
 	return $alias
@@ -792,6 +793,7 @@ proc AccessDatabase {array target args} {
 
 	set singles [pget agv::p::keytype(single)]
 	set commandlike [pget agv::p::keytype(command)]
+	set uniques [pget agv::p::keytype(unique)]
 
 	# Get old options
 	set db $agv_db($target)
@@ -874,13 +876,32 @@ proc AccessDatabase {array target args} {
 			continue
 		}
 
+		set update_mode ""
+
 		if { !$nomoreoptions && $f2 == "+ " } {
 			set o [string range $o 2 end]
 		}
 
 		if { !$nomoreoptions && $f3 == "++ " } {
 			set o [string range $o 3 end]
-			set push_front true
+			set update_mode push_front
+		}
+
+		if { !$nomoreoptions && $f3 == "+- " } {
+			set o [string range $o 3 end]
+			set update_mode unique
+		}
+
+		if { $update_mode == "" } {
+			# Depending on type.
+			if { $lastopt in $singles } {
+				set update_mode override
+			} elseif { $lastopt in $uniques } {
+				set update_mode unique
+			} else {
+				set update_mode push_back
+			}
+			# commandlike check is unnecessary - it doesn't use $update_mode.
 		}
 
 		$::g_debug "TO SET '$lastopt' (before): $o"
@@ -916,7 +937,7 @@ proc AccessDatabase {array target args} {
 				if { $size == 1 } {
 					set o [lindex $o 0]
 				}
-				if { $push_front } {
+				if { $update_mode == "push_front" } {
 					set options($lastopt) [concat $o $options($lastopt)]
 				} elseif { $lastopt in $singles } {
 					if { [info exists options($lastopt)] } {
@@ -924,16 +945,20 @@ proc AccessDatabase {array target args} {
 					}
 					set options($lastopt) $o
 				} else {
-					lappend options($lastopt) {*}$o
+					if { $update_mode != "unique" || $o ni $options($lastopt) } {
+						lappend options($lastopt) {*}$o
+					}
 				} 
 			} else {
 				# Happened to be a text not convertible to a list.
 				# Well, happens. Just append to the existing value.
 				if { [info exists options($lastopt)] } {
-					if { $push_front } {
+					if { $update_mode == "push_front" } {
 						set options($lastopt) "$o $options($lastopt)"
 					} else {
-						append options($lastopt) " $o"
+						if { $update_mode != "unique" || $o ni $options($lastopt) } {
+							append options($lastopt) " $o"
+						}
 					}
 				} else {
 					set options($lastopt) $o
@@ -975,7 +1000,16 @@ proc ag {target args} {
 	set tar [file join $agv::statedir $target]
 	set target [prelocate $tar]
 
-	return [AccessDatabase agv::target $target {*}$args]
+	set wasthere [info exists agv::target($target)]
+
+	set res [AccessDatabase agv::target $target {*}$args]
+	# The database accessor does the whole parsing and it's
+	# not possible to intersect anything here. On the other hand,
+	# it doesn't matter whether we report error before or after the access.
+
+	if { !$wasthere && ![dict exists $agv::target($target) type] } {
+		error "First access to ag '$target' must specify a type."
+	}
 }
 
 proc ag-info {filename args} {
@@ -1387,6 +1421,199 @@ proc Process:custom target {
 	Process:phony $target
 }
 
+proc ReplaceVars s {
+	return [regsub -all {%([A-Za-z0-9_-]+)} $s {${\1}}]
+}
+
+proc Process:pkg-config target {
+
+	set db $agv::target($target)
+
+	set name [dict:at $db name]
+	set output [dict:at $db output]
+	$::g_debug "PC: '$target' name='$name' output='$output'"
+
+	# Usually the name of the target matches *.pc and it's
+	# the name of the output file; if so, the name is then
+	# the name with stripped .pc suffix. Otherwise this is
+	# the name and the output is added .pc suffix. The second
+	# one is not recommended because the name this way can
+	# be mixed with some other target name, which is a usual
+	# situation when you have a library with pkg-config.
+
+	if { $name == "" && $output == "" } {
+		# this is simplest, handle it accordingly.
+		if { [string match *.pc $target] } {
+			set output $target
+			set name [file rootname $target]
+		} else {
+			set name $target
+			set output $target.pc
+		}
+
+		dict set db name $name
+		dict set db output $output
+
+	} elseif { $name == "" } {
+		set name $target
+		if { [string match *.pc $target] } {
+			if { $target != $output } {
+				error "Target:$target has .pc in name and doesn't match output file '$output'"
+			}
+			set name [file rootname $target]
+		}
+	} elseif { $output == "" } {
+		if { [string match *.pc $target] } {
+			set output $target
+		} else {
+			set output $target.pc
+		}
+	}
+	$::g_debug "PC FIXED: '$target' name='$name' output='$output'"
+
+	set varset ""
+	set keyset ""
+
+	# First, complete the keys. Note that any %name must be replaced with ${name}.
+	lappend keyset "Name: $name"
+	lappend keyset "Description: [ReplaceVars [dict:at $db description]]" ;# Ignore if empty
+
+	# Use version 0.1 if not defined.
+	set ver [ReplaceVars [dict:at $db version]]
+	if { $ver == "" } {
+		set ver 0.1
+	}
+	lappend keyset "Version: $ver"
+	set req [ReplaceVars [dict:at $db depends]]
+	if { $req != "" } {
+		set reqpublic ""
+		set reqprivate ""
+		foreach r $req {
+			if { [string match private:* $r] } {
+				lappend reqprivate [string range $r 8 end]
+			} else {
+				lappend reqpublic $r
+			}
+		}
+
+		if { $reqpublic != "" } {
+			lappend keyset "Requires: $reqpublic"
+		}
+		if { $reqprivate != "" } {
+			lappend keyset "Requires.private: $reqprivate"
+		}
+	}
+
+	set libs [ReplaceVars [dict:at $db ldflags]]
+	if { $libs != "" } {
+		set lpublic ""
+		set lprivate ""
+		foreach l $libs {
+			if { [string match private:* $l] } {
+				lappend lprivate "-l[string range $l 8 end]"
+			} else {
+				lappend lpublic "-l$l"
+			}
+		}
+
+		lappend keyset "Libs: -L\${libdir} $lpublic"
+		if { $lprivate != "" } {
+			lappend keyset "Libs.private: $lprivate"
+		}
+	}
+
+	set incdir [ReplaceVars [dict:at $db incdir]]
+	set defines [ReplaceVars [dict:at $db defines]]
+	set cflags [ReplaceVars [dict:at $db cflags]]
+
+	set ocflags ""
+
+	foreach d $incdir {
+		if { [string index $d 0] != "/" } {
+			# Relative path. For incdir, it requires prefixing with ${includedir}.
+			append ocflags "-I\${incdir}/$d "
+		} else {
+			append ocflags "$d "
+		}
+	}
+
+	foreach d $defines {
+		append ocflags "-D$d "
+	}
+
+	lappend keyset "Cflags: -I\${includedir} $ocflags $cflags"
+
+	# Ok, now variables
+	# First, set variables that the brooker specified.
+	foreach var [dict:at $db var] {
+		set value [join [lassign [split $var =] varname] =]
+		lappend varset $varname [ReplaceVars $value]
+	}
+
+	# Ok, varset is now built so that it can be accessed as a dictionary.
+	# We need that to check if there are the overridable items specified.
+	# If not, specify them. Use reverse order and insert at the beginning.
+	PrependIfNotFound varset includedir {${prefix}/include}
+	PrependIfNotFound varset libdir {${exec_prefix}/lib}
+	PrependIfNotFound varset exec_prefix {${prefix}}
+	PrependIfNotFound varset prefix [agv::prefix]
+
+	# Good, all data are now complete. Open the file and write to it.
+	set realtarget [file normalize [ResolveOutput1 $output b]]
+	$::g_debug "Creating PC file: $realtarget"
+
+	$::g_debug "PC VARIABLES: $varset"
+	$::g_debug "PC KEYS: $keyset"
+
+	set fd [open $realtarget w]
+
+	# Now stream in the varset first
+	foreach {key value} $varset {
+		puts $fd "$key=$value"
+	}
+
+	# Var-key separator
+	puts $fd ""
+
+	# Keyset is a list of lines, so just print them as it goes
+	foreach kv $keyset {
+		puts $fd $kv
+	}
+
+	close $fd
+
+	set installdir [dict:at $agv::profile(default) installdir:lib]/pkgconfig
+
+	# Good. Now attach the installation rules
+	dict set db rules install-$target [list $output "\n\tinstall $output $installdir\n"]
+	dict set db clean none
+
+	set agv::target($target) $db
+}
+
+proc PrependIfNotFound {dictvar key value} {
+	upvar $dictvar dict
+	if { ![dict exists $dict $key] } {
+		set dict [concat [list $key $value] $dict]
+	}
+}
+
+proc Process:phony target {
+	# Do the general depends processing
+	set phony [dict:at $agv::target($target) phony]
+	set deps [dict:at $agv::target($target) depends]
+
+	# This sets the 'phony' key for a case when there's no
+	# phony nor rule added for $target yet. Just in a case when
+	# any earlier processing facility didn't set it at all.
+	# Normally a processing facility should set a rule to build the target.
+	set db $agv::target($target)
+	if { [dict:at $db phony $target] == "" && [dict:at $db rules $target] == "" } {
+		vlog "TARGET '$target' has no rule nor phony - setting phony with '$deps'"
+		dict set agv::target($target) phony $target $deps
+	}
+}
+
 proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 	set icmd ""
 
@@ -1539,22 +1766,6 @@ proc ProcessCompileLink {type subtype target outfile} {
 	}
 
 	ExecuteFrameworks $target complete
-}
-
-proc Process:phony target {
-	# Do the general depends processing
-	set phony [dict:at $agv::target($target) phony]
-	set deps [dict:at $agv::target($target) depends]
-
-	# This sets the 'phony' key for a case when there's no
-	# phony nor rule added for $target yet. Just in a case when
-	# any earlier processing facility didn't set it at all.
-	# Normally a processing facility should set a rule to build the target.
-	set db $agv::target($target)
-	if { [dict:at $db phony $target] == "" && [dict:at $db rules $target] == "" } {
-		vlog "TARGET '$target' has no rule nor phony - setting phony with '$deps'"
-		dict set agv::target($target) phony $target $deps
-	}
 }
 
 proc CompleteFlags {db lang flagtype} {

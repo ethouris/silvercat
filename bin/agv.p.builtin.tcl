@@ -43,4 +43,41 @@ set compatible_langs {
 }
 
 
+set keytype(single) {
+	compile
+	compile_oflag
+	link
+	link_oflag
+	linkdl
+	gendep
+	depspec
+	preproc
+	libtype
+	name
+}
+
+set keytype(command) {
+	command
+	clean
+}
+
+set keytype(unique) {
+}
+
+array set typeflags {
+
+	program {
+		all
+		{binddeps library}
+	}
+
+	library {
+		all
+		{binddeps library}
+		{passdeps library}
+	}
+	custom all
+	pkg-config all
+}
+
 

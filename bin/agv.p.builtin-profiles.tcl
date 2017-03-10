@@ -1,22 +1,4 @@
 
-
-set keytype(single) {
-	compile
-	compile_oflag
-	link
-	link_oflag
-	linkdl
-	gendep
-	depspec
-	preproc
-	libtype
-}
-
-set keytype(command) {
-	command
-	clean
-}
-
 set profiles {
 
 	# {This is only informative - explains the structure of the profiles.}

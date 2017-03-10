@@ -19,14 +19,14 @@ The `agcat` tool when using options starting from `--`, uses one of the standard
 configuration options. They all consist of functional prefix and the name. The
 following functional prefix are used:
 
-* --have - rather not used manually, this is for automated check, although this option
-  can be used to override a system check. There's also inverted prefix: --havent
-* --use - declares that particular thing should be used. These options may have
+* `--have` - rather not used manually, this is for automated check, although this option
+  can be used to override a system check. There's also inverted prefix: `--havent`
+* `--use` - declares that particular thing should be used. These options may have
   parameters. This also has alternative `--use-no` in order to override a default,
   although particular options should also accept `--use-OPTION=none`
-* --enable - boolean only values, set the value to true (alternative `--disable`
+* `--enable` - boolean only values, set the value to true (alternative `--disable`
   prefix sets it to false).
-* --with - specifies some detail of already accepted alternative, such as path
+* `--with` - specifies some detail of already accepted alternative, such as path
   or alternative specification. The `with` prefix should be used for something
   that is already enabled by `--enable` or used by `--use`, or when it's turned
   on by default. Anything specified by `--with` must have some existing default value.
@@ -96,7 +96,7 @@ package isn't found. You can override this behavior by using optional flags.
 
 If the situation is that the package is found and therefore appropriate with includes/libs keys
 have been filled in, these things can be still overridden (i.e. keys are set before the check
-is done, which means that it won't be newly set by ag-check-have) by using --with option. This
+is done, which means that it won't be newly set by ag-check-have) by using `--with` option. This
 has then the following syntax:
 
     --with-<pkgname>-includes=PATH --with-<pkgname>-libs=PATH

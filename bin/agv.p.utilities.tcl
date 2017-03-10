@@ -180,13 +180,14 @@ proc PrepareGeneralTargets {} {
 		set addtargets ""
 		$::g_debug "Target '$t', type $type, runon $runon:"
 
-		if { $type in {program library custom} } {
-			$::g_debug " --> Added to 'all' (because $type)"
-			set addtargets $t
-		} elseif { $type == {directory} } {
+		if { $type == {directory} } {
+			# Directory must be treated special way
 			$::g_debug " --> Added to 'all' as $t/all (because $type)"
 			CheckDefinedTarget $t/all  ;# Create it lazily
 			set addtargets "$t $t/all"
+		} elseif { {all} in [pget agv::p::typeflags($type)] } {
+			$::g_debug " --> Added to 'all' (because $type)"
+			set addtargets $t
 		} else {
 			$::g_debug " --| Not added to 'all' (because $type)"
 		}
