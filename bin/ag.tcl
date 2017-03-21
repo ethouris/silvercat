@@ -2426,6 +2426,9 @@ proc SynthesizeClean {target} {
 		}
 		set cleanflags "-noclean"
 	}
+	if { $tarname == "." } {
+		lappend cleandeps all-clean
+	}
 
 	vlog "Makefile generating: synthesizing '$cleanname' target to clean '$target' (with extra $cleandeps)"
 	if { $customclean != "" } {
@@ -2448,11 +2451,11 @@ proc SynthesizeClean {target} {
 	if { $tarname == "all" } {
 		append orule "\nrule all-distclean all-clean \{\n"
 		foreach d [pget agv::p::directories] {
-			append orule "\t%submake -C $d all-distclean\n"
+			append orule "\t%submake -C $d distclean\n"
 		}
 		append orule "\t%autoclean $target\n\t%autoclean $target distclean\n\}"
 	} elseif { $tarname == "." } {
-		append orule "\nrule distclean clean \{\n"
+		append orule "\nrule distclean clean all-distclean \{\n"
 		foreach d [pget agv::p::directories] {
 			append orule "\t%submake -C $d distclean\n"
 		}
