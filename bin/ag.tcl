@@ -2270,9 +2270,10 @@ proc ag-do-genrules target {
 	foreach {vname vval} $variables {
 		append varexpr "'$vname=$vval' "
 	}
+
 	set cmdf \
 {
-	[mkv::MAKE] clean && !agcmd -f !agfile !varexpr
+	[mkv::MAKE] clean && !agcmd -f !agfile !varexpr !toplevel
 }
 
 	# These actions were added previously to enforce restarting make and do nothing afterwards.
@@ -2283,8 +2284,13 @@ proc ag-do-genrules target {
 	# For genrules, add also reconfigure rule to regenerate Makefile.tcl.
 	# The 'reconfigure-ifneeded' is running automatically to check if Makefile.tcl is fresh.
 	# The 'reconfigure' target can be only run on demand.
+	set maybe_toplevel ""
+	if { $agv::toplevel != "" } {
+		set maybe_toplevel "-t [prelocate $agv::toplevel]"
+	}
+
 	ag reconfigure -type custom -flags noclean distclean -clean none -runon demand \
-			-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr] $cmdf]}
+			-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr !toplevel $maybe_toplevel] $cmdf]}
 
 	ag reconfigure-ifneeded -type custom -flags noclean distclean -clean none -sources $::agfile -output Makefile.tcl $agv::generated_files \
 			-command {	%submake reconfigure}
@@ -3178,7 +3184,7 @@ if { $agfile == "" } {
 	exit 1
 }
 
-set ag_call [list $::argv0 genrules -f %agfile]
+set ag_call [list $::argv0 -f %agfile]
 
 
 #puts stderr "AGFILE FOUND AS: $agfile"
