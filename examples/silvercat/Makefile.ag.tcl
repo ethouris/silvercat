@@ -105,10 +105,11 @@ ag-instantiate config.h.in  ;#//source-config.h
 ag ff -headers //b:config.h
 
 # Target on demand, target file in source dir.
-ag tags -type custom -o //tags -clean none -command {
+ag tags -type custom -o //tags -command {
 	cd $agv::srcdir && ctags -R .
 }
 
+#ag tags -clean none
 ag tags -runon demand
 
 # The first argument is always the target to be built.

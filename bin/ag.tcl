@@ -822,6 +822,10 @@ proc AccessDatabase {array target args} {
 			if { [string length $o] < 2 } {
 				error "Error in specification - query: The '?' character must be followed by the key name"
 			}
+			if { $query != "" } {
+				error "Query can contain only one key"
+			}
+			$::g_debug "...Found query request: $o"
 			set query [string range $o 1 end]
 			continue
 		}
@@ -971,6 +975,7 @@ proc AccessDatabase {array target args} {
 	}
 
 	if { $query != "" } {
+		$::g_debug "... [join $keypath /]/$query result: [dict:at $agv_db($target) {*}$keypath $query]"
 		# This means there was a query without a mask. So return everything as it goes.
 		return [dict:at $agv_db($target) {*}$keypath $query]
 	}
@@ -1008,8 +1013,14 @@ proc ag {target args} {
 	# it doesn't matter whether we report error before or after the access.
 
 	if { !$wasthere && ![dict exists $agv::target($target) type] } {
-		error "First access to ag '$target' must specify a type."
+		if { [string index [lindex $args 0] == "-" } {
+			error "First access to ag '$target' must specify a type."
+		} else {
+			error "Target '$target' doesn't exist - invalid query"
+		}
 	}
+
+	return $res
 }
 
 proc ag-info {filename args} {
@@ -1374,6 +1385,7 @@ proc Process:custom target {
 	# Custom targets are targets that declare the
 	# input files (-s), output files (-o) and
 	# the external command to build them.
+	$::g_debug "PROCESSING CUSTOM: $target"
 
 	set db $agv::target($target)
 
@@ -1384,6 +1396,10 @@ proc Process:custom target {
 	set sources [dict:at $db sources]
 	set command [dict:at $db command]
 	set deps [dict:at $db depends]
+
+	foreach i {phony output outfile sources command deps} {
+		$::g_debug "...D: $i: [set $i]"
+	}
 
 	# Check dependencies if they are defined.
 	foreach d $deps {
@@ -1396,6 +1412,9 @@ proc Process:custom target {
 	foreach s $sources {
 		lappend rsrc [FixShadowPath $s]
 	}
+
+	$::g_debug "DEP TARGETS: $deps"
+	$::g_debug "DEP SOURCES: $rsrc"
 
 	set rule [list {*}$deps {*}$rsrc "\n\t$command\n"]
 	foreach o $outfile {
