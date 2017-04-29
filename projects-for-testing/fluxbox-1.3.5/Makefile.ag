@@ -1,0 +1,43 @@
+
+# This will replace the below searching for config.ag and loading it
+#ag-configure config.ag {
+#}
+
+if { ![file exists $agv::toplevel/config.ag] } {
+	error "The TOP dir $agv::toplevel does not contain 'config.ag' file"
+}
+
+source $agv::toplevel/config.ag
+
+
+
+set config_h ""
+proc have {symbol} {
+	append ::config_h "#define HAVE_${symbol} 1\n"
+}
+
+proc !have {symbol} {
+	append ::config_h "#undef HAVE_${symbol}\n"
+}
+source $agv::toplevel/config.h.ags
+
+pupdate $agv::toplevel/config.h $config_h
+
+set VERSION 1.3.5
+ag-instantiate version.h.in
+
+# Testing correct cleaning
+#ag-instantiate generated/version.h.in
+
+
+#ag-subdir doc nls src util data
+ag-subdir src 
+
+
+
+ag source-doc -command {
+	cd $agv::srcdir && doxygen Doxyfile
+}
+
+
+# vim:ft=tclmake

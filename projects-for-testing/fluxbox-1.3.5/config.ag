@@ -1,0 +1,41 @@
+
+ag-profile gcc-native
+ag-profile posix-install
+
+# Check if ag was run from the correct location
+
+# These should be options
+
+set DEFAULT_MENU  [agv::prefix]/share/fluxbox/menu 
+set DEFAULT_STYLE [agv::prefix]/share/fluxbox/styles/bloe 
+set DEFAULT_KEYS  [agv::prefix]/share/fluxbox/keys 
+set DEFAULT_INIT  [agv::prefix]/share/fluxbox/init
+set DEFAULT_APPSFILE [agv::prefix]/share/fluxbox/apps
+set DEFAULT_OVERLAY [agv::prefix]/share/fluxbox/overlay
+set DEFAULT_WINDOWMENU [agv::prefix]/share/fluxbox/windowmenu
+
+
+ag-export {
+	DEFAULT_MENU
+	DEFAULT_STYLE
+	DEFAULT_KEYS
+	DEFAULT_INIT
+	DEFAULT_APPSFILE
+	DEFAULT_OVERLAY
+	DEFAULT_WINDOWMENU
+}
+
+
+set TOP [file dirname [info script]]
+ag-export TOP
+
+# To be automatically added by configurator
+
+ag-profile c++ -incdir $agv::toplevel
+
+ag-profile c++ -defines HAVE_CONFIG_H=1
+
+ag-profile {c c++} -packages x11 imlib2 xpm xft freetype2 -libs -- -liconv
+
+
+# vim:ft=tclmake

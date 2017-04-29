@@ -1,0 +1,395 @@
+
+package require ag 1.0
+
+# NOTE:
+# The statements for checking for options are mixed with the statements for
+# declaring options with their help text in autoconf. Also there are some
+# other functions that may add their own options. It's because the
+# processing causes generation of the "configure" script
+
+# The ag tool causes these all statement be executed in place. It means
+# that whatever things have to be done in the beginning, must be done
+# in the beginning. Maybe the solution would be to introduce the --help
+# mode in which case all check* functions are blocked from execution
+# and they only are allowed to add options.
+
+# The ag-project simultaneously defines a target with that name.
+# It is not determined yet as to whether it has to be a program or library,
+# so it's simply defined as phony. Of course, later actions may redefine
+# the type of the target.
+# The project name is also added in agv::config(project).name
+ag-project fluxbox 1.3.5 -email fluxbox-devel@lists.sf.net -homepage http://fluxbox.org
+
+# This is done in place of AC_CONFIG_SRCDIR.
+# It's described that it sets the source directory, optionally
+# when given a file, make sure that this is really the source
+# directory.
+
+# The problem is that such a setting of source directory doesn't make
+# sense at all. A directory can be referred to by ag-directories, while
+# changing the current directory makes completely no sense. It would be
+# tough to refer to the other directories from this config file.
+
+# So, let's just do what's expected - let's do a check command that
+# just checks if the file exists and issue an exception if not.
+ag-check-file src/fluxbox.cc
+
+# AM_INIT_AUTOMAKE. It accepts options like:
+# dist-bzip2 (what should compress the tarball)
+# tar-pax  (flavor of tar to use)
+# subdir-objects (directory to place the *.o files)
+#
+# Things like that may happen to be:
+# - target specific - in which case they should be added to the target database
+# - general - in which case they should be added to the profile
+
+# AS_IF ... default prefix. Done internally.
+
+# AM_LANG_CPLUSPLUS
+# Yo kiddin? :)
+
+# This should perform the most basic system autodetection
+# and determine the system-default profile. It should also
+# confirm that the tools mentioned in the profile exist and
+# possibly autodetect the correct ones if needed. May include
+# C and C++ compilers, the 'install' command and maybe 'ranlib'.
+ag-profile-system
+
+# Check language features of the language compiler. It can have
+# some defaults and some things always checked, but some things
+# may be automatically specified.
+# This is done when the ag-check has only one argument: simply
+# tests if C++ programs can be compiled with the currently set
+# profile.
+ag-check c++
+
+# Otherwise the ag-check command requires two obligatory arguments
+# 1. language (may be a list of languages, if the check can be
+# done commonly for them)
+# 2. The checker
+# Rest of the arguments depend on the checker.
+#
+# The 'types' checker checks if the types can be used (to declare
+# a variable). For every successful type, the config entry is generated
+# with the name processed by StringToUpperSymbol (all non-literal
+# characters are turned into underscore, literal characters turned
+# into uppercase, the cases of lowercase character followed by an
+# uppercase character get also injected underscore in between).
+# This below will generate HAVE_PID_T and HAVE_SIZE_T symbols.
+ag-check c++ types {
+	pid_t
+	size_t
+}
+
+# The ag-check-execok searches for any of programs in the list,
+# possibly with -path {some_path}. The first file that exists and
+# is executable is returned with the full path. If none found, the
+# error is reported.
+set regex_cmd [ag-check-execok sed -failmsg "sed is required to build the data files" ]
+
+# The stock-headers checker checks if standard library headers and
+# system heades are available. Names can be:
+# - some predefined general common name: stdc for c or stdc++ for c++
+# - filename without the suffix (.h suffix is added for C, for C++ nothing)
+ag-check c stock-headers {
+	stdc
+	stdbool
+}
+
+# The headers checker checks directly for file names.
+# For C language on POSIX it's only searched in /usr/include.
+# For C++ it's this directory plus current compiler's C++ header
+# files, per autodetected path (e.g. /usr/include/c++/6.2.2).
+# On non-POSIX systems they are being checked in a path per
+# compiler configuration.
+ag-check c headers {
+	errno.h ctype.h dirent.h fcntl.h libgen.h
+    locale.h math.h nl_types.h process.h signal.h stdarg.h
+    stdint.h stdio.h time.h unistd.h
+    sys/param.h sys/select.h sys/signal.h sys/stat.h
+    sys/time.h sys/types.h sys/wait.h
+    langinfo.h iconv.h
+}
+
+ag-check c++ headers {
+	sstream
+	strstream
+} -failmsg "Your libstdc++ doesn't have the sstream or strstream classes"
+
+
+ag-check c++ headers {
+	cassert cctype cerrno cmath cstdarg cstdint cstdio cstdlib cstring ctime
+}
+
+# every check may have multiple items. Accepted elements are:
+# if it starts from @, it's the forced key name. The resulting key
+# will be still made uppercase and will have "HAVE_" added in the beginning.
+# This below will set HAVE_CLOSEDIR_VOID to 1, if check for 'closedir' function
+# that returns void is successful.
+# The item may also be prepended by options each one with one argument.
+# What options are available, depend on the checker module.
+ag-check c functions {
+	@closedir_void -ret void closedir
+}
+
+# Alternative:
+# ag-check c functions -key closedir_void -return void closedir 
+#
+# Note that for C++ you should specify the checker expression in the
+# form of calling a function, or even an operator. Only in C you can
+# specify simply the function name because it can be called without
+# arguments.
+
+# The stock-* checkers differ to * checkers in that the second ones are
+# generic and accept any item, while stock-* checkers require predefined
+# name.
+ag-check c stock-functions {
+	fork
+	malloc
+	realloc
+	select
+	stat
+}
+
+# All ag-check commands have additional parameters supplied through options:
+# -failmsg "string" - message to display if the test failed
+# -then {Tcl script} - action to take if the test passed
+# -else {Tcl script} - action to take if the test failed
+# -key - name of the key in the config to be set (1 if passed, 0 if failed)
+
+# If -failmsg is specified, the test failure results in interrupt and message displaying.
+# If -key is specified, the test result is stored under this key
+# If none of these options is specified, test failure results in interrupt
+# with default message.
+# Important thing to know about -key is that if particular system capability
+# is obligatory, there's no reason to store the positive result under a key
+# because the negative result causes error.
+
+ag-check c functions basename -else {
+	# Alternative checker: 'lib'. Arguments are: libname and optional
+	# function name.
+	ag-check c lib gen basename -failmsg "No 'basename' in default, not in libgen"
+	ag-config project -ldflags {++ -lgen}
+}
+
+# A good example of a completely custom check.
+# The test-compile checker requires an explicit code in particular language
+# to be compiled and checked. It requires three arguments:
+# - the subject of what you're going to check
+# - the list of heading declarations (includes in C and C++)
+# - the code of the program
+# Third argument is optional. If supplied, the standard main() function
+# is generated (for C and C++) and the argument is its body. If only one
+# argument is supplied, everything is the exact program code to be executed.
+ag-check c test-compile "for strftime function" {
+	#include <time.h>
+} {
+	char * s;
+	time_t t = time(NULL);
+	size_t x = strftime(s, 5, "%a", localtime(&t));
+} -then {
+
+	# ag-check-set have is a shortcut to ag-config project "-HAVE_[string toupper $1]" $2
+	ag-check-set have strftime {1 "Define 1 if you have the 'strftime' function"}
+}
+
+# Oh, why repeating this all the time?
+
+proc check-for-function {lang name includes library callcode} {
+
+	set incspec ""
+	foreach i $includes {
+		append incspec "#include <$i>\n"
+	}
+
+	ag-check $lang test-compile "for $name" $incspec $callcode -then {
+		ag-check-set have $name {1 "Define 1 if you have '$name' function"}
+	} -else {
+		ag-check $lang lib "$library -function $name" -then {
+			ag-check-set ldflags "++ -l$library"
+		}
+	}
+}
+
+check-for-function c clock_gettime time.h rt {
+	clock_gettime(CLOCK_MONOTONIC, 0);
+	return 0;
+} 
+
+check-for-function c mach_absolute_time mach/mach_time.h rt {
+	mach_absolute_time();
+	return 0;
+}
+
+if { [ag-check-get have header:iconv.h] } {
+
+	# The -retry option does again test-compile
+	# checker with different parameters, if the
+	# previous test failed.
+
+	ag-check c test-compile "for iconv" {
+		#include <stdlib.h>
+		#include <iconv.h>
+	} {
+		iconv_open(NULL, NULL);
+		return 0;
+
+	} -key iconv -retry {
+		#include <stdlib.h>
+		#include <iconv.h>
+	} {
+		libiconv_open(NULL, NULL);
+		return 0;
+	}
+
+	# Complete the comment line
+	if { [ag-check-get have iconv] } {
+		ag-check-set have iconv {1 "Define if you have the iconv() function"}
+
+		# This looks stupid, but it's in the form copied from configure.ac
+		# This possibly finds out that this function is available in this library, or not.
+		ag-check c lib iconv iconv_open -addfront ldflags
+		ag-check c lib iconv libiconv_open -addfront ldflags
+
+		ag-check c test-compile "for iconv declaration" {
+			#include <stdlib.h>
+			#include <iconv.h>
+		} {
+			char **msg, **new_msg;
+			size_t result, inleft, outleft;
+			result = iconv((iconv_t)(-1), msg, &inleft, new_msg, &outleft);
+			return 0;
+		} -key iconv_const
+
+		if { [ag-check-get have iconv] } {
+			ag-check-set have iconv {1 "Define if you have the const iconv() function."}
+		}
+	}
+}
+
+ag-check c lib nsl t_open -addfront ldflags -else {}
+ag-check c lib socket socket -addfront ldflags -else {}
+
+# In the original configure.ac this is followed by the check
+# of the result and error message. This is not necessary here,
+# the necessary is otherwise, as in these two above: prevent
+# exception if the check is for option rather than requirement.
+ag-check c stock-headers x
+
+# AS_IF ?
+# Don't know how to use these x_includes and x_libraries variables.
+# Autoconf possibly uses that for something its specific
+# Same as adding CFLAGS, CXXFLAGS, LIBS, LDFLAGS
+
+ag-check c lib X11 XOpenDisplay -addfront ldflags
+
+# Now, what's up: adding extra x libs?
+
+# Optional setlocale, but no fallback? WTF?
+ag-check c lib xpg4 setlocale -addfront ldflags -else {}
+
+set gencat_cmd [auto_execok gencat]
+if { $gencat_cmd == "" } {
+
+	# Simple setting a variable, but it should be
+	# just added to the generated Makefile.
+	# The direct execution should set this in the prepared shell env.
+	ag-check-set export NLS ""
+}
+
+# This checks if particular option was passed at the command line.
+# If so, it sets this value to ag-config options "option name" "value"
+ag-check-option enable-remember "include Remembering attributes (default=yes)" -then {
+	ag-check-set use remember {1 "compile with remember"}
+}
+
+ag-check-option enable-regexp "regular expression support (default=yes)" -then {
+	
+	# Here is "egrep" of "regex_t" from regex.h. The only "sensible"
+	# equivalent for me would be to check if regex_t type can be aliased to
+	# in a program that includes regex.h. Doing 'egrep' can falsely
+	# succeed if, for example, this word was used in the comment only.
+	ag-check c header regexp.h
+
+	ag-check-set use regexp {1 "Regular expression support"}
+}
+
+ag-check-option enable-slit "include code for the Slit (default=yes)" -then {
+	ag-check-set use slit {1 "compile with slit"}
+}
+
+ag-check-option enable-systemtray "include code for the systemtray (default=yes)" -then {
+	ag-check-set use systemtray {1 "compile with systemtray"}
+}
+
+# There some more options like that. Skip.
+
+
+# AM_PATH_XFT - skip this shit. XFT is supported by pkg-config
+ag-config project packages xft
+
+
+ag-check-option enable-xrender "XRENDER (transparent) support (default=yes)" -then {
+	ag-check c lib Xrender:XRenderCreatePicture -addfront ldflags
+	ag-check-set use xrender {1 "compile with XRender"}
+}
+
+ag-check-option enable-xpm "XPM (transparent) support (default=yes)" -then {
+	ag-check c lib Xpm:XpmReadFileToPixmap -addfront ldflags
+	ag-check-set use xpm {1 "compile with Xpm"}
+}
+
+# Ok, let's skip aleo the other libraries
+# It looks like the X libraries is quite an expanded topic and would be
+# nice to create a dedicated checker (probably external checker) for them.
+
+# I'd bet the guys from Fluxbox just did copy-paste of the check code.
+
+ag-check-option with-menu "location menu file" -default {$agv::prefix/share/fluxbox/menu}
+
+# ...etc
+
+#AC_SUBST - prepares variable for further substitution.
+
+ag-import-var LOCALE_PATH
+
+# Yeah, but I thought these two rather come from --program-* options?
+ag-import-var program_prefix
+ag-import-var program_suffix
+
+ag-instantiate config.h
+
+# AC_OUTPUT - not needed. This mentions all *.in files that should be instantiated.
+# In Ag there's nothing like that.
+
+# Although directories should be defined here.
+# The src directory is already defined.
+
+ag-subdir {
+	src
+	util
+	data
+	doc
+	nls
+}
+
+# Directories like data/styles are defined in data/Makefile.ag
+
+# --- That's not all! Now goes Makefile.am
+# Oh, only directories?
+# There's one interesting extra-dist:
+# $(top_srcdir)/3rd/vim/* $(top_srcdir)/3rd/vim/syntax/*
+
+# Target type 'data' does not use compiling, although may
+# contain various types of processing.
+# The input data can be:
+# -directories: take all that's in these directories
+# -files: take specified files
+# -templates: take *.in files that will be instantiated
+# May be in future some extra processing including custom.
+ag extra -type data -directories 3rd/vim 3rd/vim/syntax
+
+# Well, that's all. Please find the other processing steps in Makefile.ag files in subdirectories!
+
+
+

@@ -1,0 +1,12 @@
+[submodule "projects-for-testing/lineup.sub"]
+	path = projects-for-testing/lineup.sub
+	url = git@gitlab.com:jmatthin/lineup.git
+[submodule "projects-for-testing/QtWebApp.sub"]
+	path = projects-for-testing/QtWebApp.sub
+	url = git@gitlab.com:msrd0/QtWebApp.git
+[submodule "projects-for-testing/neapolis.sub"]
+	path = projects-for-testing/neapolis.sub
+	url = https://gitlab.com/jmatthin/neapolis.git
+[submodule "projects-for-testing/phasor.git"]
+	path = projects-for-testing/phasor.git
+	url = https://gitlab.com/fluorine/phasor.git

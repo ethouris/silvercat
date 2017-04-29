@@ -1,0 +1,5 @@
+Version 1.3.5 is a bug fix release.
+
+Critical Bugfixes in 1.3.5:
+    * Reenabled 'If' 'Or' 'And' actions again
+
