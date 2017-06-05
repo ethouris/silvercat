@@ -10,3 +10,6 @@
 [submodule "projects-for-testing/phasor.git"]
 	path = projects-for-testing/phasor.git
 	url = https://gitlab.com/fluorine/phasor.git
+[submodule "projects-for-testing/yaml-cpp11.sub"]
+	path = projects-for-testing/yaml-cpp11.sub
+	url = https://gitlab.com/berenm/yaml-cpp11.git

@@ -56,6 +56,9 @@ set profiles {
 			installdir:lib {$prefix/lib}
 			installdir:data {$prefix/share}
 			installdir:include {$prefix/include}
+
+			cmd:makedir "mkdir -p"
+			cmd:install "cp -a"
 		}
 	}
 

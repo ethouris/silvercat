@@ -35,7 +35,7 @@ ag-subdir src
 
 
 
-ag source-doc -command {
+ag source-doc -type custom -command {
 	cd $agv::srcdir && doxygen Doxyfile
 }
 

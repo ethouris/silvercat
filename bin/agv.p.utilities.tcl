@@ -249,6 +249,23 @@ proc PrepareGeneralTargets {} {
 	$::g_debug " --: ALL TARGETS: $alltargets"
 	ag all -type phony -depends {*}$alltargets
 	ag . -type phony -depends all {*}$extratargets
+
+	# Add installation targets for all targets that have installation rules
+	# Non-installable targets (category: noinst) should be excluded
+
+	set installdeps ""
+	foreach t $alltargets {
+		set ic [ag $t ?install]
+		if {  $ic != "" && $ic != "noinst" } {
+			lappend installdeps "install-$t"
+		}
+	}
+
+	$::g_debug " ... Generating install with: $installdeps"
+	if { $installdeps != "" } {
+		dict set phony install $installdeps
+		dict set agv::target(all) phony $phony
+	}
 }
 
 proc GetHeaderSuffixes {languages} {

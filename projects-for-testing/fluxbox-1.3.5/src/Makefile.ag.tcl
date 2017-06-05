@@ -72,22 +72,6 @@ ag generated-defaults -type custom -output //defaults.hh //defaults.cc -s $agv::
 	!tcl generate-defaults-file $agv::srcdir
 }
 
-# XXX theoretically this should be achieved by 'ag fluxbox -depends generated-defaults'.
-# However, adding file-dependencies by -depends for dependent target of type custom
-# is not yet implemented. There could be made something like file type autodetection
-# for custom targets (only those that are declared explicitly), and qualify automatically
-# *.c* files as -source and *.h files as -noinst-header.
-ag fluxbox -s defaults.cc -depends generated-defaults
-
-# Without cached dependencies, this file must be made "in place", otherwise dep commands will fail.
-# XXX BUG HERE - this 'make' doesn't work correctly for shadow builds.
-# Would be nice to have "ag-make" that does the right thing in the right directory
-puts "Going to generate defaults files in advance"
-ag-make generated-defaults
-
-# Generate it also the first time
-#generate-defaults-file $agv::srcdir
-
 
 ag-subdir FbTk
 
@@ -97,6 +81,24 @@ ag fluxbox {
 	-depends FbTk/FbTk
 	-ldflags -- -liconv
 }
+
+# XXX theoretically this should be achieved by 'ag fluxbox -depends generated-defaults'.
+# However, adding file-dependencies by -depends for dependent target of type custom
+# is not yet implemented. There could be made something like file type autodetection
+# for custom targets (only those that are declared explicitly), and qualify automatically
+# *.c* files as -source and *.h files as -noinst-header.
+ag fluxbox -s defaults.cc -depends generated-defaults
+
+puts "Going to generate defaults files in advance"
+
+# Without cached dependencies, this file must be made "in place", otherwise dep commands will fail.
+# Generate it also the first time
+generate-defaults-file $agv::srcdir
+
+# XXX This doesn't work - it states the 'generate-defaults-file' is undefined.
+# Probably it works inside different environment.
+#ag-make generated-defaults
+
 
 
 # Common sources
