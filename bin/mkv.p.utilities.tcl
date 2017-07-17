@@ -547,21 +547,24 @@ proc pver {args} {
 	# 1.2>2.3 or 1.2 >2.3 or 1.2 > 2.3.
 	# So, simply treat all arguments as a text and extract all using one regexp.
 
-	if { ![regexp {([0-9\.]+)\S*\s*([<>=]*)\s*([0-9\.]+)\S*} $args unu ver rel mver] } {
+	if { ![regexp {([0-9\.]+)\S*\s*([!<>=]*)\s*([0-9\.]+)\S*} $args unu ver rel mver] } {
 		error "pver: usage: <tested-version> \[relationship\] <template-version>, e.g. 1.3 >= 2.5.9"
 	}
 
 	set dist [package vcompare $ver $mver]
 	if { $rel == "" } {
-		set rel <=
+		set rel >=
 	} elseif { $rel == "=" } {
 		set rel ==
+	} elseif { $rel == "<>" } {
+		# Old Pascal/BASIC not-equal operator :)
+		set rel !=
 	}
 
 	# Now we should have this <= >= == < >
 	set fi [string index $rel 0]
 	set ne [string index $rel 1]
-	if { $fi ni {< > =} || $ne ni {= ""} } {
+	if { $fi ni {< > = !} || $ne ni {= ""} } {
 		error "pver: incorrect version relation expression: '$rel' - use <>= based less-greater-equal expression"
 	}
 
