@@ -51,11 +51,13 @@ ag-profile c++ -defines ANSWER
 ag answer -type program -install bin ;#-fw pkg-config (framework can be also set per target)
 ag answer -packages zlib-1.2
 ag answer -sources file1.cc file2.cc
-ag answer -depends party/test
+ag answer -depends party/test ff
 
 ag answer -defines DEBUG -incdir $env(HOME)/.local/include lib -libdir $env(HOME)/.local/lib lib
 
-ag ff -type library -install lib -sources file2.cc -headers file.h -libspec static dynamic
+ag f1 -type library -install lib -sources file3.cc -libspec dynamic
+
+ag ff -type library -install lib -sources file2.cc -headers file.h -libspec static dynamic -depends f1
 # Ups, file2 should be removed from the answer file!
 ag answer -sources {- file2.cc}
 # This demonstrated how to add values that have "-" as the first character
@@ -71,7 +73,7 @@ ag answer -sources {- file2.cc}
 # dependencies. The phony target will not ship libraries, so linkage against
 # the library won't happen, and phony target being dependent on a library only
 # does forwarding when compiling.
-ag answer -depends ff
+ag answer -depends {+- ff}
 
 # Custom clean rule
 ag ff -clean {

@@ -60,6 +60,7 @@ proc topsort {data} {
 		set avail [dict keys [dict filter $data value {}]]
 		if {![llength $avail]} {
 			if {[dict size $data]} {
+				$::g_debug "CYCLE: $data"
 				error "graph is cyclic, possibly involving nodes \"[dict keys $data]\""
 			}
 			return $sorted
@@ -253,14 +254,32 @@ proc PrepareGeneralTargets {} {
 	# Add installation targets for all targets that have installation rules
 	# Non-installable targets (category: noinst) should be excluded
 
-	set installdeps ""
-	foreach t $alltargets {
+	set definedtargets [array names agv::target]
+
+	set installtar ""
+	$::g_debug "Checking all installable targets:"
+	foreach t $definedtargets {
 		set ic [ag $t ?install]
 		if {  $ic != "" && $ic != "noinst" } {
-			lappend installdeps "install-$t"
+			lappend installtar $t
+			$::g_debug " --> $t ($ic)"
 		}
 	}
 
+	# Now installtar contains a list of all target that are installable.
+	# We need to take out those that occur in runtime dependencies
+	set notopinstall ""
+	foreach t $installtar {
+		foreach td [dict:at $agv::target($t) runtimedepends] {
+			if { $td in $installtar } {
+				lappend notopinstall $td
+			}
+		}
+	}
+
+	set installdeps [lsearch -all -inline -not -regexp $installtar "([join $notopinstall |])"]
+
+	$::g_debug " ... All installable targets: $installtar"
 	$::g_debug " ... Generating install with: $installdeps"
 	if { $installdeps != "" } {
 		dict set phony install $installdeps

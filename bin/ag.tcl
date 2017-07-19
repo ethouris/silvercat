@@ -735,7 +735,9 @@ proc UnaliasOption alias {
 		L { return libdir }
 		libs { return ldflags }
 		lflags { return ldflags }
-		requires { return depends }
+		requires {
+			return depends;# XXX WARNING! elements of 'depends' list must be filtered through [CheckDefinedTarget]!
+		}
 	}
 
 	return $alias
@@ -901,7 +903,7 @@ proc AccessDatabase {array target args} {
 			if { $lastopt in $singles } {
 				set update_mode override
 			} elseif { $lastopt in $uniques } {
-				set update_mode unique
+				set update_mode "unique forced"
 			} else {
 				set update_mode push_back
 			}
@@ -941,6 +943,7 @@ proc AccessDatabase {array target args} {
 				if { $size == 1 } {
 					set o [lindex $o 0]
 				}
+				$::g_debug "Updating '$array' @ '$lastopt' mode '$update_mode' with value '$o'"
 				if { $update_mode == "push_front" } {
 					set options($lastopt) [concat $o $options($lastopt)]
 				} elseif { $lastopt in $singles } {
@@ -949,8 +952,17 @@ proc AccessDatabase {array target args} {
 					}
 					set options($lastopt) $o
 				} else {
-					if { $update_mode != "unique" || $o ni $options($lastopt) } {
+					if { "unique" ni $update_mode || ![info exists options($lastopt)] || $o ni $options($lastopt) } {
 						lappend options($lastopt) {*}$o
+					} elseif { "forced" in $update_mode } {
+						# unique-forced mode causes that if a key is non-uniquely
+						# updated and it wasn't a requested unique update, report error
+						if { [info exists agv::p::dbname($array)] } {
+							set name $agv::p::dbname($array)
+						} else {
+							set name $array
+						}
+						error "ERROR: In $name:$target -$lastopt key is UNIQUE and value '$o' is already present. Use {+- $o} to prevent this error."
 					}
 				} 
 			} else {
@@ -1674,27 +1686,132 @@ proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 	return $icmd
 }
 
-proc GenerateInstallTarget:program {target prefix} {
-
-	set db $agv::target($target)
-	set outfile [ResolveOutput [dict:at $db output]]
-	set icmd [GenerateInstallCommand [dict:at $db install] $outfile $prefix]
-	if { $icmd == "" } {
-		return
-	}
-
-	set itarget install-$target
-	dict set db rules $itarget [list $outfile \n$icmd\n]
-	dict set db phony $itarget ""
-	# Ok, ready. Write back to the database
-	set agv::target($target) $db
-}
-
 proc GenerateInstallTarget:object {target prefix} {
 	return GenerateInstallTarget:library $target $prefix
 }
 
+proc GetFlatInstallDeps {target} {
+
+	# Required is to:
+	# 1. Get direct dependencies of the target
+	# 2. For all those targets, extract names of the install targets
+	# 3. Get runtime-dependent targets of this target and run itself on them
+	# 4. Attach so extracted targets to the overall list and return.
+
+	set all_install_deps ""
+
+	foreach d [dict:at $agv::target($target) depends] {
+		set phonies [dict keys [dict:at $agv::target($d) phony]]
+		$::g_debug "Checking if '$d' is installable in phonies: $phonies"
+		if { "install-$d" in $phonies } {
+			lappend all_install_deps install-$d {*}[GetFlatInstallDeps $d]
+		}
+	}
+
+	return $all_install_deps
+}
+
+proc GetRuntimeDeps {target} {
+
+	set db $agv::target($target)
+
+	set runtype [dict get $db type]
+	if { $runtype ni {program library data phony} } {
+		return
+	}
+
+	set deps [dict:at $db depends]
+	if { $deps == "" } {
+		# no deps - no runtime deps
+		return
+	}
+
+	$::g_debug "GetRuntimeDeps: target '$target' deps: '$deps'"
+
+	set deplist ""
+
+	if { $runtype == "program" || ($runtype == "library" && "dynamic" in [dict:at $db libspec]) } {
+		set runtype runtime
+	}
+
+	# Cases when this function is called are:
+	switch -- $runtype {
+		data {
+
+			# - data
+			# --> so find targets being data
+			#    - targets of type 'library' mean error
+			#    - targets of type 'program' are ignored (build dependency only)
+
+			foreach d $deps {
+				lassign [CheckDefinedTarget $d dynamic] d spec
+				set ddb $agv::target($d)
+
+				set t [dict get $ddb type]
+				if { $t == "library" && $spec == "dynamic" } {
+					error "SEMANTIC: data target '$target' depends on library target '$d'"
+				}
+
+				if { $t == "data" } {
+					lappend deplist $d
+				}
+
+				# If dep target is any other, this is then a build dependency,
+				# so "don't mention it".
+			}
+
+			return $deplist
+		}
+
+		runtime - phony {
+			# - program or dynamic library:
+			# --> so find all targets being dynamic library or data, only:
+			#      - direct ones
+			#      - transited through a static library
+
+			foreach d $deps {
+				lassign [CheckDefinedTarget $d dynamic] dd spec
+				set ddb $agv::target($dd)
+				set t [dict get $ddb type]
+				$::g_debug "GetRuntimeDeps '$d' of '$target': $dd type=$t spec=$spec"
+
+				set d $dd
+				if { $t == "data" } {
+					# Add direct dependency.
+					lappend deplist $d
+				} elseif { $spec == "dynamic" } {
+					# We don't even check if this was a "library".
+					# There can be a "dymamic-oriented" dependency of a program,
+					# which means that a program requires another program to function
+					# (will be spawned by the dependent program).
+					lappend deplist $d
+				} elseif { $t == "library" } {
+					# This catches only a static library then, as dynamic
+					# is already handled.
+					# Static libraries do carryover of their runtime deps.
+					lappend deplist {*}[GetRuntimeDeps $d]
+				}
+				# Others are ignored.
+			}
+
+			return $deplist
+		}
+
+		default {
+			return
+		}
+	}
+}
+
 proc GenerateInstallTarget:library {target prefix} {
+
+	GenerateInstallDevel $target $prefix
+	GenerateInstallRuntime $target $prefix install-$target-runtime
+
+	dict set agv::target($target) phony install-$target [list install-$target-devel install-$target-runtime]
+}
+
+proc GenerateInstallDevel {target prefix} {
 	set db $agv::target($target)
 
 	set libfile [ResolveOutput [dict:at $db output]]
@@ -1722,13 +1839,29 @@ proc GenerateInstallTarget:library {target prefix} {
 	dict set db phony install-$target-headers ""
 
 	dict set db phony install-$target-devel [list install-$target-archive install-$target-headers]
+	set agv::target($target) $db
+}
 
-	# XXX Check for dynamic library !!!
-	dict set db phony install-$target-runtime ""  ;# XXX Should refer to installing dynamic library
-	dict set db phony install-$target [list install-$target-devel install-$target-runtime]
+proc GenerateInstallRuntime {target prefix itarget} {
+	set db $agv::target($target)
+	set outfile [ResolveOutput [dict:at $db output]]
+	set icmd [GenerateInstallCommand [dict:at $db install] $outfile $prefix]
+	if { $icmd == "" } {
+		return
+	}
 
+	set installdeps [GetRuntimeDeps $target]
+	# As they are now available, record them for later use
+	dict set db runtimedepends $installdeps
+
+	dict set db rules $itarget [list $outfile {*}$installdeps \n$icmd\n]
+	dict set db phony $itarget ""
 	# Ok, ready. Write back to the database
 	set agv::target($target) $db
+}
+
+proc GenerateInstallTarget:program {target prefix} {
+	GenerateInstallRuntime $target $prefix install-$target
 }
 
 proc ProcessCompileLink {type subtype target outfile} {
@@ -1777,10 +1910,9 @@ proc ProcessCompileLink {type subtype target outfile} {
 	# Add a phony rule that redirects the symbolic name to physical file,
 	# in case they differ (in future, this can be due to them being in different directories)
 
-	set phony ""
-	if { $outfile != $target } {
+	if { $outfile != $target && $outfile ni [dict:at $phony $target] } {
 		vlog "Adding phony $target -> $outfile (because they differ)"
-		dict set phony $target $outfile
+		dict lappend phony $target $outfile
 	}
 
 	# Ok, ready. Write back to the database
@@ -1862,30 +1994,38 @@ proc GenerateCompileRule {db lang objfile source deps} {
 	return $rule
 }
 
-proc GetTargetFile {target spec} {
+proc FindDepSpec {target reqspec} {
+	# Extract filename according to the specification.
+	set libspec [dict:at $agv::target($target) libspec]
+	if { $libspec == "" } {
+		set libspec static
+	}
+
+	if { [llength $libspec] < 2 } {
+		if { $reqspec != $libspec } {
+			return -1
+		}
+		return 00 ;# Double 0 to state that the value shouldn't be indexed, but taken as a whole
+	} else {
+		return [lsearch $libspec $reqspec]
+	}
+}
+
+proc GetTargetFile {target reqspec} {
 
 	set output [dict:at $agv::target($target) output]
 
-	if { $spec != "" } {
-		# Extract filename according to the specification.
-		set type [dict:at $agv::target($target) libspec]
-		if { $type == "" } {
-			set type static
+	if { $reqspec != "" } {
+		set pos [FindDepSpec $target $reqspec]
+		if { $pos == -1 } {
+			error "Getting filename for '$target' spec '$reqspec': no such specialization found in reqspec '$reqspec'"
 		}
-
-		if { [llength $type] < 2 } {
-			if { $spec != $type } {
-				error "Requested dependency of '$target/$spec': no such spec found in the target"
-			}
-			# output is already set to the required value
-		} else {
-			set pos [lsearch $type $spec]
-			if { $pos == -1 } {
-				error "Getting filename for $target spec:$spec: no such specialization found in libspec '$type'"
-			}
+		if { $pos ne "00" } {
+			# 00 returned means that the output is already set correctly
+			# (because the $target has only one reqspec, and it matches $reqspec)
 			set output [lindex $output $pos]
-			set spec [lindex $type $pos]
 		}
+		set reqspec [lindex $reqspec $pos]
 	}
 
 	set outs ""
@@ -1901,7 +2041,7 @@ proc GetTargetFile {target spec} {
 		lappend outs $filename
 	}
 
-	return [list $outs $spec]
+	return [list $outs $reqspec]
 	#set dir [file dirname $target]
 	#return [file join $dir $filename]
 }
@@ -1937,8 +2077,8 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 	if { $initial != "//" } {
 
 		if { [file pathtype $o] == "absolute" } {
-			$::g_debug "... ABSOLUTE PATH. Relocating to '$agv::builddir'"
-			return [prelocate $o $agv::builddir]
+			$::g_debug "... ABSOLUTE PATH. Relocating to '$agv::builddir' up to '$agv::srcdir'"
+			return [prelocate $o $agv::builddir $agv::srcdir]
 		}
 
 		# If this is a builddir, with prefix=builddir
@@ -2235,6 +2375,7 @@ proc GenerateLinkRule:library {libtype db outfile} {
 
 	# Add all dependent objects to the archive (NOT dependent libraries)
 	foreach d $deps {
+		lassign [CheckDefinedTarget $d] d spec
 		if { [dict:at $agv::target($d) type] == "object" } {
 			lappend objects [dict get $agv::target($d) output]
 		}
@@ -2365,11 +2506,16 @@ proc GenerateMakefile {target fd} {
 	set agv::p::exported_var ""
 	set agv::p::exported_proc ""
 
-	if { $target != "." } {
+	if { $target == "." } {
+		$::g_debug "NOTE: not generating any rules for toplevel target"
+	} else {
+
+		# Normal targets, including 'all'.
 
 		set rules [dict:at $agv::target($target) rules]
 		set type [dict:at $agv::target($target) type]
 		set flags [dict:at $agv::target($target) flags]
+		set phony [dict:at $agv::target($target) phony]
 
 		# Rules is itself also a dictionary.
 		# Key is target file, value is dependencies and command at the end.
@@ -2390,7 +2536,6 @@ proc GenerateMakefile {target fd} {
 		}
 
 		# First rules, then phony. Later phonies may override earlier rules.
-		set phony [dict:at $agv::target($target) phony]
 
 		if { $phony != "" } {
 
@@ -2401,11 +2546,32 @@ proc GenerateMakefile {target fd} {
 			# So, just shift this rule to the first position.
 			set alldone false
 			if { $target == "all" } {
-				puts $fd "# EXPOSING all first"
-				puts $fd "phony all [dict:at $phony all]"
 				set alldone true
-			}
 
+				puts $fd "# EXPOSING all first"
+				set all_deps [dict:at $phony all]
+				puts $fd "phony all $all_deps"
+				set all_install_deps ""
+
+				# On the first level, just extract all DIRECT dependencies
+				# from 'all' itself. Then, from any of these extract the
+				# direct runtime dependencies.
+				foreach d $all_deps {
+
+					# XXX
+					# This must be tested more thoroughly.
+
+					if { "install-$d" in [dict:at $agv::target($d) phony] } {
+						lappend all_install_deps install-$d
+						puts $fd "# -- $d (direct): install-$d"
+					}
+					set ddeps [GetFlatInstallDeps $d]
+					puts $fd "# -- $d: $ddeps"
+					lappend all_install_deps {*}$ddeps
+				}
+				#set all_install_deps [pluniq $all_install_deps]
+				puts $fd "phony install $all_install_deps"
+			}
 
 			foreach {rule deps} $phony {
 				if { $alldone && $rule == "all" } {
@@ -2417,8 +2583,6 @@ proc GenerateMakefile {target fd} {
 		}
 
 		puts $fd ""
-	} else {
-		$::g_debug "NOTE: not generating any rules for toplevel target"
 	}
 
 	lappend agv::genrules_done $target
@@ -2428,6 +2592,7 @@ proc GenerateMakefile {target fd} {
 
 	vlog "Makefile generator: will generate sub-rules for deps: $deps"
 	foreach d $deps {
+		lassign [CheckDefinedTarget $d] d spec
 		#if { [IsSubTarget $d] } {
 		#	vlog " --- skipping target in a subdir: $d"
 		#	continue
@@ -2613,17 +2778,26 @@ proc ag-make {target} {
 # It's specifically for targets that may have a special form and because of that
 # have to be synthesized lazily.
 # Currently it concerns only detecting "directory-based targets"
-proc CheckDefinedTarget target {
+proc CheckDefinedTarget {target {dspec {}}} {
 
 	# If the target exists - it's already done.
 	if { [info exists agv::target($target)] } {
 		# It this was a library, then return the first default
 		if { [dict:at $agv::target($target) type] == "library" } {
-			set spec [lindex [dict:at $agv::target($target) libspec] 0]
-			if { $spec == "" } {
-				set spec static
+			set ls [dict:at $agv::target($target) libspec]
+			if { $dspec == "" } {
+				set spec [lindex $ls 0]
+				if { $spec == "" } {
+					set spec static
+				}
+				return [list $target $spec]
+			} else {
+				if { ($dspec == "static" && $ls == "") || $dspec in $ls } {
+					return [list $target $dspec]
+				} else {
+					return $target
+				}
 			}
-			return [list $target $spec]
 		}
 		return $target
 	}
@@ -2737,6 +2911,7 @@ proc agp-prepare-database {target {parent ""}} {
 	vlog "PROCESSING DEPENDS of $target (DIRECT): $targets_depends \{"
 
 	foreach dep $targets_depends {
+		lassign [CheckDefinedTarget $dep] dep spec
 		vlog " ... DEP OF '$target': '$dep'"
 		if { ![agp-prepare-database $dep $target] } {
 			return false
