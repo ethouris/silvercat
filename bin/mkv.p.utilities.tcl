@@ -620,11 +620,36 @@ proc dict:sel {dic args} {
 	}
 
 	set output ""
+	set use_pattern ""
+	set moreoptions yes
 	foreach x $args {
-		if { $x == "\\|" } {
+		if { $use_pattern != "" } {
+			if { $use_pattern == "glob" } {
+				foreach k [dict keys $input $x] {
+					lappend output [dict get $input $k]
+				}
+				continue
+			}
+		} elseif { $x == "\\|" } {
 			set x |
+		} elseif { $x == "--" } {
+			set moreoptions no
+			continue
+		} elseif { $moreoptions && [string index $x 0] == "-" } {
+			switch -- [string range $x 1 end] {
+				glob {
+					set use_pattern "glob"
+					continue
+				}
+
+				default {
+					error "dict:sel: unknown option $x, use \\$x to pass through a value"
+				}
+			}
 		}
-		lappend output [dict get $input $x]
+		if { [dict exists $input $x] } {
+			lappend output [dict get $input $x]
+		}
 	}
 	return $output
 }
