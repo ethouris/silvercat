@@ -626,7 +626,7 @@ proc dict:sel {dic args} {
 		if { $use_pattern != "" } {
 			if { $use_pattern == "glob" } {
 				foreach k [dict keys $input $x] {
-					lappend output [dict get $input $k]
+					lappend output {*}[dict get $input $k]
 				}
 				continue
 			}
@@ -648,7 +648,7 @@ proc dict:sel {dic args} {
 			}
 		}
 		if { [dict exists $input $x] } {
-			lappend output [dict get $input $x]
+			lappend output {*}[dict get $input $x]
 		}
 	}
 	return $output
