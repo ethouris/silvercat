@@ -834,14 +834,25 @@ proc is_target_stale {target depend} {
 		}
 		return $out
 	}
-	if { ![file exists $target] || ![file exists $depend] || [catch {
+
+	if { ![file exists $target] } {
+		vlog "... ... '$target' missing - declare it stale."
+		return true
+	}
+
+	if { ![file exists $depend] } {
+		vlog "... ... '$target' dep '$depend' missing - declare target stale."
+		return true
+	}
+
+	if { [catch {
 			set mtime_depend [file mtime $depend]
 			set mtime_target [file mtime $target]
-			set stale [expr {$mtime_depend > $mtime_target ? yes : no}]
+			set stale [expr {$mtime_depend > $mtime_target ? yes : no}] ;# this yes/no is in order to print in log
 		}]
 	} {
-		puts stderr "MTIME checked on nonexistent '$depend'"
-		return false
+		puts stderr "IPE: 'file mtime' error on '$depend' - '$target' declared stale"
+		return true
 	}
 
 	$mkv::debug "is_target_stale: TARGET: $mtime_target DEPEND: $mtime_depend: STALE: $stale"

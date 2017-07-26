@@ -414,6 +414,7 @@ proc plist args {
 
 proc process-options {argv optargd} {
 
+	set longoptions ""
 	array set optargs $optargd
 
 	# Set first all boolean options to false
@@ -519,6 +520,9 @@ proc process-options {argv optargd} {
 					}
 
 					break ; # meaning, continue iterations
+				} elseif { [string range $e 0 2] == "--" } {
+					lappend longoptions [string range $e 2 end] $follow
+					break
 				}
 
 				# This is for command-line so this is ok.
@@ -536,7 +540,7 @@ proc process-options {argv optargd} {
 		}
 	}
 
-	return [list $args $variables]
+	return [list $args $variables $longoptions]
 }
 
 proc pass args { return $args }

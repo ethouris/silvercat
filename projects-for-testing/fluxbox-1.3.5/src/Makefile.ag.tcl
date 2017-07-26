@@ -69,7 +69,7 @@ ag-export {
 }
 
 ag generated-defaults -type custom -output //defaults.hh //defaults.cc -s $agv::toplevel/config.ag -command {
-	!tcl generate-defaults-file $agv::srcdir
+	!tcl generate-defaults-file [prelocate $agv::srcdir]
 }
 
 

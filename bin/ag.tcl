@@ -3312,6 +3312,7 @@ set g_debug mkv::p::pass
 set agfiledir ""
 set topdir ""
 set runmode genrules
+set install_prefix ""
 
 #puts stderr "CURRENT DIR: [pwd]"
 set agv::builddir [pwd]
@@ -3326,9 +3327,10 @@ set ag_optargs {
 	-C agfiledir
 	-t topdir
 	-m runmode
+	--prefix install_prefix
 }
 
-lassign [process-options $argv $ag_optargs] g_args g_variables
+lassign [process-options $argv $ag_optargs] g_args g_variables g_longoptions
 
 if { $help } {
 	puts "Usage: [file tail $::argv0] genrules <target>"
@@ -3372,11 +3374,46 @@ if { $ag_debug_on } {
 set mkv::p::verbose $verbose
 set mkv::directory $agv::builddir
 
-proc got_u_writer args {
-	error "hands off!"
-}
+foreach {ln lv} $g_longoptions {
+	set keyname [lassign [split $ln -] entry]
+	set keyname [join $keyname -]
 
-#trace variable mkv::directory w got_u_writer
+	switch -- $entry {
+		use {
+			ag-config use $keyname $lv
+		}
+
+		enable {
+			if { $lv == "" } {
+				set lv 1
+			}
+			if { ![string is boolean $lv] }  {
+				error "For --$ln allowed value is a boolean value only"
+			}
+			ag-config enable $keyname $lv
+		}
+
+		disable {
+			if { $lv == "" } {
+				set lv 1
+			}
+			if { ![string is boolean $lv] }  {
+				error "For --$ln allowed value is a boolean value only"
+			}
+			ag-config enable $keyname [expr {!$lv}]
+		}
+
+		have {
+			if { $lv == "" } {
+				set lv 1
+			}
+			if { ![string is boolean $lv] } {
+				error "For --$ln allowed value is a boolean value only"
+			}
+			ag-config have $keyname $lv
+		}
+	}
+}
 
 vlog "Makefile will be generated in $mkv::directory"
 
@@ -3443,6 +3480,11 @@ puts stderr "+++ Reading database: [prelocate [pwd] $agv::toplevel]"
 #trace add execution open leave agv-notify-filewrite-handler
 source $agfile
 #trace remove execution open leave agv-notify-filewrite-handler
+
+# Set install_prefix if defined by --prefix option
+if { $install_prefix != "" } {
+	ag-profile general install:prefix $install_prefix
+}
 
 puts stderr "+++ Processing runmode '$agv::runmode':  @[prelocate [pwd] $agv::toplevel]"
 
