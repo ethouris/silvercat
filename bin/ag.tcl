@@ -77,8 +77,18 @@ namespace eval agv {
 		source $here/agv.p.builtin-profiles.tcl
 		source $here/agv.p.builtin-frameworks.tcl
 
+		# Variable and procedures that should be exported from
+		# the silverball file to the makefile.
 		set exported_proc ""
 		set exported_var ""
+
+		pinit profile_overrides ""
+
+		# List of internal variables to be derived
+		# by a subdirectory.
+		set subdir_export {
+			agv::p::profile_overrides
+		}
 	}
 
 	set exe $p::exefor([info sharedlibextension])
@@ -3217,6 +3227,18 @@ proc ag-subdir1 target {
 	ag-interp-indir eval set argv0 $::argv0
 	ag-interp-indir eval set argv [list [lrange $cmd 1 end]]
 	ag-interp-indir eval set me_is_slave 1
+
+	# Export declared private variables
+	ag-interp-indir eval [list namespace eval agv {namespace eval p {}}]
+	foreach v $agv::p::subdir_export {
+		#puts stderr "DEBUG export:\t$v = [set $v]"
+		ag-interp-indir eval [list set $v [set $v]]
+	}
+	#puts stderr "DEBUG: SUBDIR processing: $sd"
+	#puts stderr "DEBUG: PRIVATE VARIABLES:"
+	#foreach vv [ag-interp-indir eval info vars agv::p::*] {
+	#	puts stderr "DEBUG:\t$vv = [ag-interp-indir eval set $vv]"
+	#}
 	ag-interp-indir eval source [lindex $cmd 0]
 
 	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Pinning in database."
@@ -3313,6 +3335,8 @@ set agfiledir ""
 set topdir ""
 set runmode genrules
 set install_prefix ""
+set profile_overrides ""
+set config_overrides ""
 
 #puts stderr "CURRENT DIR: [pwd]"
 set agv::builddir [pwd]
@@ -3327,6 +3351,8 @@ set ag_optargs {
 	-C agfiledir
 	-t topdir
 	-m runmode
+	-p -profile_overrides
+	-c -config_overrides
 	--prefix install_prefix
 }
 
@@ -3373,6 +3399,17 @@ if { $ag_debug_on } {
 
 set mkv::p::verbose $verbose
 set mkv::directory $agv::builddir
+
+# --prefix LOCATION is alias to -p install:prefix LOCATION
+if { $install_prefix != "" } {
+	#puts stderr "DEBUG adding install:prefix: $install_prefix"
+	dict set profile_overrides install:prefix $install_prefix
+}
+
+# Set this to global so that it's derived by subdirs
+set agv::p::profile_overrides [dict merge $agv::p::profile_overrides $profile_overrides]
+#puts stderr "DEBUG installing profile override: $agv::p::profile_overrides"
+
 
 foreach {ln lv} $g_longoptions {
 	set keyname [lassign [split $ln -] entry]
@@ -3471,6 +3508,7 @@ if { $topdir != "" } {
 }
 
 puts stderr "+++ Reading database: [prelocate [pwd] $agv::toplevel]"
+#puts stderr "DEBUG: existing profile overrides: $profile_overrides"
 
 # Do sourcing in the original directory of the file.
 # This is important so that all file references are relative
@@ -3481,10 +3519,16 @@ puts stderr "+++ Reading database: [prelocate [pwd] $agv::toplevel]"
 source $agfile
 #trace remove execution open leave agv-notify-filewrite-handler
 
-# Set install_prefix if defined by --prefix option
-if { $install_prefix != "" } {
-	ag-profile general install:prefix $install_prefix
+foreach {k v} $agv::p::profile_overrides {
+	# Not using ag-profile because we need to overwrite the value
+	dict set agv::profile(default) $k $v
 }
+
+#puts stderr "DEBUG: RESULTING PROFILE (general):"
+#parray agv::profile
+#foreach {k v} $agv::profile(default) {
+#	puts [format "%20s = %s" $k $v]
+#}
 
 puts stderr "+++ Processing runmode '$agv::runmode':  @[prelocate [pwd] $agv::toplevel]"
 

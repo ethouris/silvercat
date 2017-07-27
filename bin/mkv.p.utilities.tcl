@@ -18,12 +18,13 @@ proc pexpand {arg {ulevel 2}} {
 	return [lindex $result 0]
 }
 
-proc pset {name arg1 args} {
+proc pset {name args} {
     upvar $name var
+	set args [lassign $args arg1]
 
-    set var [pexpand $arg1]
+    set var [[namespace current]::pexpand $arg1]
     foreach a $args {
-		append var " [pexpand $a]"
+		append var " [[namespace current]::pexpand $a]"
     }
 	return $var
 }
@@ -41,12 +42,12 @@ proc plremove {list item args} {
 	if { $args == "" } {
 		return [lsearch -not -all -inline -exact $list $item]
 	}
-	return [lsearch -not -all -inline -regexp $list [RegexpJoinWords $item {*}$args]]
+	return [lsearch -not -all -inline -regexp $list [[namespace current]::RegexpJoinWords $item {*}$args]]
 }
 
 proc pset+ {name arg1 args} {
     upvar $name var
-    append var " [pexpand $arg1]"
+    append var " [[namespace current]::pexpand $arg1]"
     foreach a $args {
 	append var " $a"
 	 }
@@ -59,7 +60,7 @@ proc pinit {name args} {
 		return $var
 	}
 
-	uplevel pset $name {*}$args
+	uplevel [namespace current]::pset $name {*}$args
 	
 	return $var
 }
@@ -67,7 +68,7 @@ proc pinit {name args} {
 proc phas {name} {
     upvar $name lname
     if {![info exists lname]} {
-	return 0
+		return 0
     }
     return [string is true $lname]
 }
@@ -419,18 +420,22 @@ proc process-options {argv optargd} {
 
 	# Set first all boolean options to false
 	foreach {on ov} $optargd {
-		if { [string index $ov 0] == "*" } {
+		if { [string index $ov 0] in {* -} } {
 			set varname [string range $ov 1 end]
-			upvar $varname r_$varname
-			#puts stderr "OPTION VARIABLE: ::$varname (bool: 0)"
-			if { ![info exists r_$varname] } {
-				set r_$varname 0
-			}
+			set tp [string index $ov 0]
 		} else {
-			upvar $ov r_$ov
-			#puts stderr "OPTION VARIABLE: ::$ov (string: '')"
-			if { ![info exists r_$ov] } {
-				set r_$ov ""
+			set varname $ov
+			set tp ""
+		}
+
+		#puts stderr "OPTION VARIABLE: ::$varname (type: $tp)"
+
+		upvar $varname r_$varname
+		if { ![info exists r_$varname] } {
+			if { $tp == "*" } {
+				set r_$varname 0
+			} else {
+				set r_$varname ""
 			}
 		}
 	}
@@ -442,6 +447,7 @@ proc process-options {argv optargd} {
 
 	foreach e $argv {
 
+		set okey ""
 		set follow ""
 		set continue 1
 		# This is for the case when the whole body needs to be repeated
@@ -451,12 +457,35 @@ proc process-options {argv optargd} {
 			# This variable is set only if there are more than 0 optargs for this option
 			# The in_option contains: <name of the option> <how many arguments to grab>
 			if { $in_option != "" } {
-				lassign $in_option on ox
+				lassign $in_option on ox tp
 				set os [llength $optargs($on)]
 				set pos [expr {$os-$ox}]
 				set varname [lindex $optargs($on) $pos]
-				set r_$varname $e
-				#puts stderr "OPTION: ::$varname = $e"
+				if { $tp == "-" } {
+					set varname [string range $varname 1 end]; # skip -
+
+					# This type is a key-value pair. So check the key.
+					# if the key is empty, this step sets the key. If not,
+					# this step sets the value under given key and clears
+					# the key.
+
+					if { $okey == "" } {
+						set okey $e
+						break
+					}
+
+					# If the key is set, then use the argument as a value to set
+					if { [string index $e 0] == "-" } {
+						error "process-options: '$on' must be followed by key and value. Use {+ value} if it starts from -."
+					}
+					dict set r_$varname $okey $e
+					set okey ""
+
+				} else {
+					set r_$varname $e
+					#puts stderr "OPTION: ::$varname = $e"
+				}
+
 				incr ox -1
 				if { $ox == 0 } {
 					set in_option ""
@@ -509,8 +538,14 @@ proc process-options {argv optargd} {
 						break ;# continue iterations
 					}
 
+					set tp ""
+					if { [string index $oa 0] == "-" } {
+						set tp -
+						set oa [string range $oa 1 end]
+					}
+
 					# Otherwise set the hook for the next iteration
-					set in_option [list $e [llength $oa]]
+					set in_option [list $e [llength $oa] $tp]
 
 					if { $follow != "" } {
 						set e $follow
