@@ -114,6 +114,7 @@ set profiles {
 			libdirflag -L
 			incdirflag -I
 			std_option "-std="
+			archive "ar rcs"
 		}
 		c++ {
 			compile "clang++ -c"

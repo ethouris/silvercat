@@ -1065,6 +1065,7 @@ proc ProcessLanguage target {
 	set db $agv::target($target)
 
 	set sources [dict:at $db sources]
+	set used_langs ""
 
 	foreach s $sources {
 
@@ -1090,13 +1091,21 @@ proc ProcessLanguage target {
 		}
 
 		dict lappend used_langs $lang $s
-		
 	}
 
 	set lang [dict:at $db language]
 	if { $lang == "" } {
-		set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
-		dict set db language $lang
+
+		if { $used_langs != "" } {
+			set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
+			dict set db language $lang
+		} else {
+			set default_language [dict:at $agv::profile(default) language]
+			if { $default_language == "" } {
+				set default_language default
+			}
+			dict set db language $default_language
+		}
 	}
 
 	# Write the database before running framework's hook
@@ -2377,7 +2386,8 @@ proc GenerateLinkRule:library {libtype db outfile} {
 	set lang [pget db.language]
 	set arcmd [dict:at $agv::profile($lang) archive]
 	if { $arcmd == "" } {
-		error "Can't create rules for static library - profile key 'archive' returns no commands"
+		#parray agv::profile
+		error "Can't create rules for static library [pget db.name] lang=$lang - profile key 'archive' returns no commands"
 	}
 
 	set objects [dict:at $db objects]

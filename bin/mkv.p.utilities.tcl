@@ -586,21 +586,24 @@ proc pver {args} {
 	# 1.2>2.3 or 1.2 >2.3 or 1.2 > 2.3.
 	# So, simply treat all arguments as a text and extract all using one regexp.
 
-	if { ![regexp {([0-9\.]+)\S*\s*([<>=]*)\s*([0-9\.]+)\S*} $args unu ver rel mver] } {
+	if { ![regexp {([0-9\.]+)\S*\s*([!<>=]*)\s*([0-9\.]+)\S*} $args unu ver rel mver] } {
 		error "pver: usage: <tested-version> \[relationship\] <template-version>, e.g. 1.3 >= 2.5.9"
 	}
 
 	set dist [package vcompare $ver $mver]
 	if { $rel == "" } {
-		set rel <=
+		set rel >=
 	} elseif { $rel == "=" } {
 		set rel ==
+	} elseif { $rel == "<>" } {
+		# Old Pascal/BASIC not-equal operator :)
+		set rel !=
 	}
 
 	# Now we should have this <= >= == < >
 	set fi [string index $rel 0]
 	set ne [string index $rel 1]
-	if { $fi ni {< > =} || $ne ni {= ""} } {
+	if { $fi ni {< > = !} || $ne ni {= ""} } {
 		error "pver: incorrect version relation expression: '$rel' - use <>= based less-greater-equal expression"
 	}
 
@@ -656,11 +659,38 @@ proc dict:sel {dic args} {
 	}
 
 	set output ""
+	set use_pattern ""
+	set moreoptions yes
 	foreach x $args {
-		if { $x == "\\|" } {
+		if { $use_pattern != "" } {
+			if { $use_pattern == "glob" } {
+				foreach k [dict keys $input $x] {
+					lappend output {*}[dict get $input $k]
+				}
+				continue
+			}
+		} elseif { $x == "\\|" } {
 			set x |
+		} elseif { $x == "--" } {
+			set moreoptions no
+			continue
+		} elseif { $moreoptions && [string index $x 0] == "-" } {
+			# XXX Add also other resolution methods,
+			# e.g. regexp, is, where
+			switch -- [string range $x 1 end] {
+				glob {
+					set use_pattern "glob"
+					continue
+				}
+
+				default {
+					error "dict:sel: unknown option $x, use \\$x to pass through a value"
+				}
+			}
 		}
-		lappend output [dict get $input $x]
+		if { [dict exists $input $x] } {
+			lappend output {*}[dict get $input $x]
+		}
 	}
 	return $output
 }
