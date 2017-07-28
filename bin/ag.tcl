@@ -1689,13 +1689,13 @@ proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 
 		default {
 			# Try to use the directory marked for particular category
-			set bindir [subst -nocommands [dict:at $agv::profile(default) installdir:$cat]]
-			if { $bindir != "" } {
+			set instdir [subst -nocommands [dict:at $agv::profile(default) installdir:$cat]]
+			if { $instdir != "" } {
 				if { $subdir != "" } {
-					set bindir [file join $bindir $subdir]
+					set instdir [file join $instdir $subdir]
 				}
 				set filename [file tail $outfile]
-				set icmd "\t$mkdir3cmd $bindir\n\t$installcmd $outfile $bindir"
+				set icmd "\t$mkdir3cmd $instdir\n\t$installcmd $outfile $instdir"
 			} else {
 				puts stderr "+++AG WARNING: No installdir for -install $cat - can't install $outfile"
 			}
@@ -1836,7 +1836,7 @@ proc GenerateInstallDevel {target prefix} {
 	set libfile [ResolveOutput [dict:at $db output]]
 	set libicmd [GenerateInstallCommand [dict:at $db install] $libfile $prefix]
 
-	set cmds ""
+	set hcmds ""
 
 	# Generate also installation for headers
 	set src_hdr [dict:at $db headers]
@@ -1846,15 +1846,15 @@ proc GenerateInstallDevel {target prefix} {
 	$::g_debug "... ($target): target headers to install: $hdr"
 
 	foreach h $hdr {
-		set hcmd [GenerateInstallCommand include $h $prefix [dict:at $db headers-subdir]]
-		append cmds $hcmd\n
+		set hcmd [GenerateInstallCommand include $h $prefix [dict:at $db headers-installdir]]
+		append hcmds $hcmd\n
 	}
 
 	set itarget install-$target
 	dict set db rules install-$target-archive [list $libfile \n$libicmd\n]
 	dict set db phony install-$target-archive ""
 
-	dict set db rules install-$target-headers [list {*}$hdr \n$cmds]
+	dict set db rules install-$target-headers [list {*}$hdr \n$hcmds]
 	dict set db phony install-$target-headers ""
 
 	dict set db phony install-$target-devel [list install-$target-archive install-$target-headers]
@@ -2589,7 +2589,7 @@ proc GenerateMakefile {target fd} {
 					puts $fd "# -- $d: $ddeps"
 					lappend all_install_deps {*}$ddeps
 				}
-				#set all_install_deps [pluniq $all_install_deps]
+				set all_install_deps [pluniq $all_install_deps]
 				puts $fd "phony install $all_install_deps"
 			}
 

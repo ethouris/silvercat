@@ -616,6 +616,14 @@ proc prun args {
 	exec 2>@stderr >@stdout {*}$args
 }
 
+# Return a list of transformed names from @c list.
+# Elements are put into the place of % in @c format.
+proc pdip {format list} {
+	set pproc {return [string map [list % \$n] $format]}
+	set pproc [subst -nocommands $pproc]
+	return [[namespace current]::pmap [list n $pproc] [[namespace current]::plist $list]]
+}
+
 
 proc dict:assert dic {
 	set llen [llength $dic]
@@ -721,7 +729,6 @@ if { $tcl_version < 8.6 } {
 	}
 }
 
-
 set public_export_util [puncomment {
 
 	# Utility functions
@@ -751,6 +758,7 @@ set public_export_util [puncomment {
 	pass
 	pver
 	prun
+	pdip
 	process-options
 	number-cores
 	dict:at
