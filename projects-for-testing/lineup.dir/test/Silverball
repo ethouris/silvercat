@@ -1,0 +1,4 @@
+
+ag-profile gcc-native
+
+ag lineupTest -type program -s Compiler.cc main.cc Tokenizer.cc -depends ../lineup

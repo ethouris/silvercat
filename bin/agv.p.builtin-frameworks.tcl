@@ -92,7 +92,7 @@ namespace eval fw {
 				return [list $name "-$v"]
 			} else {
 				$::g_debug "pkg-config with no version for '$namev':"
-				$::g_debug "PKG_CONFIG_PATH=$::env(PKG_CONFIG_PATH)"
+				$::g_debug "PKG_CONFIG_PATH=[pget ::env(PKG_CONFIG_PATH)]"
 				$::g_debug "COMMAND: $pkg_config --exists $namev"
 				# So just find the package by name without checking for version
 				if { [catch {exec $pkg_config --exists $namev} erp] } {
