@@ -408,7 +408,7 @@ proc FindSilverFile {agfile {agdir ""}} {
 
 # XXX This should be platform-dependent!
 proc CreateLibraryFilename {target type} {
-	if { $type == "dynamic" } {
+	if { $type == "shared" } {
 		return lib$target.so
 	}
 
@@ -1380,7 +1380,7 @@ proc Process:object target {
 	# IMPORTANT: Normally, if a static library has
 	# any kind of library-type dependency, it is
 	# skipped and carried over to the latest target
-	# program or dynamic library. In case when an
+	# program or shared library. In case when an
 	# object target is a dependency, the object file
 	# is added directly to the contents of the library.
 
@@ -1749,7 +1749,7 @@ proc GetRuntimeDeps {target} {
 
 	set deplist ""
 
-	if { $runtype == "program" || ($runtype == "library" && "dynamic" in [dict:at $db libspec]) } {
+	if { $runtype == "program" || ($runtype == "library" && "shared" in [dict:at $db libspec]) } {
 		set runtype runtime
 	}
 
@@ -1763,11 +1763,11 @@ proc GetRuntimeDeps {target} {
 			#    - targets of type 'program' are ignored (build dependency only)
 
 			foreach d $deps {
-				lassign [CheckDefinedTarget $d dynamic] d spec
+				lassign [CheckDefinedTarget $d shared] d spec
 				set ddb $agv::target($d)
 
 				set t [dict get $ddb type]
-				if { $t == "library" && $spec == "dynamic" } {
+				if { $t == "library" && $spec == "shared" } {
 					error "SEMANTIC: data target '$target' depends on library target '$d'"
 				}
 
@@ -1783,13 +1783,13 @@ proc GetRuntimeDeps {target} {
 		}
 
 		runtime - phony {
-			# - program or dynamic library:
-			# --> so find all targets being dynamic library or data, only:
+			# - program or shared library:
+			# --> so find all targets being shared library or data, only:
 			#      - direct ones
 			#      - transited through a static library
 
 			foreach d $deps {
-				lassign [CheckDefinedTarget $d dynamic] dd spec
+				lassign [CheckDefinedTarget $d shared] dd spec
 				set ddb $agv::target($dd)
 				set t [dict get $ddb type]
 				$::g_debug "GetRuntimeDeps '$d' of '$target': $dd type=$t spec=$spec"
@@ -1798,14 +1798,14 @@ proc GetRuntimeDeps {target} {
 				if { $t == "data" } {
 					# Add direct dependency.
 					lappend deplist $d
-				} elseif { $spec == "dynamic" } {
+				} elseif { $spec == "shared" } {
 					# We don't even check if this was a "library".
 					# There can be a "dymamic-oriented" dependency of a program,
 					# which means that a program requires another program to function
 					# (will be spawned by the dependent program).
 					lappend deplist $d
 				} elseif { $t == "library" } {
-					# This catches only a static library then, as dynamic
+					# This catches only a static library then, as shared
 					# is already handled.
 					# Static libraries do carryover of their runtime deps.
 					lappend deplist {*}[GetRuntimeDeps $d]
@@ -2225,7 +2225,7 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 				set slibs [dict:at $agv::target($d) ldflags]
 				$::g_debug " -- static library $d - importing its ldflags: $slibs"
 			} else {
-				$::g_debug " -- dynamic library $d - not importing ldflags"
+				$::g_debug " -- shared library $d - not importing ldflags"
 			}
 
 			set libpack [list $libofile $slibs]
@@ -2254,7 +2254,7 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 				lappend deps $libofile
 
 			} else {
-				$::g_debug "ADDING DEP: $d (because dynamic library)"
+				$::g_debug "ADDING DEP: $d (because shared library)"
 				lappend deps $d
 			}
 
@@ -2372,14 +2372,14 @@ proc GenerateLinkRule:program {subtype db outfile} {
 
 # NOTE: static libraries are just archives with *.o files, they don't
 # have dependencies - at worst they will be resolved at link time with
-# dynamic libraries or executables.
+# shared libraries or executables.
 proc GenerateLinkRule:library {libtype db outfile} {
 
-	if { $libtype == "dynamic" } {
+	if { $libtype == "shared" } {
 		return [GenerateExecutableLinkRule library $db $outfile]
 	}
 
-	# The 'libspec' key can contain 'static' and 'dynamic'.
+	# The 'libspec' key can contain 'static' and 'shared'.
 	# If there's none, it defaults to 'static'.
 	# If both are supplied, create link rules for both!
 
@@ -2845,8 +2845,8 @@ proc CheckDefinedTarget {target {dspec {}}} {
 		}
 
 		library {
-			if { [lindex $parts 1] ni {static dynamic} } {
-				error "Target '$target' is a library, but specialization '[lindex $parts 1]' is unknown (expected: static or dynamic)"
+			if { [lindex $parts 1] ni {static shared} } {
+				error "Target '$target' is a library, but specialization '[lindex $parts 1]' is unknown (expected: static or shared)"
 			}
 			return $parts
 		}

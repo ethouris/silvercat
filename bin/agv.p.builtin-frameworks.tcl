@@ -27,6 +27,22 @@ namespace eval fw {
 			variable pkg_config
 			variable pkg_config_cache
 
+			set tparts [file split $namev]
+
+			# Package can be also specified as "NAME-VER/LIBSPEC".
+			# By default we take the dynamic library, but static can be also specified
+
+			if { [llength $tparts] == 1 } {
+				set libspec shared
+			} elseif { [llength $tparts] == 2 } {
+				lassign $tparts namev libspec
+				if { $libspec ni {static shared} } {
+					error "pkg-config fw: unknown libspec for pkg '$namev':'$libspec' (use static or shared)"
+				}
+			} else {
+				error "pkg-config fw: incorrect pkg name specification: $namev"
+			}
+
 			if { [regexp -indices -- {-([0-9].*)$} $namev pos] } {
 				set p [lindex $pos 0]
 				set version [string range $namev $p+1 end]
@@ -38,7 +54,7 @@ namespace eval fw {
 					# We found this package. Get the version information just for info
 					set v [exec $pkg_config --modversion $namev]
 					$::g_debug "pkg-config: found as $namev"
-					return [list $namev $v]
+					return [list $namev $v $libspec]
 				}
 
 				# Well, we haven't found the package with that name-version,
@@ -71,7 +87,7 @@ namespace eval fw {
 						if { [package vcompare $v $version] != -1 } {
 							puts stderr "WARNING: pkg-config doesn't know neiter '$name' nor '$namev'."
 							puts stderr "WARNING: Found '$p', which seems to have a similar name and required minimum version."
-							return [list $p $v]
+							return [list $p $v $libspec]
 						}
 					}
 
@@ -85,11 +101,11 @@ namespace eval fw {
 				set v [exec $pkg_config --modversion $name]
 				if { [package vcompare $v $version] } {
 					$::g_debug "pkg-config: found '$name' version '$v'"
-					return [list $name $v]
+					return [list $name $v $libspec]
 				}
 
 				# This means: package found, but not in the required version.
-				return [list $name "-$v"]
+				return [list $name "-$v" $libspec]
 			} else {
 				$::g_debug "pkg-config with no version for '$namev':"
 				$::g_debug "PKG_CONFIG_PATH=[pget ::env(PKG_CONFIG_PATH)]"
@@ -111,8 +127,8 @@ namespace eval fw {
 			set confirmed ""
 			vlog "Packages: $packages"
 			foreach p $packages {
-				lassign [FindPackage $p] name version
-				$::g_debug "pkg-config:FindPackage returned name '$name' version '$version'"
+				lassign [FindPackage $p] name version spec
+				$::g_debug "pkg-config:FindPackage returned name '$name' version '$version' spec '$spec'"
 				if { [string index $version 0] == "-" } {
 					set v [string range $version 1 end]
 					$::g_debug "NOTE: pkg-config found package '$name', but with outdated version $v"
@@ -127,8 +143,13 @@ namespace eval fw {
 				# Package found. Add to the confirmed list.
 				lappend confirmed $p
 
-				set ldflags [exec $pkg_config --libs $name]
-				set cflags [exec $pkg_config --cflags $name]
+				set ifstatic ""
+				if {$spec == "static"} {
+					set ifstatic "--static"
+				}
+
+				set ldflags [exec $pkg_config --libs {*}$ifstatic $name]
+				set cflags [exec $pkg_config --cflags {*}$ifstatic $name]
 
 				vlog "Data for $name: cflags='$cflags' ldflags='$ldflags'"
 
