@@ -1061,6 +1061,40 @@ proc agv-notify-filewrite-handler {commandstring op} {
 	}
 }
 
+proc ag-maf {target directory args} {
+	set option ""
+	foreach a $args {
+		if { [string index $a 0] == "-" } {
+			lappend keys($a)
+			set option $a
+			continue
+		}
+
+		lappend keys($option) $a
+	}
+
+	if { [info exists keys()] } {
+		set filename [file join $keys()]
+	} else {
+		set filename ""
+	}
+	array unset keys ""
+
+	set output [agv::p::MafRead $directory $filename]
+	foreach key [array names keys] {
+		set value ""
+		foreach section $keys($key) {
+			if { [dict exists $output $section] } {
+				lappend value [dict get $output $section]
+			}
+		}
+		ag $target $key {*}$value
+	}
+
+	return $output
+}
+
+
 proc ProcessLanguage target {
 	set db $agv::target($target)
 

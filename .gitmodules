@@ -8,8 +8,11 @@
 	path = projects-for-testing/neapolis.sub
 	url = https://gitlab.com/jmatthin/neapolis.git
 [submodule "projects-for-testing/phasor.git"]
-	path = projects-for-testing/phasor.git
+	path = projects-for-testing/phasor.sub
 	url = https://gitlab.com/fluorine/phasor.git
 [submodule "projects-for-testing/yaml-cpp11.sub"]
 	path = projects-for-testing/yaml-cpp11.sub
 	url = https://gitlab.com/berenm/yaml-cpp11.git
+[submodule "projects-for-testing/srt.sub"]
+	path = projects-for-testing/srt.sub
+	url = https://github.com/Haivision/srt.git

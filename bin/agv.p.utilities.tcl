@@ -346,3 +346,44 @@ proc GetCommonLanguage langs {
 	return [lindex $accepted 0]
 }
 
+proc MafRead {directory {filename {}}} {
+	set output ""
+	set maffile [file join $directory $filename]
+	if { $filename == "" } {
+		# You can call this with specifying one argument, path to MAF file.
+		# In this case no directory will be applied on extracted filenames.
+		set directory ""
+	}
+
+	if { ![file exists $maffile] } {
+		error "MafRead: no MAF file '$filename' in directory '$directory'"
+	}
+
+	set fd [open $maffile r]
+
+	set insection 0
+	set cursection "SOURCES"
+
+	while { [gets $fd line] >= 0 } {
+		set oline [string trim $line]
+		if { $oline == "" } {
+			continue
+		}
+
+		if { [string index $line 0] == "#" } {
+			continue
+		}
+
+		if { [regexp {^[A-Z ]} $line] } {
+			# A Section. Setup the section name
+			set cursection $oline
+			dict lappend output $cursection  ;# Make sure that the key exists
+			continue
+		}
+
+		dict lappend output $cursection [file join $directory $oline]
+	}
+
+	return $output
+}
+
