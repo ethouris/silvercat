@@ -1,6 +1,7 @@
 package require ag 0.3
 
-set SRT_VERSION 1.3.0
+set SRT_VERSION 1.2.0
+#set VERSION 1.3.0
 
 # Choosing the toolchain profile is a little bit more complicated than just select one.
 # There's a separate script for that, pushed there in order not to make so much noise.
@@ -141,12 +142,6 @@ ag $TARGET_srt -install lib -libspec $srt_libspec
 
 # HaiCrypt
 
-set maf_haicrypt [MafRead haicrypt filelist.maf]
-
-
-#ag $TARGET_haicrypt -s [dict get $maf_haicrypt SOURCES]
-#ag $TARGET_haicrypt -h {*}[dict:sel $maf_haicrypt "PUBLIC HEADERS" "PROTECTED HEADERS"]
-
 set maf_haicrypt [ag-maf $TARGET_haicrypt haicrypt filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 ag $TARGET_haicrypt -hidir srt
 ag $TARGET_haicrypt -ldflags -- -lcrypto
@@ -158,7 +153,7 @@ if { $tcl_platform(os) == "Windows" } {
 
 # HaiSRT
 
-set maf_srt [ag-maf $TARGET_srt -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}
+set maf_srt [ag-maf $TARGET_srt srtcore filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 ag $TARGET_srt -hidir srt
 if { [pget tcl_platform(os)] == "Linux" } {
 	ag $TARGET_srt -ldflags -- -lpthread
@@ -256,8 +251,8 @@ proc testprogram {prg args} {
 # - optional extra sources in common/ directory
 
 testprogram utility-test
-testprogram stransmit socketoptions.cpp logsupport.cpp transmitmedia.cpp
-testprogram siplex socketoptions.cpp logsupport.cpp transmitmedia.cpp
+testprogram stransmit socketoptions.cpp ;# logsupport.cpp transmitmedia.cpp
+#testprogram siplex socketoptions.cpp logsupport.cpp transmitmedia.cpp
 
 proc single-program {sourcename args} {
 	set name [file rootname [file tail $sourcename]]
