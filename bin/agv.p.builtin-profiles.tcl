@@ -1,4 +1,10 @@
 
+
+# REMEMBER!!!
+# In here below ALL COMMENTS MUST BE # { ... }
+# This is because it's only a dataset and it's interpreted
+# specifically; comments are removed just by removing the '#' key.
+
 set profiles {
 
 	# {This is only informative - explains the structure of the profiles.}
@@ -35,7 +41,7 @@ set profiles {
 			std_option "Compiler option to use given language standard"
 			std_values "key-value pairs to map general names of the language standard to value required to pass to that option"
 
-			# Install-related keys
+			# { Install-related keys }
 			install:prefix "Main directory with installation structure"
 			installdir:bin "Installation directory for 'bin' category"
 			installdir:lib "Installation directory for 'lib' category"
@@ -69,11 +75,11 @@ set profiles {
 			# while lib is only for 32-bit libraries }
 			installdir:lib {$prefix/lib}
 
-			# This should be somehow changed on Cygwin to
+			# { This should be somehow changed on Cygwin to
 			# point to same as installdir:bin
 			# Mind also that it should usually refer to
 			# either installdir:lib or installdir:bin or
-			# even to something else completely.
+			# even to something else completely. }
 			installdir:lib:shared {[expr {[info sharedlibextension] == ".dll" ? "$prefix/bin" : "$prefix/lib"}]}
 
 			installdir:data {$prefix/share}
