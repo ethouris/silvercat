@@ -34,6 +34,20 @@ set profiles {
 			ldflags "Flags passed to link command"
 			std_option "Compiler option to use given language standard"
 			std_values "key-value pairs to map general names of the language standard to value required to pass to that option"
+
+			# Install-related keys
+			install:prefix "Main directory with installation structure"
+			installdir:bin "Installation directory for 'bin' category"
+			installdir:lib "Installation directory for 'lib' category"
+			installdir:lib:shared "Installation directory for 'lib' category for shared libraries"
+			installdir:data "Installation directory for 'data' category"
+			installdir:include "Installation directory for header files (install-target-headers)"
+
+			cmd:makedir "command to make directory (full tree)"
+			cmd:install "command to put a file into an installation directory"
+
+			form:archive "name format for static libraries"
+			form:sharedroot "name format for shared libraries, without extension (this will be taken from \[info sharedlibextension])"
 		}
 
 	}
@@ -54,11 +68,22 @@ set profiles {
 			# the 64-bit libraries are installed in lib64,
 			# while lib is only for 32-bit libraries }
 			installdir:lib {$prefix/lib}
+
+			# This should be somehow changed on Cygwin to
+			# point to same as installdir:bin
+			# Mind also that it should usually refer to
+			# either installdir:lib or installdir:bin or
+			# even to something else completely.
+			installdir:lib:shared {[expr {[info sharedlibextension] == ".dll" ? "$prefix/bin" : "$prefix/lib"}]}
+
 			installdir:data {$prefix/share}
 			installdir:include {$prefix/include}
 
 			cmd:makedir "mkdir -p"
 			cmd:install "cp -a"
+
+			form:archive "lib%.a"
+			form:sharedroot "lib%"
 		}
 	}
 

@@ -37,7 +37,7 @@ TclmakeDefineCommand setflags
 TclmakeDefineCommand getflags
 
 syn keyword tcltkCommandColor pget phas pset pset+ pinit puncomment pexpand pdef pdefx pdefv
-syn keyword tcltkCommandColor pwrite pupdate pread pmap pfind prelocate plist 
+syn keyword tcltkCommandColor pwrite pupdate pread pmap pfind prelocate plist pdip prun
 
 
 " ag.tcl
@@ -48,6 +48,8 @@ TclmakeDefineCommand ag-instantiate
 TclmakeDefineCommand ag-subdir
 TclmakeDefineCommand ag-make
 TclmakeDefineCommand ag-export
+TclmakeDefineCommand ag-config
+TclmakeDefineCommand ag-maf
 
 
 syn keyword silvercatSwitch contained -s -sources -h -headers -nh -noinst-headers -hidir

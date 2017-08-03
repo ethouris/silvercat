@@ -408,11 +408,14 @@ proc FindSilverFile {agfile {agdir ""}} {
 
 # XXX This should be platform-dependent!
 proc CreateLibraryFilename {target type} {
+
 	if { $type == "shared" } {
-		return lib$target.so
+		set form [ag-profile general ?form:sharedroot]
+		return [pdip $form $target][info sharedlibextension]
 	}
 
-	return lib$target.a
+	set form [ag-profile general ?form:archive]
+	return [pdip $form $target]
 }
 
 # This function joins two lists into one list, keeping
@@ -691,16 +694,28 @@ proc InstallProfile {name} {
 		set prof [dict get $agv::p::profiles default]
 		$::g_debug "FRESH PROFILE: adding defaults: $prof"
 	} else {
-		$::g_debug "EXISTING PROFILE: [array get agv::profile]"
+		# Check if this 'existing profile' consists of only name.
+		# If so, still apply the defaults
+		if { [dict remove [pget agv::profile(default)] name] == "" } {
+			set prof [dict get $agv::p::profiles default]
+			$::g_debug "EXISTING PROFILE, but name only: - adding default: $prof"
+		} else {
+			$::g_debug "EXISTING PROFILE: [array get agv::profile]"
+		}
 	}
+
 	set newprof [dict get $agv::p::profiles $name]
+
 	$::g_debug "ADDING PROFILE CONTENTS: $newprof"
+	$::g_debug "PROFILE OVERRIDES: [pget agv::p::profile_overrides]"
 
 	# Merge manually - official merging would overwrite keys and therefore
 	# possibly delete sub-keys, while we want
 	# to merge sub-keys.
 	array set tmp_prof $prof
+
 	foreach {key val} $newprof {
+		# Skip keys that exist in "profile override" array
 		set tmp_prof($key) [dict merge [pget tmp_prof($key)] $val]
 	}
 
@@ -726,6 +741,17 @@ proc InstallProfile {name} {
 
 		dict set prof $lng [dict merge [dict:at $prof default] [dict:at $prof $lng]]
 	}
+
+    foreach {okey oval} [pget agv::p::profile_overrides] {
+    	lassign [split $okey /] lng lky
+    	if { $lky == "" } {
+    		set lky $lng
+    		set lng default
+    	}
+    
+    	$::g_debug "OVERRIDING \[$lng $lky\]: $oval"
+    	dict set prof $lng $lky $oval
+    }
 
 	$::g_debug "InstallProfile: $prof"
 
@@ -1723,7 +1749,15 @@ proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 
 		default {
 			# Try to use the directory marked for particular category
-			set instdir [subst -nocommands [dict:at $agv::profile(default) installdir:$cat]]
+			# NOTE: 'prefix' variable is here usually expanded
+			set form [dict:at $agv::profile(default) installdir:$cat]
+			# Fallback to form without extension, if not found
+			if { $form == "" } {
+				lassign [split $cat :] cat drop
+				set form [dict:at $agv::profile(default) installdir:$cat]
+			}
+
+			set instdir [subst $form]
 			if { $instdir != "" } {
 				if { $subdir != "" } {
 					set instdir [file join $instdir $subdir]
@@ -1898,7 +1932,7 @@ proc GenerateInstallDevel {target prefix} {
 proc GenerateInstallRuntime {target prefix itarget} {
 	set db $agv::target($target)
 	set outfile [ResolveOutput [dict:at $db output]]
-	set icmd [GenerateInstallCommand [dict:at $db install] $outfile $prefix]
+	set icmd [GenerateInstallCommand [dict:at $db install]:shared $outfile $prefix]
 	if { $icmd == "" } {
 		return
 	}
@@ -2192,7 +2226,7 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 		}
 	}
 
-	$::g_debug "... RESOLVE: apath=$apath restpath=$restpath prefix=$prefix"
+	$::g_debug "... RESOLVE: apath=$apath restpath=$restpath prefix=$prefix builddir=$agv::builddir"
 
 	if { $apath == "" } {
 		error "Invalid special-path specification: $prefix (in $o) - use '//SPEC:', where SPEC is s, b, t"
