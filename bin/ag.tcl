@@ -1901,8 +1901,22 @@ proc GenerateInstallTarget:library {target prefix} {
 proc GenerateInstallDevel {target prefix} {
 	set db $agv::target($target)
 
-	set libfile [ResolveOutput [dict:at $db output]]
-	set libicmd [GenerateInstallCommand [dict:at $db install] $libfile $prefix]
+	# Outputs may be multiple and defined according to libspec.
+	# We have to find libspec static, otherwise this output is
+	# not to be generated
+	set libspec [dict:at $db libspec]
+	set ipos [lsearch $libspec static]
+	if { $ipos != -1 } {
+		set outfile [ppipe dict:at $db output | lindex % $ipos]
+		if { $outfile == "" } {
+			error "IPE: no filename defined for static library target: $target"
+		}
+		set outfile [ResolveOutput $outfile]
+		set libfile [ResolveOutput [dict:at $db output]]
+		set libicmd [GenerateInstallCommand [dict:at $db install] $libfile $prefix]
+	} else {
+		set libicmd ""
+	}
 
 	set hcmds ""
 
@@ -1919,7 +1933,9 @@ proc GenerateInstallDevel {target prefix} {
 	}
 
 	set itarget install-$target
-	dict set db rules install-$target-archive [list $libfile \n$libicmd\n]
+	if { $libicmd != "" } {
+		dict set db rules install-$target-archive [list $libfile \n$libicmd\n]
+	}
 	dict set db phony install-$target-archive ""
 
 	dict set db rules install-$target-headers [list {*}$hdr \n$hcmds]
@@ -1931,17 +1947,30 @@ proc GenerateInstallDevel {target prefix} {
 
 proc GenerateInstallRuntime {target prefix itarget} {
 	set db $agv::target($target)
-	set outfile [ResolveOutput [dict:at $db output]]
-	set icmd [GenerateInstallCommand [dict:at $db install]:shared $outfile $prefix]
-	if { $icmd == "" } {
-		return
+
+	# Outputs may be multiple and defined according to libspec.
+	# We have to find libspec shared, otherwise this output is
+	# not to be generated
+	set libspec [dict:at $db libspec]
+	set ipos [lsearch $libspec shared]
+	if { $ipos != -1 } {
+		set outfile [ppipe dict:at $db output | lindex % $ipos]
+		if { $outfile == "" } {
+			error "IPE: no filename defined for shared library target: $target"
+		}
+		set outfile [ResolveOutput $outfile]
+		set icmd [GenerateInstallCommand [dict:at $db install]:shared $outfile $prefix]
+		if { $icmd != "" } {
+			set installdeps [GetRuntimeDeps $target]
+			# As they are now available, record them for later use
+			dict set db runtimedepends $installdeps
+
+			dict set db rules $itarget [list $outfile {*}$installdeps \n$icmd\n]
+		}
+	} else {
+		vlog "Target $target does not require shared library, no runtime install"
 	}
-
-	set installdeps [GetRuntimeDeps $target]
-	# As they are now available, record them for later use
-	dict set db runtimedepends $installdeps
-
-	dict set db rules $itarget [list $outfile {*}$installdeps \n$icmd\n]
+	# If shared library was not requested, then just generate empty target.
 	dict set db phony $itarget ""
 	# Ok, ready. Write back to the database
 	set agv::target($target) $db
@@ -2521,7 +2550,7 @@ proc ag-do-genrules target {
 
 	set cmdf \
 {
-	[mkv::MAKE] clean && !agcmd -f !agfile !varexpr !toplevel
+	[mkv::MAKE] clean && !agcmd -f !agfile !varexpr !options
 }
 
 	# These actions were added previously to enforce restarting make and do nothing afterwards.
@@ -2532,13 +2561,24 @@ proc ag-do-genrules target {
 	# For genrules, add also reconfigure rule to regenerate Makefile.tcl.
 	# The 'reconfigure-ifneeded' is running automatically to check if Makefile.tcl is fresh.
 	# The 'reconfigure' target can be only run on demand.
-	set maybe_toplevel ""
+	set maybe_options ""
 	if { $agv::toplevel != "" } {
-		set maybe_toplevel "-t [prelocate $agv::toplevel]"
+		set top [prelocate $agv::toplevel]
+		if { $top != "." } {
+			lappend maybe_options -t $top
+		}
+	}
+	
+	if { $agv::p::profile_overrides != "" } {
+		foreach {k v} $agv::p::profile_overrides {
+			lappend maybe_options -p $k $v
+		}
 	}
 
+	# XXX config_overrides (-c) is also required, add when implemented
+
 	ag reconfigure -type custom -flags noclean distclean -clean none -runon demand \
-			-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr !toplevel $maybe_toplevel] $cmdf]}
+			-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr !options $maybe_options] $cmdf]}
 
 	ag reconfigure-ifneeded -type custom -flags noclean distclean -clean none -sources $::agfile -output Makefile.tcl $agv::generated_files \
 			-command {	%submake reconfigure}

@@ -445,14 +445,15 @@ proc process-options {argv optargd} {
 
 	set in_option ""
 
+	set okey ""
 	foreach e $argv {
 
-		set okey ""
 		set follow ""
 		set continue 1
 		# This is for the case when the whole body needs to be repeated
 		# without getting to the next iteration
 		while { $continue } {
+			#puts stderr "process-options DEBUG: current arg: '$e'"
 
 			# This variable is set only if there are more than 0 optargs for this option
 			# The in_option contains: <name of the option> <how many arguments to grab>
@@ -463,6 +464,7 @@ proc process-options {argv optargd} {
 				set varname [lindex $optargs($on) $pos]
 				if { $tp == "-" } {
 					set varname [string range $varname 1 end]; # skip -
+					#puts stderr "process-options DEBUG: in_option='$in_option' varname='$varname'"
 
 					# This type is a key-value pair. So check the key.
 					# if the key is empty, this step sets the key. If not,
@@ -471,13 +473,16 @@ proc process-options {argv optargd} {
 
 					if { $okey == "" } {
 						set okey $e
+						#puts stderr "process-options DEBUG: for var=$varname setting key=$okey, pick up the next value"
 						break
 					}
+					#puts stderr "process-options DEBUG: have key=$okey, setting value='$e'"
 
 					# If the key is set, then use the argument as a value to set
 					if { [string index $e 0] == "-" } {
 						error "process-options: '$on' must be followed by key and value. Use {+ value} if it starts from -."
 					}
+					#puts stderr "process-options DEBUG: in_option='$in_option' varname='$varname' dict($okey) $e"
 					dict set r_$varname $okey $e
 					set okey ""
 
@@ -703,6 +708,40 @@ proc dict:sel {dic args} {
 	return $output
 }
 
+proc ppipe args {
+	set esets ""
+	set cset ""
+	foreach arg $args {
+		if { $arg == "|" } {
+			lappend esets $cset
+			set cset ""
+		} elseif { $arg == "\\|" } {
+			lappend cset |
+		} else {
+			lappend cset $arg
+		}
+	}
+	lappend esets $cset
+
+	set thru ""
+	foreach cset $esets {
+		set cmd ""
+		foreach c $cset {
+			if { $c == "%%" } {
+				lappend cmd %
+			} elseif { $c == "%" } {
+				lappend cmd $thru
+			} else {
+				lappend cmd $c
+			}
+		}
+
+		set thru [uplevel $cmd]
+	}
+
+	return $thru
+}
+
 proc dict:layout {layout list} {
 	set output ""
 	foreach k $layout v $list {
@@ -759,6 +798,7 @@ set public_export_util [puncomment {
 	pver
 	prun
 	pdip
+	ppipe
 	process-options
 	number-cores
 	dict:at

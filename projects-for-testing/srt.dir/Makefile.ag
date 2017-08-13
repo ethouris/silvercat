@@ -144,7 +144,8 @@ ag $TARGET_srt -install lib -libspec $srt_libspec
 
 set maf_haicrypt [ag-maf $TARGET_haicrypt haicrypt filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 ag $TARGET_haicrypt -hidir srt
-ag $TARGET_haicrypt -ldflags -- -lcrypto
+#ag $TARGET_haicrypt -ldflags -- -lcrypto
+ag $TARGET_haicrypt -packages libcrypto
 
 
 if { $tcl_platform(os) == "Windows" } {
