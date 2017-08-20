@@ -1393,7 +1393,7 @@ proc Process:program target {
 		dict set agv::target($target) output $outfile
 	}
 
-	ProcessCompileLink program normal $target $outfile
+	ProcessCompileLink program $target
 	Process:phony $target
 }
 
@@ -1412,21 +1412,29 @@ proc Process:library target {
 	set outfiles ""
 	set output [pget agv::target($target).output]
 
+	#puts stderr "DEBUG: Library target '$target': libspec defined '$libspec' output predefined:$output"
+
 	foreach type $libspec {
+
+		#set debugad ""
 
 		set outfile [lindex $output $ipos]
 		if { $outfile == "" } {
 			set outfile [CreateLibraryFilename $target $type]
-			lappend outfiles $outfile
+			#set debugad " (generated)"
 		}
+		#puts stderr "DEBUG: Target '$target' checking libspec '$type': output=$outfile$debugad"
+		lappend outfiles $outfile
 
 		incr ipos
 
-		ProcessCompileLink library $type $target $outfile
 	}
+
 	if { $outfiles != "" } {
 		dict set agv::target($target) output $outfiles
 	}
+
+	ProcessCompileLink library $target
 	Process:phony $target
 }
 
@@ -1454,7 +1462,7 @@ proc Process:object target {
 		dict set agv::target($target) output $outfile
 	}
 
-	ProcessCompileLink object normal $target $outfile
+	ProcessCompileLink object $target
 	Process:phony $target
 }
 
@@ -1492,12 +1500,10 @@ proc Process:custom target {
 		$::g_debug "...D: $i: [set $i]"
 	}
 
-	# Check dependencies if they are defined.
-	foreach d $deps {
-		if { [CheckDefinedTarget $d] == "" } {
-			error "Target '$d' (dependency of '$target' type custom) is not defined"
-		}
-	}
+	# This will throw exception if any target in deps list
+	# cannot be resolved
+	set deptargets [ExtractActualDepends $target $deps]
+
 
 	set rsrc ""
 	foreach s $sources {
@@ -1505,9 +1511,10 @@ proc Process:custom target {
 	}
 
 	$::g_debug "DEP TARGETS: $deps"
+	$::g_debug "DEP ACTUAL: $deptargets"
 	$::g_debug "DEP SOURCES: $rsrc"
 
-	set rule [list {*}$deps {*}$rsrc "\n\t$command\n"]
+	set rule [list {*}$deptargets {*}$rsrc "\n\t$command\n"]
 	foreach o $outfile {
 		dict set rules $o $rule
 	}
@@ -1728,7 +1735,7 @@ proc Process:phony target {
 	}
 }
 
-proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
+proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 
 	# It's hard to customize properly the command with the use
 	# of multiple possible commands accepting various arguments.
@@ -1737,14 +1744,19 @@ proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 	# is also a "<command> <directory-path>" name.
 
 	set mkdir3cmd [dict:at $agv::profile(default) cmd:makedir]
+
+	# XXX Consider generating here an internal Tcl command
+	# that will only update the target if it's stale or missing.
 	set installcmd [dict:at $agv::profile(default) cmd:install]
+
+	set havedir ""
 
 	set icmd ""
 
 	switch -- $cat {
 		noinst - {} {
 			# Nothing.
-			set icmd "# Nothing to install for '$outfile' (noinst)"
+			set icmd "# Nothing to install for '$outfiles' (noinst)"
 		}
 
 		default {
@@ -1762,8 +1774,10 @@ proc GenerateInstallCommand {cat outfile prefix {subdir ""}} {
 				if { $subdir != "" } {
 					set instdir [file join $instdir $subdir]
 				}
-				set filename [file tail $outfile]
-				set icmd "\t$mkdir3cmd $instdir\n\t$installcmd $outfile $instdir"
+				set icmd "\t$mkdir3cmd $instdir"
+				foreach outfile $outfiles {
+					append icmd "\n\t$installcmd $outfile $instdir"
+				}
 			} else {
 				puts stderr "+++AG WARNING: No installdir for -install $cat - can't install $outfile"
 			}
@@ -1788,6 +1802,9 @@ proc GetFlatInstallDeps {target} {
 	set all_install_deps ""
 
 	foreach d [dict:at $agv::target($target) depends] {
+		# The 'depends' field contains dependency spec together with libspec
+		lassign [CheckDefinedTarget $d] d spec
+		
 		set phonies [dict keys [dict:at $agv::target($d) phony]]
 		$::g_debug "Checking if '$d' is installable in phonies: $phonies"
 		if { "install-$d" in $phonies } {
@@ -1907,12 +1924,11 @@ proc GenerateInstallDevel {target prefix} {
 	set libspec [dict:at $db libspec]
 	set ipos [lsearch $libspec static]
 	if { $ipos != -1 } {
-		set outfile [ppipe dict:at $db output | lindex % $ipos]
+		set outfile [ppipe dict:at $db output | set output % |  lindex % $ipos]
 		if { $outfile == "" } {
-			error "IPE: no filename defined for static library target: $target"
+			error "IPE: no filename defined for static library target: $target (output:$output)"
 		}
-		set outfile [ResolveOutput $outfile]
-		set libfile [ResolveOutput [dict:at $db output]]
+		set libfile [ResolveOutput $outfile]
 		set libicmd [GenerateInstallCommand [dict:at $db install] $libfile $prefix]
 	} else {
 		set libicmd ""
@@ -1927,10 +1943,7 @@ proc GenerateInstallDevel {target prefix} {
 
 	$::g_debug "... ($target): target headers to install: $hdr"
 
-	foreach h $hdr {
-		set hcmd [GenerateInstallCommand include $h $prefix [dict:at $db headers-installdir]]
-		append hcmds $hcmd\n
-	}
+	set hcmds [GenerateInstallCommand include $hdr $prefix [dict:at $db headers-installdir]]
 
 	set itarget install-$target
 	if { $libicmd != "" } {
@@ -1938,7 +1951,7 @@ proc GenerateInstallDevel {target prefix} {
 	}
 	dict set db phony install-$target-archive ""
 
-	dict set db rules install-$target-headers [list {*}$hdr \n$hcmds]
+	dict set db rules install-$target-headers [list {*}$hdr \n$hcmds\n]
 	dict set db phony install-$target-headers ""
 
 	dict set db phony install-$target-devel [list install-$target-archive install-$target-headers]
@@ -1954,9 +1967,9 @@ proc GenerateInstallRuntime {target prefix itarget} {
 	set libspec [dict:at $db libspec]
 	set ipos [lsearch $libspec shared]
 	if { $ipos != -1 } {
-		set outfile [ppipe dict:at $db output | lindex % $ipos]
+		set outfile [ppipe dict:at $db output | set output % | lindex % $ipos]
 		if { $outfile == "" } {
-			error "IPE: no filename defined for shared library target: $target"
+			error "IPE: no filename defined for shared library target: $target (libspec:$libspec output:$output)"
 		}
 		set outfile [ResolveOutput $outfile]
 		set icmd [GenerateInstallCommand [dict:at $db install]:shared $outfile $prefix]
@@ -1980,7 +1993,7 @@ proc GenerateInstallTarget:program {target prefix} {
 	GenerateInstallRuntime $target $prefix install-$target
 }
 
-proc ProcessCompileLink {type subtype target outfile} {
+proc ProcessCompileLink {type target} {
 
 	# The ProcessLanguage does only language check for all sources
 	# and defines the languages for every source file as well as for
@@ -1992,8 +2005,8 @@ proc ProcessCompileLink {type subtype target outfile} {
 
 	# XXX BUG DEBUG - still a bug, remove after fixing
 	set prev_outfile [pget agv::target($target).filename]
-	$::g_debug " --**--++-- ProcessCompileLink: using output filename '$outfile' (was $prev_outfile) for $type $target"
-	dict set agv::target($target) output $outfile
+	set output [pget agv::target($target).output]
+	$::g_debug " --**--++-- ProcessCompileLink: using output filenames '$output' (was $prev_outfile) for $type $target"
 
 	# If the target is program, then you need
 	# to generate rules that compile all sources
@@ -2018,9 +2031,13 @@ proc ProcessCompileLink {type subtype target outfile} {
 	# The rule for the outfile can be already generated; this
 	# happens for "object" type where compile rule is the generation
 	# rule itself.
-	if { [dict:at $rules $outfile] == "" } {
-		set rule [GenerateLinkRule:$type $subtype $db $outfile]
-		dict set rules $outfile $rule
+	foreach outfile [dict:at $db output] libspec [dict:at $db libspec] {
+		if { [dict:at $rules $outfile] == "" } {
+			# Libspec will be empty when not defined, but it still only
+			# matters for a library anyway.
+			set rule [GenerateLinkRule:$type $libspec $db $outfile]
+			dict set rules $outfile $rule
+		}
 	}
 
 	# Add a phony rule that redirects the symbolic name to physical file,
@@ -2134,7 +2151,7 @@ proc GetTargetFile {target reqspec} {
 	if { $reqspec != "" } {
 		set pos [FindDepSpec $target $reqspec]
 		if { $pos == -1 } {
-			error "Getting filename for '$target' spec '$reqspec': no such specialization found in reqspec '$reqspec'"
+			return
 		}
 		if { $pos ne "00" } {
 			# 00 returned means that the output is already set correctly
@@ -2314,7 +2331,10 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 
 		if { $type == "library" } {
 			set slibs ""
-			lassign [GetTargetFile $d $spec] libofile spec
+			lassign [GetTargetFile $d $spec] libofile ospec
+			if { $libofile == "" } {
+				error "Target '$target' requested dep '$d' in spec '$spec' which '$d' does not define"
+			}
 			$::g_debug " -- LIBRARY DEP '$d': output=[pget agv::target($d).output] ($libofile) SPEC: $spec"
 			set ldflags ""
 			if { $spec == "static" } {
@@ -2780,6 +2800,7 @@ proc SynthesizeClean {target} {
 		# This is a synthetic 'all' target, so take clean names from
 		# all dependent targets, if any. They must be dependencies of clean.
 		foreach d [ag $tarname ?depends] {
+			lassign [CheckDefinedTarget $d] d spec
 			lappend cleandeps {*}[dict:at $agv::target($d) cleantarget]
 		}
 		set cleanflags "-noclean"
@@ -2800,6 +2821,7 @@ proc SynthesizeClean {target} {
 		# this should't be checked whether the target has a chance to get generated.
 		set cleancmd "\n"
 		foreach d [ag . ?depends] {
+			lassign [CheckDefinedTarget $d] d spec
 			append cleancmd "\t%autoclean $d $cleanflags\n"
 		}
 	} else {
@@ -2818,6 +2840,7 @@ proc SynthesizeClean {target} {
 			append orule "\t%submake -C $d distclean\n"
 		}
 		foreach d [ag . ?depends] {
+			lassign [CheckDefinedTarget $d] d spec
 			append orule "\t%autoclean $d\n\t%autoclean $d distclean\n"
 		}
 		foreach f $agv::generated_files {
@@ -2902,10 +2925,48 @@ proc ag-make {target} {
 	cd $wd
 }
 
+proc ExtractActualDepends {target deps} {
+	# Filter deptargets through the library specialization as requested
+	# By the way this also checks if the dep target is defined
+	set tartype [dict:at $agv::target($target) type]
+	set deptargets ""
+	foreach d $deps {
+		lassign [CheckDefinedTarget $d] d spec
+		if { $d == "" } {
+			error "Target '$d' (dependency of '$target' type $tartype) is not defined"
+		}
+		if { $spec == "" } {
+			lappend deptargets $d
+			continue
+		}
+
+		# For a library specification, check if such a specification is available.
+		set libspec [dict:at $agv::target($d) libspec]
+		if { $libspec == "" } {
+			error "Target '$d' spec $spec (dependency of '$target' type $tartype) has no libspec defined"
+		}
+
+		# Find specialization that is requested
+		set ix [FindDepSpec $d $spec]
+		if { $ix == -1 } {
+			error "Target '$d' has no spec $spec (required as dependency of '$target type $tartype)"
+		}
+
+		# Store a library file as a dependency.
+		set depfile [ppipe dict:at $agv::target($d) output | set output % | lindex % $ix]
+		if { $depfile == "" } {
+			error "IPE: In target '$d' output file not found for spec=$spec (libspec:$libspec ouptut:$output)"
+		}
+		lappend deptargets $depfile
+	}
+
+	return $deptargets
+}
+
 # This procedure should be used instead of checking if exists agv::target($target).
 # It's specifically for targets that may have a special form and because of that
 # have to be synthesized lazily.
-# Currently it concerns only detecting "directory-based targets"
+# Currently it concerns only detecting "directory-based targets" and libspec.
 proc CheckDefinedTarget {target {dspec {}}} {
 
 	# If the target exists - it's already done.

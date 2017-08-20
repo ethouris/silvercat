@@ -21,13 +21,30 @@ if { [phas ENABLE_MXPTOOL] } {
 	set ENABLE_MXPTOOL 0
 }
 
-set srt_libspec static
+set srtstatic 0
+set srtshared 0
 
-if { [phas USE_DYNAMIC] } {
-	set srt_libspec dynamic
-	puts "Note: srt package libraries will be compiled as dynamic"
+
+if { [phas ENABLE_SHARED] } {
+	set srtshared 1
 }
 
+if { [phas ENABLE_STATIC] } {
+	set srtstatic 1
+}
+
+# Enable static and shared by default
+# Disable shared only if ENABLE_STATIC
+# Keep default shared enabled due to LGPL requirements.
+# Keep also static enabled because it's required as a dependency of stransmit.
+
+if { $srtshared == 0 && $srtstatic == 1 } {
+	set srt_libspec static
+} else {
+	set srt_libspec "static shared"
+}
+
+puts "SRT LIBSPEC: $srt_libspec"
 
 ag-profile {c c++} -D {SRT_VERSION=\"$SRT_VERSION\"}
 
@@ -158,6 +175,12 @@ set maf_srt [ag-maf $TARGET_srt srtcore filelist.maf -s SOURCES -h {PUBLIC HEADE
 ag $TARGET_srt -hidir srt
 if { [pget tcl_platform(os)] == "Linux" } {
 	ag $TARGET_srt -ldflags -- -lpthread
+
+	if { "shared" in [ag $TARGET_haicrypt ?libspec] } {
+		# Required by linking a shared library against a shared library
+		puts "NOTE: adding -fPIC due to linking libsrt.so against libcrypto. ADD AUTOMATIC RECOGNITION."
+		ag $TARGET_haicrypt -cflags -- -fPIC
+	}
 }
 
 # Instantiate and install config header
@@ -240,7 +263,7 @@ proc testprogram {prg args} {
 	ag $prg -type program -install bin
 	ag $prg -s apps/$prg.cpp [InDir common [concat uriparser.cpp $args]] -I common
 	ag $prg -cflags -- -std=c++11
-	ag $prg -depends srt -ldflags -- -lcrypto
+	ag $prg -depends srt/static -ldflags -- -lcrypto
 	if { [pget tcl_platform(os)] == "Linux" } {
 		ag $prg -ldflags -- -pthread -lrt
 	}
