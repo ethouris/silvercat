@@ -21,4 +21,4 @@ ag lineupApp -type program -s src/main.cc -depends lineup
 
 ag-subdir test
 
-
+# vim:ft=tclmake

@@ -13,14 +13,6 @@ ag-profile posix-install
 pinit NAME_haicrypt haicrypt
 pinit NAME_srt srt
 
-if { [phas ENABLE_MXPTOOL] } {
-	if { $tcl_platform(os) != "Linux" } {
-		error "ENABLE_MXPTOOL: MXP is supported only on Linux."
-	}
-} else {
-	set ENABLE_MXPTOOL 0
-}
-
 set srtstatic 0
 set srtshared 0
 
@@ -88,13 +80,6 @@ ag-profile general -depspec cached
 ag-profile general -cflags -- -Wall -Wextra
 
 
-# Utility to add path prefix to all files in the list
-proc InDir {prefix list} {
-	return [pdip $prefix/% [plist $list]]
-}
-
-
-
 # ------------
 # Targets
 # -----------
@@ -151,7 +136,6 @@ ag $TARGET_srt -install lib -libspec $srt_libspec
 
 # Ok, predefined, now specify the sources and public headers
 
-# mxpc_log - this is an internal logging library used by HaiCrypt and MXP.
 # srt_compat - this provides some system dependent, portable features.
 # Devel only - compile as static, dependency of haicrypt.
 #ag $TARGET_haicrypt -s mxpmod/mxpc_log.c mxpmod/mxpc_err.c common/srt_compat.c
@@ -195,7 +179,7 @@ ag srt_pc -type data -install lib/pkgconfig -s //b:srt.pc
 # XXX Use MAF file to specify these details!
 
 # Include directories (see Issue #72)
-ag-profile general -I [InDir $agv::srcdir {
+ag-profile general -I [pdip $agv::srcdir/% {
 	srtcore
 	haicrypt
 	common
@@ -225,27 +209,7 @@ if { $SRT_BUILD_PROFILE } {
 # Now collect all source file names for tags
 
 pset sources [pluniq [concat [ag $TARGET_srt ?sources] [ag $TARGET_haicrypt ?sources]]]
-pset sourcedirs srtcore common haicrypt mxpmod 
-
-if { $ENABLE_MXPTOOL } {
-	pset+ sources [ag srt_mxp ?sources]
-	pset+ sourcedirs mxpmod
-}
-
-# Secondary target: srt_mxptool
-
-if { $ENABLE_MXPTOOL } {
-
-	ag srt_mxptool {
-		-type program
-		-install bin
-		-s [InDir tools {mxptool.c mxpt_perf.c mxpt_sat.c}]
-		-depends srt_mxp
-		-ldflags -- -lcrypto -lpthread -lrt
-	}
-
-	pset+ sources [ag srt_mxptool ?sources]
-}
+pset sourcedirs srtcore common haicrypt 
 
 # Extract all header files for tag generations
 
@@ -261,7 +225,7 @@ ag tags -command {
 
 proc testprogram {prg args} {
 	ag $prg -type program -install bin
-	ag $prg -s apps/$prg.cpp [InDir common [concat uriparser.cpp $args]] -I common
+	ag $prg -s apps/$prg.cpp [pdip common/% [concat uriparser.cpp $args]] -I common
 	ag $prg -cflags -- -std=c++11
 	ag $prg -depends srt/static -ldflags -- -lcrypto
 	if { [pget tcl_platform(os)] == "Linux" } {
