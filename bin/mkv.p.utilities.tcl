@@ -629,6 +629,14 @@ proc pdip {format list} {
 	return [[namespace current]::pmap [list n $pproc] [[namespace current]::plist $list]]
 }
 
+# Returns first string from the list that is nonempty
+proc psfirst args {
+	foreach s $args {
+		if { $s != "" } {
+			return $s
+		}
+	}
+}
 
 proc dict:assert dic {
 	set llen [llength $dic]
@@ -798,6 +806,7 @@ set public_export_util [puncomment {
 	pver
 	prun
 	pdip
+	psfirst
 	ppipe
 	process-options
 	number-cores

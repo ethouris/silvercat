@@ -1355,6 +1355,11 @@ proc ProcessSources target {
 		set hsufs [agv::p::GetHeaderSuffixes $lang]
 
 		# Find header files in the deps.
+		# XXX It is not considered here that the list may consist
+		# exclusively of a dep file, with < as first character. In this case
+		# the dep file should be checked, and if possible the headers should
+		# be extracted from there.
+
 		# If there are any, and they are not found in 'headers',
 		# add them to noinst-headers
 		foreach n $ifiles {
@@ -1779,7 +1784,7 @@ proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 					append icmd "\n\t$installcmd $outfile $instdir"
 				}
 			} else {
-				puts stderr "+++AG WARNING: No installdir for -install $cat - can't install $outfile"
+				puts stderr "+++AG WARNING: No installdir for -install $cat - can't install: $outfiles"
 			}
 		}
 	}
@@ -2118,13 +2123,30 @@ proc GenerateCompileRule {db lang objfile source deps} {
 	$::g_debug "GENERATING FOR  $source: $deps"
 
 	set command "$compiler $cflags $depflags $source $oflag $objfile"
+	set maybe_dump ""
+	# This -dumpinfo flag is propagated from profile, so check both
+	# this target and profile.
+	# XXX Some more general method must be developed for this so that there
+	# can be also "config" objects that can apply the settings to only selected targets
+	set di [psfirst [dict:at $db dumpinfo] [dict:at $agv::profile($lang) dumpinfo]]
+
+	# Some other possible values should be available in future. Now handle only yes/on/true
+	if { $di != "" && [string is true $di] } {
+		set infofile [file rootname $objfile].info
+		set maybe_dump "\n\t%pwrite $infofile {[GenerateInfoGen $source $objfile $command]}"
+	}
+
 	$::g_debug "... Command: $command"
 
-	set rule "$deps {\n\t$command\n}"
+	set rule "$deps {\n\t$command$maybe_dump\n}"
 
 	$::g_debug "... Generated rule: $rule"
 
 	return $rule
+}
+
+proc GenerateInfoGen {source target command} {
+	return "Source {$source} Target {$target} Command {$command}"
 }
 
 proc FindDepSpec {target reqspec} {
@@ -2473,12 +2495,18 @@ proc GenerateExecutableLinkRule {type db outfile} {
 
 	set command "$linker $objects $oflag $outfile $libs $ldflags"
 
+	set maybe_dump ""
+	set di [psfirst [dict:at $db dumpinfo] [dict:at $agv::profile($lang) dumpinfo]]
+	if { $di != "" && [string is true $di] } {
+		set infofile $outfile.ag.info
+		set maybe_dump "\n\t%pwrite $infofile {[GenerateInfoGen $objects $outfile $command]}"
+	}
 	# The rule should contain all ingredient files
 	# and all "targets" declared here as its dependency
 	# (be it phony or file-based target). The exact file that
 	# needs to be used in the command is already extracted
 	# by GetDependentLibraryTargets.
-	set rule "$objects $depends {\n\t$command\n}"
+	set rule "$objects $depends {\n\t$command$maybe_dump\n}"
 
 	return $rule
 }
@@ -2518,7 +2546,15 @@ proc GenerateLinkRule:library {libtype db outfile} {
 		}
 	}
 	set command "$arcmd $outfile $objects"
-	set rule "$objects {\n\t$command\n}"
+
+	set maybe_dump ""
+	set di [psfirst [dict:at $db dumpinfo] [dict:at $agv::profile($lang) dumpinfo]]
+	if { $di != "" && [string is true $di] } {
+		set infofile $outfile.ag.info
+		set maybe_dump "\n\t%pwrite $infofile {[GenerateInfoGen $objects $outfile $command]}"
+	}
+
+	set rule "$objects {\n\t$command$maybe_dump\n}"
 	return $rule
 }
 

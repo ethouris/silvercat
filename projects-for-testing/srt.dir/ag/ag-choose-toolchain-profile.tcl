@@ -34,7 +34,7 @@ if { $cc != "" } {
 
 # For CentOS 6 use special gcc-new profile.
 # Otherwise use the "current best default" gcc-native profile.
-} elseif { $tcl_platform(os) == "Darwin" } {
+} elseif { $tcl_platform(os) == "Darwin" || [phas USE_CLANG] } {
 
 	# use clang on Mac.
 	ag-profile clang-native
