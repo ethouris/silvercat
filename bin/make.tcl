@@ -2037,7 +2037,8 @@ proc tribool_logical in {
 
 
 proc finished_program {var ix op} {
-	puts stderr "+++ Leaving '[file normalize $::mkv::directory]'"
+	puts stderr "agmake\[$mkv::p::dirdepth\]: Leaving directory '[file normalize $::mkv::directory]'"
+	incr mkv::p::dirdepth -1
 }
 
 set public_export [puncomment {
@@ -2175,7 +2176,8 @@ proc main argv {
 	set wd [pwd]
 	set makefiledir [file normalize $makefiledir]
 	if { $parentdir != "" } {
-		puts stderr "+++ Entering '$makefiledir'"
+		incr mkv::p::dirdepth
+		puts stderr "agmake\[$mkv::p::dirdepth\]: Entering directory '$makefiledir'"
 		trace variable parentdir u ::mkv::p::finished_program
 	}
 	cd $makefiledir
