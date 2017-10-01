@@ -55,9 +55,9 @@ ag answer -depends party/test ff
 
 ag answer -defines DEBUG -incdir $env(HOME)/.local/include lib -libdir $env(HOME)/.local/lib lib
 
-ag f1 -type library -install lib -sources file3.cc -libspec dynamic
+ag f1 -type library -install lib -sources file3.cc -libspec shared
 
-ag ff -type library -install lib -sources file2.cc -headers file.h -libspec static dynamic -depends f1
+ag ff -type library -install lib -sources file2.cc -headers file.h -libspec static shared -depends f1
 # Ups, file2 should be removed from the answer file!
 ag answer -sources {- file2.cc}
 # This demonstrated how to add values that have "-" as the first character
@@ -66,7 +66,7 @@ ag answer -sources {- file2.cc}
 #ag answer -ldflags -- -L.  -lff
 
 # Setting a dependency on a target that was previously defined as of type library,
-# and when the target is a program or dynamic library, this statement makes the
+# and when the target is a program or shared library, this statement makes the
 # it to be linked against the library built for that target. If you want
 # to make the target simply dependent on a library target, but not to be linked
 # against it, make an intermediate phony target and link them with

@@ -214,8 +214,22 @@ proc PrepareGeneralTargets {} {
 			set tdep [pget agv::target($d).depends]
 			vlog " -- CHECKING $d's depends: $tdep"
 			if {$t in $tdep} {
-				set any 1
-				vlog " -- REMOVED $t because it's a dependency of $d"
+				# In here, do additional check: if the dependency is a library,
+				# and the dependent one is library or program, check if the dependent
+				# files are all covered by the dependency rule. If the dependent target
+				# produces multiple files, it shall always remain in the all list, at
+				# least because it's impossible to be dependent on multiple files of
+				# the same dynamic library. Limiting this to programs and libraries
+				# as dependent ones because only in case of them there's a special
+				# case of dependency that results in linkage.
+				if { [pget agv::target($t).type] == "library"
+				&&   [pget agv::target($d).type] in {library program}
+				&&   [llength [pget agv::target($t).libspec]] > 1 } {
+					vlog " -- NOT REMOVED '$t', dep of '$d', because has spec: [pget agv::target($t).libspec]"
+				} else {
+					set any 1
+					vlog " -- REMOVED $t because it's a dependency of $d"
+				}
 				break
 			}
 		}

@@ -638,6 +638,29 @@ proc psfirst args {
 	}
 }
 
+proc pif args {
+	set isq [lsearch -exact $args ?]
+	if { $isq == -1 } {
+		lassign $args cond iftrue iffalse
+	} else {
+		set cond [lrange $args 0 $isq-1]
+		set end [lsearch -start $isq -exact $args :]
+		if { $end == -1 } {
+			set iftrue [lrange $args $isq+1 end]
+			set iffalse ""
+		} else {
+			set iftrue [lrange $args $isq+1 $end-1]
+			set iffalse [lrange $args $end+1 end]
+		}
+	}
+
+	if [uplevel expr $cond] {
+		return $iftrue
+	}
+	return $iffalse
+}
+
+
 proc dict:assert dic {
 	set llen [llength $dic]
 	if { $llen%2 == 1 } {
@@ -807,6 +830,7 @@ set public_export_util [puncomment {
 	prun
 	pdip
 	psfirst
+	pif
 	ppipe
 	process-options
 	number-cores

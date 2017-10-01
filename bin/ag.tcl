@@ -407,15 +407,41 @@ proc FindSilverFile {agfile {agdir ""}} {
 }
 
 # XXX This should be platform-dependent!
-proc CreateLibraryFilename {target type} {
+proc CreateLibraryFilename {target type oldname} {
+
+	# The 'oldname' may be:
+	# - empty: in this case just return the given name
+	# - have only a rootname - then just use it in the template
+	# - be a full filename - then check if correct extension
+
+	set rootname $oldname
+	if { $rootname == "" } {
+		set rootname $target
+	} else {
+		set rootname [file rootname $rootname]
+	}
 
 	if { $type == "shared" } {
 		set form [ag-profile general ?form:sharedroot]
-		return [pdip $form $target][info sharedlibextension]
+		set outname [pdip $form $target][info sharedlibextension]
+	} elseif { $type == "static" } {
+		set form [ag-profile general ?form:archive]
+		set outname [pdip $form $target]
+	} else {
+		error "Invalid libspec '$type' for target '$target': use 'static' or 'shared'"
 	}
 
-	set form [ag-profile general ?form:archive]
-	return [pdip $form $target]
+	# Confront outname with oldname
+	if { [file extension $oldname] != "" } {
+		if { [file extension $outname] != [file extension $oldname] } {
+			error "For target '$target' output '$oldname' has invalid extension; should be like '$outname'."
+		}
+
+		# If the extensions match, accept the oldname without questions
+		return $oldname
+	}
+
+	return $outname
 }
 
 # This function joins two lists into one list, keeping
@@ -1417,22 +1443,55 @@ proc Process:library target {
 	set outfiles ""
 	set output [pget agv::target($target).output]
 
-	#puts stderr "DEBUG: Library target '$target': libspec defined '$libspec' output predefined:$output"
+	vlog "Processing library target=$target output=\[$output\] libspec=\[$libspec\]"
 
 	foreach type $libspec {
 
-		#set debugad ""
+		set debugad ""
 
 		set outfile [lindex $output $ipos]
-		if { $outfile == "" } {
-			set outfile [CreateLibraryFilename $target $type]
-			#set debugad " (generated)"
+		set outfile_new [CreateLibraryFilename $target $type $outfile]
+
+		if { $outfile != $outfile_new } {
+			set debugad " (generated)"
+			set outfile $outfile_new
 		}
-		#puts stderr "DEBUG: Target '$target' checking libspec '$type': output=$outfile$debugad"
+
+		vlog " ... For libspec=$type output=$outfile $debugad"
 		lappend outfiles $outfile
 
 		incr ipos
 
+	}
+
+	# Special procedure for Windows: on Windows a dynamic
+	# and static library must not have the same rootname
+	# because Windows compilers will generate the same filename
+	# for a dll-importing library file and the static library
+	# file (both LIBNAME.lib). This is to force user to use
+	# an explicit name override for windows
+
+	if { $::tcl_platform(platform) == "windows" } {
+		# XXX Using this form of checking is actually wrong because
+		# MinGW gcc, for example, doesn't suffer of this problem.
+		# This is only to make the Microsoft compilers happy.
+
+		# The term of "importer library" better be somehow explicitly
+		# defined; it's a windows-specific thing not only not existing
+		# in any other platform, but not even existing in other compilers
+		# than Microsoft compilers. Nevertheless, the rule here is
+		# that the library importer has the *.lib extension towards
+		# the rootname of the shared library, which has *.dll extension.
+
+		# Note that on Cygwin, the value of "platform" is unix, as
+		# well as there's no problem there as well: the static library
+		# has the ".a" suffix and the shared-library-importer library
+		# has the ".dll.a" suffix (and for a library named 'name'
+		# Cygwin makes 'cygname-VERSION.dll' and 'libname.dll.a' files).
+
+		if { [llength $outfiles] > 1 && [lindex $outfile 0] in [lrange $outfile 1 end] } {
+			error "On Microsoft platforms, if you need both static and shared library, they must have different names"
+		}
 	}
 
 	if { $outfiles != "" } {
@@ -2037,20 +2096,25 @@ proc ProcessCompileLink {type target} {
 	# happens for "object" type where compile rule is the generation
 	# rule itself.
 	foreach outfile [dict:at $db output] libspec [dict:at $db libspec] {
+
+		vlog "Generating rule for '$outfile' for libspec '$libspec'"
+
 		if { [dict:at $rules $outfile] == "" } {
 			# Libspec will be empty when not defined, but it still only
 			# matters for a library anyway.
 			set rule [GenerateLinkRule:$type $libspec $db $outfile]
 			dict set rules $outfile $rule
 		}
-	}
 
-	# Add a phony rule that redirects the symbolic name to physical file,
-	# in case they differ (in future, this can be due to them being in different directories)
+		# Add a phony rule that redirects the symbolic name to physical file,
+		# in case they differ (in future, this can be due to them being in different directories)
+		if { $outfile != $target && $outfile ni [dict:at $phony $target] } {
+			vlog "Adding phony $target -> $outfile (because they differ)"
+			dict lappend phony $target $outfile
+		} else {
+			vlog "NOT adding phony $target -> $outfile because $outfile is $target or among '[dict:at $phony $target]'"
+		}
 
-	if { $outfile != $target && $outfile ni [dict:at $phony $target] } {
-		vlog "Adding phony $target -> $outfile (because they differ)"
-		dict lappend phony $target $outfile
 	}
 
 	# Ok, ready. Write back to the database
@@ -2377,8 +2441,8 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 			# result in internal error!
 			if { $transit == "transit" || ( $spec == "static" && $tspec == "static") } {
 				$::g_debug "--> DESCENDING INTO '$d' to get transitive dependencies {"
-				lassign [GetDependentLibraryTargets $d notransit] adlibpacks adlangs addeps
-				$::g_debug "} LIBPACKS from dep '$d': $adlibpacks; DEPS: $addeps"
+				lassign [GetDependentLibraryTargets $d [pif {$spec == {static}} ? transit : notransit]] adlibpacks adlangs addeps
+				$::g_debug "} LIBPACKS from dep '$d': $adlibpacks; DEPS: $addeps, adding if spec($spec) is static"
 				if { $spec == "static" } {
 					lappend deps {*}$addeps
 				}
@@ -2386,6 +2450,8 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 				# So, the dependent libpacks land just after this one.
 				lappend libpacks {*}[concat [list $libpack] $adlibpacks ]
 				lappend langs {*}$adlangs
+			} else {
+				$::g_debug "--| NOT DESCENDING into '$d' transit=$transit spec=$spec parent-spec=$tspec"
 			}
 
 			if { $spec == "static" } {
