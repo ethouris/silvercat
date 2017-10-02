@@ -1799,6 +1799,11 @@ proc Process:phony target {
 	}
 }
 
+proc Process:data target {
+
+	Process:phony $target
+}
+
 proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 
 	# It's hard to customize properly the command with the use
