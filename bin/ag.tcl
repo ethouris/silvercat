@@ -3297,6 +3297,12 @@ proc agp-prepare-database {target {parent ""}} {
 	# 2. Complete basic data (add keys that should be there and are lacking).
 	#    Generation of C/C++ file dependencies should also happen exactly here.
 	#    
+
+	# Catch the error to display a better error message
+	if { [info command Process:$type] == "" } {
+		error "Unknown target type: '$type' for target '$target'. The type must be either builtin or framework-provided."
+	}
+
 	Process:$type $target
 
 	$::g_debug "DATABASE for '$target' AFTER PROCESSING:"
@@ -3637,13 +3643,25 @@ set ag_optargs {
 	--prefix install_prefix
 }
 
+set opt_help {
+	-f "<agfile>" "Set input filename (or path)"
+	-v "" "Enforce verbose messages"
+	-d "" "Enforce DEBUG messages"
+	-C "<path>" "Use given path as base directory"
+	-t "<dir>" "Use base toplevel directory (used by sub-cats)"
+	-m "<runmode>" "Use given runmode: genrules(default) or make"
+	-p "<key> <val>..." "Override settings provided from a profile"
+	-c "<key> <val>..." "Override settings provided from a config file"
+	--prefix "<path>" "Enforce install prefix (same as -p install:prefix <path>)"
+}
+
 lassign [process-options $argv $ag_optargs] g_args g_variables g_longoptions
 
 if { $help } {
-	puts "Usage: [file tail $::argv0] genrules <target>"
+	puts "Usage: [file tail $::argv0] ?options? <target>"
 	puts stderr "Options:"
-	foreach {opt arg} $ag_optargs {
-		puts stderr [format "  %-8s %s" $opt: $arg]
+	foreach {opt arg desc} $opt_help {
+		puts stderr [format "  %-20s %s" "$opt $arg" $desc]
 	}
 	exit 1
 }

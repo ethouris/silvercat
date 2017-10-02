@@ -173,6 +173,10 @@ proc PrepareGeneralTargets {} {
 	# type 'program' or 'library' and create a phony
 	# target named 'all' that has them all as dependencies
 
+	# Targets that will be added to . and never to 'all'
+	set extratargets {}
+
+	# Targets that will be added to 'all', unless DENIED by 'runon=demand'
 	set subtargets {}
 	# Extract only targets of type program or library
 	foreach t [array names agv::target] {
@@ -195,10 +199,13 @@ proc PrepareGeneralTargets {} {
 
 		if { $addtargets != "" } {
 			lappend subtargets {*}$addtargets
+		} else {
+			lappend extratargets $t
 		}
 	}
 
-	vlog " --: TOTAL EXTRACTED TARGETS: $subtargets"
+	$::g_debug " --: TOTAL EXTRACTED TARGETS: $subtargets"
+	$::g_debug " --: TOTAL ADDITIONAL TARGETS: $extratargets"
 	set subtargets [ReorderTargets $subtargets]
 
 	set otargets ""
@@ -250,7 +257,6 @@ proc PrepareGeneralTargets {} {
 	# that are not set -runon demand.
 
 	set alltargets ""
-	set extratargets ""
 	foreach t $subtargets {
 		set runon [dict:at $agv::target($t) runon]
 		if { $runon != "demand" } {

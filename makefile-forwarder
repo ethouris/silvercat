@@ -7,8 +7,14 @@ ANYTHINGELSE:=$(filter-out all,$(MAKECMDGOALS))
 CMDLINE=$(shell cat /proc/$$PPID/cmdline | sed 's,\x0, ,g')
 
 
-all $(ANYTHINGELSE):
-	@echo "NOTE: This build uses Silvercat. Use 'agmake' to start build, not 'make'."
+all $(ANYTHINGELSE): check-ag-capable
+	@echo "NOTE: Redirecting to Silvercat (agmake)"
 	agmake $(wordlist 2,99,$(CMDLINE))
+
+
+# This should check if Silvercat is installed and informs about any problems
+
+check-ag-capable:
+	@M=`type -p agmake` && C=`type -p agcat` || (echo "Silvercat not installed, please install from http://gitlab.com/silvercat/silvercat"; echo; exit 1)
 
 
