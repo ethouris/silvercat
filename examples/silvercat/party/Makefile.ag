@@ -1,9 +1,18 @@
 
-# Profile settings will be derived
 #set mkv::p::verbose 1
 
-ag test -type custom -output ./test.txt -sources test.txt.in -command {
-	cp ${agv::srcdir}/test.txt.in test.txt
+# Profile settings will be derived if building from toplevel
+if { $agv::srcdir == $agv::toplevel } {
+	ag-profile posix-install
+}
+
+ag test -type custom -output ./test.txt -sources test.txt.in -install data -command {
+	
+	# Commands in the -command key are taken literally, and the only
+	# substitition done here are those from Tcl langauge: \, [] and $.
+	# The path prefix substitution according to the //* rules can be
+	# achieved by ag::path.
+	cp [agv::path //test.txt.in] test.txt
 }
 
 

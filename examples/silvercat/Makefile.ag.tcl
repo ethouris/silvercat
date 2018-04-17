@@ -49,7 +49,7 @@ ag-subdir party
 ag-profile c++ -defines ANSWER
 
 ag answer -type program -install bin ;#-fw pkg-config (framework can be also set per target)
-ag answer -packages zlib-1.2
+ag answer -packages zlib-1.2/static
 ag answer -sources file1.cc file2.cc
 ag answer -depends party/test ff
 
@@ -58,6 +58,10 @@ ag answer -defines DEBUG -incdir $env(HOME)/.local/include lib -libdir $env(HOME
 ag f1 -type library -install lib -sources file3.cc -libspec shared
 
 ag ff -type library -install lib -sources file2.cc -headers file.h -libspec static shared -depends f1
+
+ag ff.pc -type pkg-config -version 1.2
+ag ff.pc -ldflags ff private:z
+
 # Ups, file2 should be removed from the answer file!
 ag answer -sources {- file2.cc}
 # This demonstrated how to add values that have "-" as the first character

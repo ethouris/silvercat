@@ -104,6 +104,10 @@ namespace eval agv {
 		return [ag-profile general ?install:prefix]
 	}
 
+	proc path {pathspec} {
+		return [ResolveOutput1 $pathspec s]
+	}
+
 	# Per-file set information
 	variable fileinfo
 	namespace export fileinfo
@@ -791,6 +795,7 @@ proc UnaliasOption alias {
 		nh { return noinst-headers }
 		fw { return frameworks }
 		hidir { return headers-installdir }
+		idir { return installdir }
 		o { return output }
 		I { return incdir }
 		D { return defines }
@@ -1568,7 +1573,6 @@ proc Process:custom target {
 	# cannot be resolved
 	set deptargets [ExtractActualDepends $target $deps]
 
-
 	set rsrc ""
 	foreach s $sources {
 		lappend rsrc [FixShadowPath $s]
@@ -1595,6 +1599,19 @@ proc Process:custom target {
 
 	dict set db rules $rules
 	dict set db phony $phony
+
+	set subdir [pget db.installdir]
+	set icat [pget db.install noinst]
+	set prefix [dict:at $agv::profile(default) install:prefix]
+	set icmds [GenerateInstallCommand $icat $outfile $prefix $subdir]
+
+	if { $icmds != "" } {
+		set installdeps [GetRuntimeDeps $target]
+		dict set db runtimedeps $installdeps
+		dict set db rules install-$target [list $outfile {*}$installdeps \n$icmds\n]
+		dict set db phony install-$target ""
+	}
+
 	set agv::target($target) $db
 
 	DebugDisplayDatabase agv::target $target
@@ -1799,11 +1816,6 @@ proc Process:phony target {
 	}
 }
 
-proc Process:data target {
-
-	Process:phony $target
-}
-
 proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 
 	# It's hard to customize properly the command with the use
@@ -1821,6 +1833,8 @@ proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 	set havedir ""
 
 	set icmd ""
+
+	$::g_debug "GenerateInstallCommand cat=$cat outfiles={$outfiles} prefix=$prefix"
 
 	switch -- $cat {
 		noinst - {} {
@@ -1849,6 +1863,7 @@ proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 				}
 			} else {
 				puts stderr "+++AG WARNING: No installdir for -install $cat - can't install: $outfiles"
+				puts stderr "+++ Available: [dict filter $agv::profile(default) key installdir:*]"
 			}
 		}
 	}
@@ -1889,7 +1904,7 @@ proc GetRuntimeDeps {target} {
 	set db $agv::target($target)
 
 	set runtype [dict get $db type]
-	if { $runtype ni {program library data phony} } {
+	if { $runtype ni {program library custom phony} } {
 		return
 	}
 
@@ -1949,7 +1964,7 @@ proc GetRuntimeDeps {target} {
 				$::g_debug "GetRuntimeDeps '$d' of '$target': $dd type=$t spec=$spec"
 
 				set d $dd
-				if { $t == "data" } {
+				if { $t == "custom" } {
 					# Add direct dependency.
 					lappend deplist $d
 				} elseif { $spec == "shared" } {
@@ -2301,8 +2316,8 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 	if { $initial != "//" } {
 
 		if { [file pathtype $o] == "absolute" } {
-			$::g_debug "... ABSOLUTE PATH. Relocating to '$agv::builddir' up to '$agv::srcdir'"
-			return [prelocate $o $agv::builddir $agv::srcdir]
+			$::g_debug "... ABSOLUTE PATH. Relocating to '$agv::builddir' up to '$agv::toplevel'"
+			return [prelocate $o $agv::builddir $agv::toplevel]
 		}
 
 		# If this is a builddir, with prefix=builddir
@@ -2766,6 +2781,7 @@ proc GenerateMakefile {target fd} {
 	} else {
 
 		# Normal targets, including 'all'.
+		$::g_debug "Generating rules for '$target'"
 
 		set rules [dict:at $agv::target($target) rules]
 		set type [dict:at $agv::target($target) type]
@@ -2808,6 +2824,8 @@ proc GenerateMakefile {target fd} {
 				puts $fd "phony all $all_deps"
 				set all_install_deps ""
 
+				$::g_debug "Generating for 'all' and its deps: $all_deps"
+
 				# On the first level, just extract all DIRECT dependencies
 				# from 'all' itself. Then, from any of these extract the
 				# direct runtime dependencies.
@@ -2816,9 +2834,14 @@ proc GenerateMakefile {target fd} {
 					# XXX
 					# This must be tested more thoroughly.
 
-					if { "install-$d" in [dict:at $agv::target($d) phony] } {
+					$::g_debug "ALL: Looking for targets in dep '$d'"
+					set this_phony [dict:at $agv::target($d) phony]
+					if { "install-$d" in $this_phony } {
 						lappend all_install_deps install-$d
 						puts $fd "# -- $d (direct): install-$d"
+						$::g_debug "... Found 'install-$d' in agv.target.$d.phony ($this_phony), generating install target"
+					} else {
+						$::g_debug "... No 'install-$d' found in agv.target.$d.phony (found: [dict keys $this_phony])"
 					}
 					set ddeps [GetFlatInstallDeps $d]
 					puts $fd "# -- $d: $ddeps"
@@ -2832,9 +2855,12 @@ proc GenerateMakefile {target fd} {
 				if { $alldone && $rule == "all" } {
 					continue
 				}
+				$::g_debug "Generating for target '$target' - forwarder to deps: $deps"
 				puts $fd "# TO GENERATE phony rule '$rule'"
 				puts $fd "phony $rule $deps"
 			}
+		} else {
+			$::g_debug "Phony empty for target '$target', not generating installation"
 		}
 
 		puts $fd ""
