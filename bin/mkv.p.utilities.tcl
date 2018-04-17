@@ -617,7 +617,9 @@ proc pver {args} {
 
 # Forwarder for standard-method running cmdline app
 proc prun args {
-	vlog "+run: $args"
+	if { [info proc vlog] != "" } {
+		vlog "+run: $args"
+	}
 	exec 2>@stderr >@stdout {*}$args
 }
 
@@ -638,6 +640,11 @@ proc psfirst args {
 	}
 }
 
+# Usage:
+#   pif CONDITION VALUE-IF-TRUE VALUE-IF-FALSE
+# or:
+#   pif CONDITION EXPRESSION ? VALUE-IF-TRUE : VALUE-IF-FALSE
+# (Note spaces around ? and : )
 proc pif args {
 	set isq [lsearch -exact $args ?]
 	if { $isq == -1 } {
@@ -659,6 +666,44 @@ proc pif args {
 	}
 	return $iffalse
 }
+
+proc pis args {
+	set rest [lassign $args value pattern]
+
+	if { [lindex $rest 0] == "?" } {
+		set rest [lrange $rest 1 end]
+	}
+
+	set end [lsearch $rest :]
+	if { $end == -1 } {
+		set iftrue $rest
+		set iffalse ""
+	} elseif {$end == 0} {
+		set iftrue ""
+		set iffalse [lrange $rest 1 end]
+	} else {
+		set iftrue [lrange $rest 0 $end-1]
+		set iffalse [lrange $rest $end+1 end]
+	}
+
+	set istrue 0
+
+	if {$value != $pattern} {
+		if {![string match $pattern $value]} {
+			if { ![string match -nocase $pattern $value] } {
+			} else {
+				set istrue 1
+			}
+		} else {
+			set istrue 1
+		}
+	} else {
+		set istrue 1
+	}
+
+	return [pif $istrue $iftrue $iffalse]
+}
+
 
 
 proc dict:assert dic {
@@ -773,6 +818,11 @@ proc ppipe args {
 	return $thru
 }
 
+proc psetp {var args} {
+	upvar $var r_var
+	set r_var [ppipe {*}$args]
+}
+
 proc dict:layout {layout list} {
 	set output ""
 	foreach k $layout v $list {
@@ -831,6 +881,8 @@ set public_export_util [puncomment {
 	pdip
 	psfirst
 	pif
+	pis
+	psetp
 	ppipe
 	process-options
 	number-cores

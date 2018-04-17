@@ -81,6 +81,7 @@ set keytype(single) {
 	preproc
 	libtype
 	name
+	type
 	headers-installdir
 }
 
