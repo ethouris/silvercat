@@ -849,6 +849,28 @@ if { $tcl_version < 8.6 } {
 	}
 }
 
+# Better switch.
+# Allows to use variable expressions as patterns,
+# uses slightly wrong list-parsing rules (odd elements
+# must be single items explicitly).
+proc pdispatch {value body} {
+   foreach {key val} $body {
+        set kv [uplevel subst $key]
+        #puts stderr "TRACE KEY: $key -> $kv"
+        lappend sw $kv $val
+   }
+   #puts stderr "TRACE: $sw"
+   uplevel switch -- $value $sw
+}
+
+
+proc pswap {ra rb} {
+	upvar $ra a
+	upvar $rb b
+	set a $b[set b $a; list]
+	return
+}
+
 set public_export_util [puncomment {
 
 	# Utility functions
@@ -884,6 +906,8 @@ set public_export_util [puncomment {
 	pis
 	psetp
 	ppipe
+	pswap
+	pdispatch
 	process-options
 	number-cores
 	dict:at

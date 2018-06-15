@@ -3538,12 +3538,19 @@ proc ag-subdir1 target {
 	$::g_debug "AG-SUBDIR: using directory '$sd'. Descending into Silverfile: '$agfilepath'"
 
 	#mkv::p::run {*}[agv::AG] $agv::runmode -f $agfilepath -t $agv::toplevel
-	lappend cmd {*}[agv::AG] $agv::runmode -f $agfilepath_abs -t $agv::toplevel
+	set cmd_exe [agv::AG]
+	lappend cmd_args $agv::runmode -f $agfilepath_abs -t $agv::toplevel
+
+	# Add command-line variables to child commandlines
+	foreach {name value} $::g_variables {
+		lappend cmd_args "$name=$value"
+	}
+
 	interp create ag-interp-indir
 
 	# XXX Pass the config and profile databases?
 	ag-interp-indir eval set argv0 $::argv0
-	ag-interp-indir eval set argv [list [lrange $cmd 1 end]]
+	ag-interp-indir eval set argv [list $cmd_args]
 	ag-interp-indir eval set me_is_slave 1
 
 	# Export declared private variables
@@ -3557,7 +3564,7 @@ proc ag-subdir1 target {
 	#foreach vv [ag-interp-indir eval info vars agv::p::*] {
 	#	puts stderr "DEBUG:\t$vv = [ag-interp-indir eval set $vv]"
 	#}
-	ag-interp-indir eval source [lindex $cmd 0]
+	ag-interp-indir eval source $cmd_exe
 
 	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Pinning in database."
 	set imported_targets ""
