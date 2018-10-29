@@ -420,7 +420,7 @@ proc process-options {argv optargd} {
 
 	# Set first all boolean options to false
 	foreach {on ov} $optargd {
-		if { [string index $ov 0] in {* -} } {
+		if { [string index $ov 0] in {* - %} } {
 			set varname [string range $ov 1 end]
 			set tp [string index $ov 0]
 		} else {
@@ -485,7 +485,18 @@ proc process-options {argv optargd} {
 					#puts stderr "process-options DEBUG: in_option='$in_option' varname='$varname' dict($okey) $e"
 					dict set r_$varname $okey $e
 					set okey ""
+				} elseif {$tp == "%"} {
 
+					set varname [string range $varname 1 end]; # skip -
+					if { [string index $e 0] == "-" } {
+						# The list contains a next option. Finish
+						break;
+					}
+					#puts stderr "process-options DEBUG: in_option='$in_option' varname='$varname' APPEND: $e"
+					lappend r_$varname $e
+
+					# Finish this argument, take on the next one.
+					break
 				} else {
 					set r_$varname $e
 					#puts stderr "OPTION: ::$varname = $e"
@@ -495,9 +506,11 @@ proc process-options {argv optargd} {
 				if { $ox == 0 } {
 					set in_option ""
 				} else {
-					set in_option [list $on $ox]
+					set in_option [list $on $ox $tp]
 				}
 				break ; # meaning, continue iterations
+			} else {
+				#puts stderr "NOTHING in in_option"
 			}
 
 			# Options start from - unless this is only -.
@@ -546,6 +559,11 @@ proc process-options {argv optargd} {
 					set tp ""
 					if { [string index $oa 0] == "-" } {
 						set tp -
+						set oa [string range $oa 1 end]
+					}
+
+					if { [string index $oa 0] == "%" } {
+						set tp %
 						set oa [string range $oa 1 end]
 					}
 

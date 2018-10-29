@@ -2217,7 +2217,7 @@ proc GenerateCompileRule {db lang objfile source deps} {
 	# Some other possible values should be available in future. Now handle only yes/on/true
 	if { $di != "" && [string is true $di] } {
 		set infofile [file rootname $objfile].info
-		set maybe_dump "\n\t%pwrite $infofile {[GenerateInfoGen $source $objfile $command]}"
+		set maybe_dump "\n\t@%pwrite $infofile {[GenerateInfoGen $source $objfile $command]}"
 	}
 
 	$::g_debug "... Command: $command"
@@ -3662,6 +3662,7 @@ set runmode genrules
 set install_prefix ""
 set profile_overrides ""
 set config_overrides ""
+set readdbspec ""
 
 #puts stderr "CURRENT DIR: [pwd]"
 set agv::builddir [pwd]
@@ -3678,6 +3679,7 @@ set ag_optargs {
 	-m runmode
 	-p -profile_overrides
 	-c -config_overrides
+	-r %readdbspec
 	--prefix install_prefix
 }
 
@@ -3690,6 +3692,7 @@ set opt_help {
 	-m "<runmode>" "Use given runmode: genrules(default) or make"
 	-p "<key> <val>..." "Override settings provided from a profile"
 	-c "<key> <val>..." "Override settings provided from a config file"
+	-r "<agfile> ?key?..." "Read and print database entries from a file"
 	--prefix "<path>" "Enforce install prefix (same as -p install:prefix <path>)"
 }
 
@@ -3701,6 +3704,39 @@ if { $help } {
 	foreach {opt arg desc} $opt_help {
 		puts stderr [format "  %-20s %s" "$opt $arg" $desc]
 	}
+	exit 1
+}
+
+if { $readdbspec != "" } {
+	if { [llength $readdbspec] < 1 } {
+		puts stderr "Usage: [file tail $::argv0] -r <filename> ?key?... (empty key for listing)"
+		exit 1
+	}
+
+	set filename [lindex $readdbspec 0]
+	set keys [lrange $readdbspec 1 end]
+
+	if { [catch {set fd [open $filename r]}] } {
+		puts stderr "ERROR: File not found: $filename"
+		exit 1
+	}
+
+	set con [read $fd]
+	close $fd
+
+	if {$keys == ""} {
+		puts [dict keys $con]
+		exit 0
+	}
+
+	set output ""
+
+	if { [dict exists $con {*}$keys] } {
+		puts [dict get $con {*}$keys]
+		exit 0
+	}
+
+	puts stderr "ERROR: key not found: $keys"
 	exit 1
 }
 
