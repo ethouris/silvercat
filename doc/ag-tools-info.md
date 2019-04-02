@@ -42,5 +42,5 @@ Two modes are currently supported:
 
 The project is currently hosted on Gitlab, here's the Wiki homepage:
 
-https://gitlab.org/silvercat/silvercat/wikis/home
+https://gitlab.com/silvercat/silvercat/wikis/home
 
