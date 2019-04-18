@@ -105,6 +105,7 @@ namespace eval fw {
 				}
 
 				# This means: package found, but not in the required version.
+				# puts "pkg-config FindPackage: $namev -$v $libspec"
 				return [list $name "-$v" $libspec]
 			} else {
 				$::g_debug "pkg-config with no version for '$namev':"
@@ -116,7 +117,7 @@ namespace eval fw {
 					return
 				}
 
-				return $namev
+				return [list $namev "" $libspec]
 			}
 		}
 
@@ -128,6 +129,7 @@ namespace eval fw {
 			vlog "Packages: $packages"
 			foreach p $packages {
 				lassign [FindPackage $p] name version spec
+				#puts "FindPackage: $name-$version ($spec)"
 				$::g_debug "pkg-config:FindPackage returned name '$name' version '$version' spec '$spec'"
 				if { [string index $version 0] == "-" } {
 					set v [string range $version 1 end]
@@ -152,7 +154,26 @@ namespace eval fw {
 				set ldflags [exec $pkg_config --libs {*}$ifstatic $name]
 				set cflags [exec $pkg_config --cflags {*}$ifstatic $name]
 
-				vlog "Data for $name: cflags='$cflags' ldflags='$ldflags'"
+				if { $spec == "static" } {
+					# Fix the -l flag so that the static library name is enforced
+					if { [dict exists $db language] } {
+						set pfl $agv::profile([dict get $db language])
+						set pfd $agv::profile(default)
+						set lflag [dict get $pfl link_lflag]
+						set ix [lsearch $ldflags $lflag*]
+						if { $ix == -1 } {
+							puts stderr "NOTE: library spec for $name has no $lflag flag"
+						} else {
+							set libname [pdip [dict get $pfd form:archive] $name]
+							lset ldflags $ix ${lflag}:$libname
+							puts stderr "NOTE: library spec for $name changed to ${lflag}:$libname"
+						}
+					} else {
+						puts stderr "NOTE: profile provides no -lang key, keeping orig library name"
+					}
+				}
+
+				vlog "PACKAGE: $name: cflags='$cflags' ldflags='$ldflags'"
 
 				dict lappend db ldflags {*}$ldflags
 				dict lappend db cflags {*}$cflags

@@ -17,6 +17,7 @@ set profiles {
 			compile_oflag "Usually -o"
 			link "Command to produce executable file"
 			link_oflag "Usually -o"
+			link_lflag "Usually -l"
 			linkdl "(optional) Command to produce dynamic library file (defaults to link with dlflag)"
 			dlflag "Flag that should be added when compiling a dynamic library, using 'link'"
 			archive "Command to create static libraries (archives)"
@@ -38,6 +39,7 @@ set profiles {
 			preproc "Command to run preprocessor (optional, can be empty if a language doesn't use one)"
 			cflags "Flags passed always to compile command (compile, gendep, preproc)"
 			ldflags "Flags passed to link command"
+			ldstatic "Option to link statically"
 			std_option "Compiler option to use given language standard"
 			std_values "key-value pairs to map general names of the language standard to value required to pass to that option"
 
@@ -63,6 +65,7 @@ set profiles {
 		default {
 			compile_oflag -o
 			link_oflag -o
+			link_lflag -l
 		}
 	}
 
@@ -102,6 +105,7 @@ set profiles {
 			incdirflag -I
 			std_option "-std="
 			archive "ar rcs"
+			ldstatic "-static"
 		}
 		c++ {
 			compile "g++ -c"
@@ -146,6 +150,7 @@ set profiles {
 			incdirflag -I
 			std_option "-std="
 			archive "ar rcs"
+			ldstatic "-static"
 		}
 		c++ {
 			compile "clang++ -c"
