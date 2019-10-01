@@ -337,7 +337,6 @@ if { "static" in $srt_libspec } {
 	# Main SRT support applications	
 	srtapp srt-live-transmit
 	srtapp srt-file-transmit
-	srtapp srt-multiplex
 
 	proc testapp {prg args} {
 		set name $prg
