@@ -29,7 +29,7 @@ if { $cc != "" } {
 	set GCCBASE $cc
 	set GXXBASE $cxx
 
-	source scripts/ag-profile-gcc-custom.tcl
+	source ag/ag-profile-gcc-custom.tcl
 	ag-profile gcc-custom
 
 # For CentOS 6 use special gcc-new profile.
@@ -44,3 +44,4 @@ if { $cc != "" } {
 	ag-profile gcc-native
 }
 
+# vim: ft=tclmake
