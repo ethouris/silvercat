@@ -16,3 +16,6 @@
 [submodule "projects-for-testing/srt.sub"]
 	path = projects-for-testing/srt.sub
 	url = https://github.com/Haivision/srt.git
+[submodule "projects-for-testing/universal-ctags.sub"]
+	path = projects-for-testing/universal-ctags.sub
+	url = https://github.com/universal-ctags/ctags.git

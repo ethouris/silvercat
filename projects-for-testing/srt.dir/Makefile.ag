@@ -107,12 +107,25 @@ puts "BUILD TYPE: $BUILD_TYPE  cflags: opt:$foptimize debug:$fdebug"
 
 ag-profile {c c++} -cflags -- $foptimize $fdebug
 
+# XXX EXPERIMENTAL for socket groups
+ag-profile {c c++} -D SRT_ENABLE_APP_READER
+
+# XXX Can be disabled, need to expose
+
+ag-profile {c c++} -D SRT_ENABLE_PKTINFO
+
 set ENABLE_HEAVY_LOGGING_DEFAULT [string match *debug* $BUILD_TYPE]
 
 if {[phas DISABLE_LOGGING]} {
 	set ENABLE_LOGGING 0
 } elseif { [pget ENABLE_LOGGING] != 0 } {
 	set ENABLE_LOGGING 1
+}
+
+if {[phas DISABLE_ENCRYPTION]} {
+	set ENABLE_ENCRYPTION 0
+} elseif { [pget ENABLE_ENCRYPTION] != 0 } {
+	set ENABLE_ENCRYPTION 1
 }
 
 if {![info exists ENABLE_HEAVY_LOGGING] } {
@@ -173,6 +186,17 @@ if { $ENABLE_LOGGING } {
 	}
 }
 
+if { $ENABLE_ENCRYPTION } {
+	ag $TARGET_srt -D SRT_ENABLE_ENCRYPTION=1
+}
+
+if { [phas ENABLE_GETNAMEINFO] } {
+	ag-profile {c c++} -D ENABLE_GETNAMEINFO=1
+}
+
+if { [pget ENABLE_PKTINFO] != 0 } {
+	ag-profile {c c++} -D ENABLE_PKTINFO=1
+}
 
 # XXX
 # As Silvercat doesn't support virtual libraries yet,
@@ -208,24 +232,39 @@ ag $TARGET_srt -install lib -libspec $srt_libspec
 
 # HaiCrypt
 
-set maf_haicrypt [ag-maf $TARGET_haicrypt haicrypt filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
-ag $TARGET_haicrypt -hidir srt
-#ag $TARGET_haicrypt -ldflags -- -lcrypto
-ag $TARGET_haicrypt -packages libcrypto
+pinit USE_ENCLIB openssl
 
+if {$ENABLE_ENCRYPTION} {
 
-if { $tcl_platform(os) == "Windows" } {
-	ag-maf $TARGET_haicrypt common filelist_win32.maf -s SOURCES -h "PUBLIC HEADERS"
+	# XXX Provide support for mbedtls and gnutls/nettle.
+	set USE_ENCLIB openssl
+
+	set maf_haicrypt [ag-maf $TARGET_haicrypt haicrypt filelist-$USE_ENCLIB.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
+	ag $TARGET_haicrypt -hidir srt
+	#ag $TARGET_haicrypt -ldflags -- -lcrypto
+	ag $TARGET_haicrypt -packages libcrypto
+
+	if { $tcl_platform(os) == "Windows" } {
+		ag-maf $TARGET_haicrypt common filelist_win32.maf -s SOURCES -h "PUBLIC HEADERS"
+	}
+
+	ag $TARGET_haicrypt -D {
+	   HAICRYPT_USE_OPENSSL_EVP=1
+	   HAICRYPT_USE_OPENSSL_AES
+	}
+
+	ag $TARGET_haicrypt -D USE_[string toupper $USE_ENCLIB]
 }
 
 # HaiSRT
 
 set maf_srt [ag-maf $TARGET_srt srtcore filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 ag $TARGET_srt -hidir srt
+
 if { [pget tcl_platform(os)] == "Linux" } {
 	ag $TARGET_srt -ldflags -- -lpthread
 
-	if { "shared" in [ag $TARGET_haicrypt ?libspec] } {
+	if {$ENABLE_ENCRYPTION && "shared" in [ag $TARGET_haicrypt ?libspec] } {
 		# Required by linking a shared library against a shared library
 		puts "NOTE: adding -fPIC due to linking libsrt.so against libcrypto. ADD AUTOMATIC RECOGNITION."
 		ag $TARGET_haicrypt -cflags -- -fPIC
@@ -256,11 +295,6 @@ ag-profile general -D {
    _GNU_SOURCE
 }
 
-ag $TARGET_haicrypt -D {
-   HAICRYPT_USE_OPENSSL_EVP=1
-   HAICRYPT_USE_OPENSSL_AES
-}
-
 set linux [expr {[pget tcl_platform(os)] == "Linux" }]
 
 if { $linux } {
@@ -269,26 +303,25 @@ if { $linux } {
 
 if { $SRT_BUILD_PROFILE } {
 	ag-profile general -cflags -- -g -pg
-
 	ag $TARGET_srt -ldflags -- -g -pg
 }
 
 # Now collect all source file names for tags
 
 pset sources [pluniq [concat [ag $TARGET_srt ?sources] [ag $TARGET_haicrypt ?sources]]]
+
+puts "SOURCES: $sources"
+
 pset sourcedirs srtcore common haicrypt testing apps
 
 # Extract all header files for tag generations
 
-set all_headers [concat [dict:sel $maf_srt -glob "* HEADERS"] [dict:sel $maf_haicrypt -glob "* HEADERS"]]
+set all_headers [dict:sel $maf_srt -glob "* HEADERS"]
+if {$ENABLE_ENCRYPTION} {
+	lappend all_headers {*}[dict:sel $maf_haicrypt -glob "* HEADERS"]
+}
 
 #puts "HEADERS FOR CTAGS: $all_headers"
-
-ag tags -type custom -s $sources $all_headers -runon demand  -output //tags -clean none -flags noclean distclean
-
-ag tags -command {
-	cd $::agv::srcdir && ctags --c++-kinds=+px -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px -R $sourcedirs
-}
 
 # Turn off compiling applications if static srt is unwanted
 # because they will want to link against the static one.
@@ -316,19 +349,13 @@ if { "static" in $srt_libspec } {
 		if { [pget tcl_platform(os)] == "Linux" } {
 			ag $name -ldflags -- -pthread
 		}
+
+		lappend ::appsources {*}[ag $name ?sources]
 	}
 
 	# Main SRT support applications	
 	srtapp srt-live-transmit
 	srtapp srt-file-transmit
-	srtapp srt-multiplex
-
-	set EXE $agv::p::exefor([info sharedlibextension])
-	# Leave old alias
-	ag stransmit -type custom -o stransmit$EXE -depends srt-live-transmit -command {
-		#cp -a srt-live-transmit$EXE stransmit$EXE
-		ln -s -f srt-live-transmit stransmit
-	}
 
 	proc testapp {prg args} {
 		set name $prg
@@ -339,6 +366,7 @@ if { "static" in $srt_libspec } {
 
 		# All source files are taken exclusively from corresponding maf file.
 		ag-maf $name testing $name.maf -s SOURCES
+		lappend ::appsources {*}[ag $name ?sources]
 		return $name
 	}
 
@@ -363,6 +391,9 @@ if { "static" in $srt_libspec } {
 	testapp-srt srt-test-relay
 	ag srt-test-relay -D SRT_ENABLE_VERBOSE_LOCK -imgen target-name
 
+	# Unblock when merged
+	#testapp-srt srt-test-multiplex
+
 	proc exampleapp {prg args} {
 		set name [file rootname $prg]
 
@@ -379,8 +410,20 @@ if { "static" in $srt_libspec } {
 	exampleapp recvfile.cpp apps/logsupport.cpp -std c++11
 	exampleapp testcapi-connect.c
 
+	puts "APP SOURCES: $appsources"
+
+	lappend sources {*}[pluniq $appsources]
+
 } else {
 	puts "NOTE: apps are disabled due to turning off static srt"
+}
+
+puts "ALL SOURCES: $sources"
+
+ag tags -type custom -s $sources $all_headers -runon demand  -output //tags -clean none -flags noclean distclean
+
+ag tags -command {
+	cd $::agv::srcdir && ctags --c++-kinds=+px -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px -R $sourcedirs
 }
 
 
