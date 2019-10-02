@@ -144,6 +144,10 @@ set haicrypt_libspec virtual
 
 set TARGET_srt srt
 
+# This is required for resolving haicrypt as virtual library,
+# which will be fixed when the virtual targets are supported.
+set TARGET_haicrypt haicrypt
+
 if { [pget WITH_SRT_NAME] != "" } {
 	set TARGET_srt $WITH_SRT_NAME
 }
@@ -152,17 +156,17 @@ if { [pget WITH_HAICRYPT_NAME] != "" } {
 	set TARGET_haicrypt $WITH_HAICRYPT_NAME
 }
 
-ag haicrypt -type library
+ag $TARGET_haicrypt -type library
 ag $TARGET_srt -type library
 
 
 if { $ENABLE_LOGGING } {
 	ag $TARGET_srt -D ENABLE_LOGGING=1
-	ag haicrypt -D ENABLE_LOGGING=1
+	ag $TARGET_haicrypt -D ENABLE_LOGGING=1
 
 	if {$ENABLE_HEAVY_LOGGING} {
 		ag $TARGET_srt -D ENABLE_HEAVY_LOGGING=1
-		ag haicrypt -D ENABLE_HEAVY_LOGGING=1
+		ag $TARGET_haicrypt -D ENABLE_HEAVY_LOGGING=1
 	}
 }
 
@@ -194,13 +198,13 @@ if { $haicrypt_libspec == "virtual" } {
 
 	# Turn off automatic compiling of this library. Just stays for formality.
 	# Set the language manually because without sources it won't be autodetected.
-	ag haicrypt -runon demand -language c++
+	ag $TARGET_haicrypt -runon demand -language c++
 
 	# Make all next settings for haicrypt apply directly on srt
 	set TARGET_haicrypt $TARGET_srt
 } else {
-	ag haicrypt -install lib -libspec $haicrypt_libspec
-	ag $TARGET_srt -depends haicrypt
+	ag $TARGET_haicrypt -install lib -libspec $haicrypt_libspec
+	ag $TARGET_srt -depends $TARGET_haicrypt
 }
 # }
 
@@ -214,26 +218,31 @@ ag $TARGET_srt -install lib -libspec $srt_libspec
 
 pinit USE_ENCLIB openssl
 
+set enclib_modules {
+	openssl {libssl libcrypto}
+	gnutls {gnutls nettle}
+	mbedtls {mbedtls mbedcrypto}
+}
+
 if {$ENABLE_ENCRYPTION} {
 
 	# XXX Provide support for mbedtls and gnutls/nettle.
 	set USE_ENCLIB openssl
 
-	set maf_haicrypt [ag-maf haicrypt haicrypt filelist-$USE_ENCLIB.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
-	ag haicrypt -hidir srt
-	#ag haicrypt -ldflags -- -lcrypto
-	ag haicrypt -packages libcrypto
+	set maf_haicrypt [ag-maf $TARGET_haicrypt haicrypt filelist-$USE_ENCLIB.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
+	ag $TARGET_haicrypt -hidir srt
+	ag $TARGET_haicrypt -packages [dict get $enclib_modules $USE_ENCLIB]
 
 	if { $tcl_platform(os) == "Windows" } {
-		ag-maf haicrypt common filelist_win32.maf -s SOURCES -h "PUBLIC HEADERS"
+		ag-maf $TARGET_haicrypt common filelist_win32.maf -s SOURCES -h "PUBLIC HEADERS"
 	}
 
-	ag haicrypt -D {
+	ag $TARGET_haicrypt -D {
 	   HAICRYPT_USE_OPENSSL_EVP=1
 	   HAICRYPT_USE_OPENSSL_AES
 	}
 
-	ag haicrypt -D USE_[string toupper $USE_ENCLIB]
+	ag $TARGET_haicrypt -D USE_[string toupper $USE_ENCLIB]
 }
 
 # HaiSRT
@@ -244,10 +253,10 @@ ag $TARGET_srt -hidir srt
 if { [pget tcl_platform(os)] == "Linux" } {
 	ag $TARGET_srt -ldflags -- -lpthread
 
-	if {$ENABLE_ENCRYPTION && "shared" in [ag haicrypt ?libspec] } {
+	if {"shared" in [ag $TARGET_srt ?libspec] } {
 		# Required by linking a shared library against a shared library
 		puts "NOTE: adding -fPIC due to linking libsrt.so against libcrypto. ADD AUTOMATIC RECOGNITION."
-		ag haicrypt -cflags -- -fPIC
+		ag $TARGET_haicrypt -cflags -- -fPIC
 	}
 }
 
@@ -289,7 +298,7 @@ if { $SRT_BUILD_PROFILE } {
 
 # Now collect all source file names for tags
 
-pset sources [pluniq [concat [ag $TARGET_srt ?sources] [ag haicrypt ?sources]]]
+pset sources [pluniq [concat [ag $TARGET_srt ?sources] [ag $TARGET_haicrypt ?sources]]]
 
 puts "SOURCES: $sources"
 
