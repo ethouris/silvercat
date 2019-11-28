@@ -311,12 +311,15 @@ proc number-cores {} {
 
 	switch -glob -- $::tcl_platform(os) {
 		CYGWIN* - Linux {
-		        set nc [exec grep "^processor\[ \t\]:" /proc/cpuinfo | wc -l]
+			if {[auto_execok nproc] == ""} {
+				error "The automatic core detection requires 'coreutils' to be installed."
+			}
+			set nc [exec nproc]
 		}
 
 		Darwin {
-		        set nr [exec sysctl hw.ncpu]
-		        set nc [string trim [lindex [split $nr :] 1]]
+		    set nr [exec sysctl hw.ncpu]
+		    set nc [string trim [lindex [split $nr :] 1]]
 		}
 
 		default {
