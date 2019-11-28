@@ -1,6 +1,6 @@
 package require ag 0.3
 
-set SRT_VERSION 1.3.0
+set SRT_VERSION 1.4.0
 
 lassign [split $SRT_VERSION .] SRT_VERSION_MAJOR SRT_VERSION_MINOR SRT_VERSION_PATCH
 
@@ -10,6 +10,35 @@ lassign [split $SRT_VERSION .] SRT_VERSION_MAJOR SRT_VERSION_MINOR SRT_VERSION_P
 # There's a separate script for that, pushed there in order not to make so much noise.
 source ag/ag-choose-toolchain-profile.tcl
 ag-profile posix-install
+
+if { [info exists STD] } {
+
+	# Parse the STD spec
+	set STD [string tolower $STD]
+	if { [string range $STD 0 2] != "c++" } {
+		error "STD variable should specify a C++ standard"
+	}
+	set stdver [string range $STD 3 end]
+	if { $stdver == "0x" } {
+		set stdver 11
+	}
+	set parts [split $stdver ""]
+	if { [lindex $parts 0] < 1 } {
+		set STD_APPS c++11
+		if { $stdver != "03" } {
+			error "C++0x series is only C++03"
+		}
+	} else {
+		if { $stdver ni {11 14 17} } {
+			error "$STD: unknown C++ standard"
+		}
+		set STD_APPS $STD
+	}
+	set STD_SRTLIB $STD
+} else {
+	set STD_SRTLIB "" ;# use compiler default
+	set STD_APPS c++11
+}
 
 # Experimental: Use a separate directory for intermediate files
 #namespace eval agv::p {
@@ -107,10 +136,6 @@ ag-profile {c c++} -cflags -- $foptimize $fdebug
 # XXX EXPERIMENTAL for socket groups
 ag-profile {c c++} -D SRT_ENABLE_APP_READER
 
-# XXX Can be disabled, need to expose
-
-ag-profile {c c++} -D SRT_ENABLE_PKTINFO
-
 set ENABLE_HEAVY_LOGGING_DEFAULT [string match *debug* $BUILD_TYPE]
 
 pinit ENABLE_LOGGING 1
@@ -178,8 +203,8 @@ if { [phas ENABLE_GETNAMEINFO] } {
 	ag-profile {c c++} -D ENABLE_GETNAMEINFO=1
 }
 
-if { [pget ENABLE_PKTINFO] != 0 } {
-	ag-profile {c c++} -D ENABLE_PKTINFO=1
+if { [phas ENABLE_PKTINFO] } {
+	ag-profile {c c++} -D SRT_ENABLE_PKTINFO=1
 }
 
 # XXX
@@ -210,6 +235,11 @@ if { $haicrypt_libspec == "virtual" } {
 
 ag $TARGET_srt -install lib -libspec $srt_libspec
 
+if {$STD_SRTLIB != ""} {
+	puts "NOTE: Using '$STD' as C++ standard for SRT"
+	ag $TARGET_srt -std $STD_SRTLIB
+}
+
 # Ok, predefined, now specify the sources and public headers
 
 # XXX on Windows add also srtcore/windows/win_time.cpp
@@ -224,6 +254,8 @@ set enclib_modules {
 	mbedtls {mbedtls mbedcrypto}
 }
 
+set sourcedirs ""
+
 if {$ENABLE_ENCRYPTION} {
 
 	# XXX Provide support for mbedtls and gnutls/nettle.
@@ -232,9 +264,11 @@ if {$ENABLE_ENCRYPTION} {
 	set maf_haicrypt [ag-maf $TARGET_haicrypt haicrypt filelist-$USE_ENCLIB.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 	ag $TARGET_haicrypt -hidir srt
 	ag $TARGET_haicrypt -packages [dict get $enclib_modules $USE_ENCLIB]
+	lappend sourcedirs haicrypt
 
 	if { $tcl_platform(os) == "Windows" } {
 		ag-maf $TARGET_haicrypt common filelist_win32.maf -s SOURCES -h "PUBLIC HEADERS"
+		lappend sourcedirs common
 	}
 
 	ag $TARGET_haicrypt -D {
@@ -249,6 +283,7 @@ if {$ENABLE_ENCRYPTION} {
 
 set maf_srt [ag-maf $TARGET_srt srtcore filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 ag $TARGET_srt -hidir srt
+lappend sourcedirs srtcore
 
 if { [pget tcl_platform(os)] == "Linux" } {
 	ag $TARGET_srt -ldflags -- -lpthread
@@ -261,7 +296,7 @@ if { [pget tcl_platform(os)] == "Linux" } {
 }
 
 # Instantiate and install config header
-ag-instantiate srtcore/version.h.in include/version.h
+ag-instantiate ag/version.h.in include/version.h
 ag $TARGET_srt -h //b:include/version.h
 # Include path must be added to all targets, as they will include it intermediately
 # (including apps)
@@ -302,8 +337,6 @@ pset sources [pluniq [concat [ag $TARGET_srt ?sources] [ag $TARGET_haicrypt ?sou
 
 puts "SOURCES: $sources"
 
-pset sourcedirs srtcore common haicrypt testing apps
-
 # Extract all header files for tag generations
 
 set all_headers [dict:sel $maf_srt -glob "* HEADERS"]
@@ -313,12 +346,17 @@ if {$ENABLE_ENCRYPTION} {
 
 #puts "HEADERS FOR CTAGS: $all_headers"
 
+set appdir apps
+#set appdeveldir devel-apps
+set appdeveldir testing
+set exampledir examples
+
 # Turn off compiling applications if static srt is unwanted
 # because they will want to link against the static one.
 if { "static" in $srt_libspec } {
 
 	proc sprogram {name} {
-		ag $name -type program -install bin -I apps common
+		ag $name -type program -install bin -I $::appdir common
 	}
 
 	proc srtapp {prg args} {
@@ -326,13 +364,13 @@ if { "static" in $srt_libspec } {
 		sprogram $name
 
 		# Application main source file
-		ag $name -s apps/$prg.cpp
+		ag $name -s $::appdir/$prg.cpp
 
 		# Apps use ALL FILES from the support source category.
-		ag-maf $name apps support.maf -s SOURCES
+		ag-maf $name $::appdir support.maf -s SOURCES
 
 		# All apps are C++11
-		ag $name -std c++11
+		ag $name -std $::STD_APPS
 
 		# Link against SRT
 		ag $name -depends $::TARGET_srt/static
@@ -347,6 +385,8 @@ if { "static" in $srt_libspec } {
 	srtapp srt-live-transmit
 	srtapp srt-file-transmit
 
+	lappend sourcedirs $appdir
+
 	proc testapp {prg args} {
 		set name $prg
 		sprogram $name
@@ -355,7 +395,7 @@ if { "static" in $srt_libspec } {
 		ag $name {*}$args
 
 		# All source files are taken exclusively from corresponding maf file.
-		ag-maf $name testing $name.maf -s SOURCES
+		ag-maf $name $::appdeveldir $name.maf -s SOURCES
 		lappend ::appsources {*}[ag $name ?sources]
 		return $name
 	}
@@ -363,7 +403,7 @@ if { "static" in $srt_libspec } {
 	proc testapp-srt {prg args} {
 		set name [testapp $prg {*}$args]
 
-		ag $name -std c++11
+		ag $name -std $::STD_APPS
 		ag $name -depends $::TARGET_srt/static
 		if { [pget tcl_platform(os)] == "Linux" } {
 			ag $name -ldflags -- -pthread
@@ -375,13 +415,15 @@ if { "static" in $srt_libspec } {
 	# - optional extra sources in common/ directory
 
 	testapp utility-test
-	testapp uriparser-test -D TEST -std c++11
+	testapp uriparser-test -D TEST -std $::STD_APPS
 	testapp-srt srt-test-live
 	testapp-srt srt-test-file
 	testapp-srt srt-test-relay
 	ag srt-test-relay -D SRT_ENABLE_VERBOSE_LOCK -imgen target-name
 
 	testapp-srt srt-test-multiplex
+
+	lappend sourcedirs $appdeveldir
 
 	proc exampleapp {prg args} {
 		set name [file rootname $prg]
@@ -395,8 +437,8 @@ if { "static" in $srt_libspec } {
 		}
 	}
 
-	exampleapp sendfile.cpp apps/logsupport.cpp -std c++11
-	exampleapp recvfile.cpp apps/logsupport.cpp -std c++11
+	exampleapp sendfile.cpp $appdir/logsupport.cpp -std $::STD_APPS
+	exampleapp recvfile.cpp $appdir/logsupport.cpp -std $::STD_APPS
 	exampleapp testcapi-connect.c
 
 	puts "APP SOURCES: $appsources"

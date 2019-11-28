@@ -15,7 +15,7 @@ set gcc_new_profile [subst {
 	c++ {
 		compile "$GXXBASE -c"
 			link "$GXXBASE"
-			linkdl "$GXXBASE -dynamic"
+			linkdl "$GXXBASE -shared"
 			gendep "$GXXBASE -MM"
 			depspec auto
 	}
@@ -23,7 +23,7 @@ set gcc_new_profile [subst {
 	c {
 		compile "$GCCBASE -c"
 			link "$GCCBASE"
-			linkdl "$GCCBASE -dynamic"
+			linkdl "$GCCBASE -shared"
 			gendep "$GCCBASE -MM"
 			depspec auto
 	}
