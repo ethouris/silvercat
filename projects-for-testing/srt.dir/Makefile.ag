@@ -397,6 +397,10 @@ if { "static" in $srt_libspec } {
 		# All source files are taken exclusively from corresponding maf file.
 		ag-maf $name $::appdeveldir $name.maf -s SOURCES
 		lappend ::appsources {*}[ag $name ?sources]
+
+		# Needed to use different IM file scheme as test sources
+		# may reuse existing component sources
+		ag $name -imgen target-name
 		return $name
 	}
 
@@ -424,6 +428,8 @@ if { "static" in $srt_libspec } {
 	testapp-srt srt-test-multiplex
 
 	lappend sourcedirs $appdeveldir
+
+	lappend sourcedirs test
 
 	proc exampleapp {prg args} {
 		set name [file rootname $prg]

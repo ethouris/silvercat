@@ -83,6 +83,7 @@ set keytype(single) {
 	name
 	type
 	headers-installdir
+	imgen
 }
 
 set keytype(command) {
