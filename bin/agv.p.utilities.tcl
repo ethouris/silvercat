@@ -384,6 +384,8 @@ proc MafRead {directory {filename {}}} {
 	set insection 0
 	set cursection "SOURCES"
 
+	set isgo 1
+
 	while { [gets $fd line] >= 0 } {
 		set oline [string trim $line]
 		if { $oline == "" } {
@@ -396,12 +398,82 @@ proc MafRead {directory {filename {}}} {
 
 		if { [regexp {^[A-Z ]} $line] } {
 			# A Section. Setup the section name
+			set isgo 1
+
+			if {[lsearch $line -] != -1} {
+
+				# Conditional
+				set parts ""
+				set index 0
+				foreach w $oline {
+					set v [lindex $parts $index]
+					if { $w == "-" } {
+						if {$v != ""} {
+							incr index
+						}
+						continue
+					}
+
+					if {$v == ""} {
+						lappend parts $w
+					} else {
+						lset parts $index [concat $v $w]
+					}
+				}
+
+				puts [list PARTS: $parts]
+
+				set oline [lindex $parts 0]
+
+				set orstate 0
+
+				# Now check conditions
+				for {set i 1} {$i < [llength $parts]} {incr i} {
+					# Every condition item contains multiple
+					# items. If so, all must be satisfied.
+					set andstate 1
+					foreach cond [lindex $parts $i] {
+						set invert 1
+						if { [string index $cond 0] == "!" } {
+							set invert 0
+							set cond [string range $cond 1 end]
+						}
+
+						# puts "CONDITION: [expr {$invert ? "" : "NOT "}] $cond"
+
+						set state [expr {[phas $cond] ? $invert : (!$invert)}]
+						set andstate [expr {$state && $andstate}]
+
+						# puts "STATE: THIS: $state AND: $andstate"
+
+						if {!$andstate} {
+							break
+						}
+					}
+
+					# puts "STATE: AND: $andstate TOTAL: $orstate"
+
+					set orstate [expr {$orstate || $andstate}]
+					if {$orstate} {
+						break
+					}
+				}
+
+				set isgo $orstate
+				# puts "STATE: FINAL: $isgo"
+			}
+
 			set cursection $oline
 			dict lappend output $cursection  ;# Make sure that the key exists
 			continue
 		}
 
-		dict lappend output $cursection [file join $directory $oline]
+		if {$isgo} {
+			dict lappend output $cursection [file join $directory $oline]
+			# puts "ADDING '$oline' to section '$cursection'"
+		} else {
+			# puts "SKIPPING '$oline' from section '$cursection'"
+		}
 	}
 
 	return $output
