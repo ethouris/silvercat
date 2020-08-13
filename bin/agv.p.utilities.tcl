@@ -421,7 +421,7 @@ proc MafRead {directory {filename {}}} {
 					}
 				}
 
-				puts [list PARTS: $parts]
+				#puts [list PARTS: $parts]
 
 				set oline [lindex $parts 0]
 
