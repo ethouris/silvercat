@@ -51,6 +51,9 @@ if { [info exists STD] } {
 
 # Ok, now variables
 
+pinit ENABLE_WIN32_SHARED 0
+pinit ENABLE_STDCXX_SYNC 0
+
 set srtstatic 0
 set srtshared 0
 
@@ -445,8 +448,8 @@ if { "static" in $srt_libspec } {
 		}
 	}
 
-	exampleapp sendfile.cpp $appdir/logsupport.cpp -std $::STD_APPS
-	exampleapp recvfile.cpp $appdir/logsupport.cpp -std $::STD_APPS
+	exampleapp sendfile.cpp -std $::STD_APPS
+	exampleapp recvfile.cpp -std $::STD_APPS
 	exampleapp testcapi-connect.c
 
 	puts "APP SOURCES: $appsources"
@@ -461,8 +464,11 @@ puts "ALL SOURCES: $sources"
 
 ag tags -type custom -s $sources $all_headers -runon demand  -output //tags -clean none -flags noclean distclean
 
+# Source dir as relative to the build path - needed where // would not be expanded
+set relsrcdir [prelocate // //b:]
+
 ag tags -command {
-	cd $::agv::srcdir && ctags --c++-kinds=+px -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px -R $sourcedirs
+	cd $relsrcdir && ctags --c++-kinds=+px -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px -R $sourcedirs
 }
 
 
