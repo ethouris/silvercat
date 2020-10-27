@@ -459,10 +459,21 @@ if { "static" in $srt_libspec } {
 
 puts "ALL SOURCES: $sources"
 
+set ignoredpp {
+	ATR_NOEXCEPT
+	ATR_FINAL
+	ATR_OVERRIDE
+}
+
+set ignoreppopt ""
+foreach i $ignoredpp {
+	lappend ignoreppopt -I $i
+}
+
 ag tags -type custom -s $sources $all_headers -runon demand  -output //tags -clean none -flags noclean distclean
 
 ag tags -command {
-	cd $::agv::srcdir && ctags --c++-kinds=+px -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px -R $sourcedirs
+	cd $::agv::srcdir && ctags --c++-kinds=+px $ignoreppopt -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px -R $sourcedirs
 }
 
 
