@@ -386,17 +386,23 @@ proc MafRead {directory {filename {}}} {
 
 	set isgo 1
 
+	set gotempty no
+
 	while { [gets $fd line] >= 0 } {
 		set oline [string trim $line]
 		if { $oline == "" } {
+			set gotempty yes
 			continue
 		}
+
+		set newsection $gotempty
+		set gotempty no
 
 		if { [string index $line 0] == "#" } {
 			continue
 		}
 
-		if { [regexp {^[A-Z ]} $line] } {
+		if { $newsection && [regexp {^[A-Z ]} $line] } {
 			# A Section. Setup the section name
 			set isgo 1
 

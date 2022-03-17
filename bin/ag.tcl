@@ -3564,7 +3564,9 @@ proc ag-subdir1 target {
 	#foreach vv [ag-interp-indir eval info vars agv::p::*] {
 	#	puts stderr "DEBUG:\t$vv = [ag-interp-indir eval set $vv]"
 	#}
-	ag-interp-indir eval source $cmd_exe
+
+	# XXX THIS SKIPS OPTIONS - must be somehow supported!
+	ag-interp-indir eval source [lindex $cmd_exe 0]
 
 	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Pinning in database."
 	set imported_targets ""

@@ -150,6 +150,7 @@ namespace eval fw {
 					set ifstatic "--static"
 				}
 
+				$::g_debug "PKG_CONFIG_PATH: [pget ::env(PKG_CONFIG_PATH)]"
 				$::g_debug "Calling pc: $pkg_config --libs --cflags $ifstatic $name"
 				set ldflags [exec $pkg_config --libs {*}$ifstatic $name]
 				set cflags [exec $pkg_config --cflags {*}$ifstatic $name]
@@ -174,6 +175,7 @@ namespace eval fw {
 				}
 
 				vlog "PACKAGE: $name: cflags='$cflags' ldflags='$ldflags'"
+				$::g_debug "PACKAGE: $name: cflags='$cflags' ldflags='$ldflags'"
 
 				dict lappend db ldflags {*}$ldflags
 				dict lappend db cflags {*}$cflags
