@@ -126,6 +126,16 @@ namespace eval agv {
 
 	variable libpath ""
 	namespace export libpath
+
+	# This is for user options; the build file defines the
+	# options and their defaults through the ag-option command.
+	# The user may override them through the long option.
+	variable useropt ""
+	variable useropt_filter ""
+	variable useropt_override ""
+	namespace export useropt
+	namespace export useropt_filter
+	namespace export useropt_override
 }
 
 namespace import agv::p::GenFileBase
@@ -672,6 +682,8 @@ proc ag-require args {
 		set in [expr { ($agv::libpath == "") ? ": no AG_LIB_PATH nor ../lib or ../share found" : " in: $agv::libpath" }]
 		error "Silvercat package '$a' not found$in"
 	}
+
+	return true
 }
 
 proc ag-profile {name args} {
@@ -707,6 +719,129 @@ proc ag-profile {name args} {
 
 	$::g_debug "Updated profile($name): $agv::profile([lindex $name 0])"
 	return $results
+}
+
+proc ag-option {name args} {
+
+	# This command requires that the name
+	# is always defined with -- in front and it is not allowed
+	# to have the config prefix.
+	# The name is notified in the array without the double-dash.
+	if {[string range $name 0 1] != "--"} {
+		error "ag-option: option name must start with -- part"
+	}
+
+	set name [string range $name 2 end]
+
+	# We use args in order to not use the mechanism of
+	# checking the default value that doesn't have a
+	# "null form", while we must allow also an empty string
+	# and whatever other kind of value for the "default value".
+
+	if {$args == ""} {
+		# Single name specified - requested to obtain the current value.
+		# Translate the error
+
+		if {![dict exists $agv::useropt $name]} {
+			error "ag-option: no such option --$name"
+		}
+
+		return [dict get $agv::useropt $name]
+	}
+
+	set others [lassign $args deflt filter]
+	if {$others != ""} {
+		error "Usage: ag-option --<name> <default-value> ?filter?"
+	}
+
+	lassign [split $name -] prefix
+
+	if {$prefix in {avail disable enable have use}} {
+		error "ag-option: option with a prefix reserved for config is not allowed"
+	}
+
+	if {$filter != ""} {
+		set fi [string index $filter 0]
+		if {$fi != "/" && $fi != "~" && $filter ni {number bool keyword}} {
+			error "ag-option: filter keywords allowed: number, bool, keyword or /regexp or ~globmatch"
+		}
+		dict set agv::useropt_filter $name $filter
+	}
+
+	dict set agv::useropt $name $deflt
+
+	# Now check if the user has already provided the value
+	# for the option.
+
+	if {[dict exists $agv::useropt_override $name]} {
+		lassign [OverrideUserOption $name [dict get $agv::useropt_override $name]] have msg
+		if {!$have} {
+			# Not possible at this place actually, so this is simply an error
+			error "ag-option: $msg"
+		}
+	}
+}
+
+# This function will be called in response to passing a --longoption
+# to the command line. If this resolves to an option, it will be set
+# and consumed, otherwise tried another possibility.
+proc OverrideUserOption {name value} {
+	if {![dict exists $agv::useropt $name]} {
+		return false
+	}
+
+	# Check if the value matches the filter
+	# If no filter, just set the value as is.
+	if {![dict exists $agv::useropt_filter $name]} {
+		dict set agv::useropt $name $value
+		return true
+	}
+
+	# Check if this is a correct filter
+	# Filter types can be:
+	#
+	# - regular expression - starts from /
+	# - glob match - starts from ~
+	# - special keyword:
+	#   - number: accepts a number, specified as hex/dec with dot etc.
+	#   - bool: standard Tcl boolean value
+	#   - keyword: same as /[a-zA-Z_][a-zA-Z_0-9]*
+
+	set filter [dict get $agv::useropt_filter $name]
+	if {[string index $filter 0] == "/"} {
+		set rex "^[string range $filter 1 end]\$"
+		if {![regexp $rex $value]} {
+			return [list false "The --$name option argument must match regexp '$rex'"]
+		}
+	} elseif {[string index $filter 0] == "~"} {
+		set mat [string range $filter 1 end]
+		if {![string match $mat $value]} {
+			return [list false "the --$name option argument must match pattern '$mat'"]
+		}
+	} else {
+		switch -- $filter {
+			number {
+				if {![string is entier $value] && ![string is double $value]} {
+					return [list false "the --$name option argument must be a number"]
+				}
+			}
+
+			bool {
+				if {![string is bool $value]} {
+					return [list false "the --$name option argument must be a boolean"]
+				}
+			}
+
+			keyword {
+				if {![regexp {^[a-zA-Z_][a-zA-Z_0-9]*$} $value]} {
+					return [list false "the --$name option argument must be a keyword string"]
+				}
+			}
+		}
+	}
+
+	dict set agv::useropt $name $value
+	return true
 }
 
 proc InstallProfile {name} {
@@ -3789,7 +3924,17 @@ foreach {ln lv} $g_longoptions {
 	set keyname [join $keyname -]
 
 	switch -- $entry {
+		avail {
+			# Avail: declare that an option with given name occurs
+			# in several alternatives, of which 'use' can select one.
+			# Example: ag-config avail crypto {openssl gnutls}
+			ag-config avail $keyname $lv
+		}
+
 		use {
+			# Use one of alternatives (if declared with avail) or
+			# use istallation path of a dependent library or package.
+			# Example: ag-config use crypto gnutls
 			ag-config use $keyname $lv
 		}
 
@@ -3822,6 +3967,12 @@ foreach {ln lv} $g_longoptions {
 			}
 			ag-config have $keyname $lv
 		}
+
+	    default {
+			# Blindly add this as user option override.
+			# This will be checked later.
+			dict set agv::useropt_override $ln $lv
+	    }
 	}
 }
 
