@@ -198,7 +198,7 @@ if { $ENABLE_LOGGING } {
 	}
 }
 
-if { $ENABLE_ENCRYPTION } {
+if { [phas ENABLE_ENCRYPTION] } {
 	ag $TARGET_srt -D SRT_ENABLE_ENCRYPTION=1
 }
 
@@ -208,6 +208,10 @@ if { [phas ENABLE_GETNAMEINFO] } {
 
 if { [phas ENABLE_PKTINFO] } {
 	ag-profile {c c++} -D SRT_ENABLE_PKTINFO=1
+}
+
+if { [phas ENABLE_BONDING] } {
+	ag $TARGET_srt -D ENABLE_BONDING=1
 }
 
 # XXX
@@ -427,8 +431,6 @@ if { "static" in $srt_libspec } {
 	testapp-srt srt-test-file
 	testapp-srt srt-test-relay
 	ag srt-test-relay -D SRT_ENABLE_VERBOSE_LOCK -imgen target-name
-	testapp-srt srt-test-switch
-	ag srt-test-switch -D SRT_ENABLE_VERBOSE_LOCK -imgen target-name
 
 	testapp-srt srt-test-multiplex
 

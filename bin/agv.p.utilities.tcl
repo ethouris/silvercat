@@ -447,7 +447,7 @@ proc MafRead {directory {filename {}}} {
 
 						# puts "CONDITION: [expr {$invert ? "" : "NOT "}] $cond"
 
-						set state [expr {[phas $cond] ? $invert : (!$invert)}]
+						set state [expr {[phas ::$cond] ? $invert : (!$invert)}]
 						set andstate [expr {$state && $andstate}]
 
 						# puts "STATE: THIS: $state AND: $andstate"
