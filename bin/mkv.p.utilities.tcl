@@ -534,12 +534,10 @@ proc process-options {argv optargd} {
 					# Otherwise we have --OPTION, check if you have --OPTION=ARGUMENT
 					# If so, then make: e = "--OPTION" follow = "ARGUMENT"
 
-					set follow [lrange $e $pos+1 end]
-					set e [lrange $e 0 $pos-1]
+					set follow [string range $e $pos+1 end]
+					set e [string range $e 0 $pos-1]
 				}
 				
-				#puts stderr "OPTION EXTRACTED: '$e' follow=$follow"
-
 				if { [info exists optargs($e)] } {
 					set oa $optargs($e)
 					if { [string index $oa 0] == "*" } {
@@ -581,7 +579,7 @@ proc process-options {argv optargd} {
 					}
 
 					break ; # meaning, continue iterations
-				} elseif { [string range $e 0 2] == "--" } {
+				} elseif { [string range $e 0 1] == "--" } {
 					lappend longoptions [string range $e 2 end] $follow
 					break
 				}
