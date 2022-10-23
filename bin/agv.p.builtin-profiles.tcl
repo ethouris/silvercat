@@ -66,6 +66,9 @@ set profiles {
 			compile_oflag -o
 			link_oflag -o
 			link_lflag -l
+
+			form:archive "lib%.a"
+			form:sharedroot "lib%"
 		}
 	}
 
@@ -90,9 +93,6 @@ set profiles {
 
 			cmd:makedir "mkdir -p"
 			cmd:install "cp -a"
-
-			form:archive "lib%.a"
-			form:sharedroot "lib%"
 		}
 	}
 
