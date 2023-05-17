@@ -219,6 +219,10 @@ if { [phas ENABLE_BONDING] } {
 	ag $TARGET_srt -D ENABLE_BONDING=1
 }
 
+if { [phas ENABLE_NEW_RCVBUFFER] } {
+	ag $TARGET_srt -D ENABLE_NEW_RCVBUFFER=1
+}
+
 # XXX
 # As Silvercat doesn't support virtual libraries yet,
 # we have to screw it up a little bit. This will be changed
@@ -457,6 +461,9 @@ if { "static" in $srt_libspec } {
 
 	exampleapp sendfile.cpp -std $::STD_APPS
 	exampleapp recvfile.cpp -std $::STD_APPS
+	exampleapp recvlive.cpp -std $::STD_APPS
+	exampleapp recvmsg.cpp -std $::STD_APPS
+	exampleapp sendmsg.cpp -std $::STD_APPS
 	exampleapp testcapi-connect.c
 
 	puts "APP SOURCES: $appsources"

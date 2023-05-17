@@ -73,10 +73,7 @@ set profiles {
 		default {
 			install:prefix /usr/local
 			installdir:bin {$prefix/bin}
-			# { XXX Mind that probably on 64-bit systems,
-			# the 64-bit libraries are installed in lib64,
-			# while lib is only for 32-bit libraries }
-			installdir:lib {$prefix/lib}
+			installdir:lib {$prefix/lib$libsuffix}
 
 			# { This should be somehow changed on Cygwin to
 			# point to same as installdir:bin
@@ -98,6 +95,8 @@ set profiles {
 
 	gcc-native {
 		default {
+			version "gcc -v"
+			targetspec "Target: "
 			depspec auto
 			depopt "-MMD -MF "
 			defineflag -D
@@ -144,6 +143,8 @@ set profiles {
 
 	clang-native {
 		default {
+			version "clang -v"
+			targetspec "Target: "
 			depspec auto
 			depopt "-MMD -MF "
 			defineflag -D
