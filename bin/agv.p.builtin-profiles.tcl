@@ -197,10 +197,10 @@ set profiles {
 			ldstatic "-static"
 		}
 		c++ {
-			compile "$cxx -c"
-			link "$cxx"
-			linkdl "$cxx -shared"
-			gendep "$cxx -MM"
+			compile "$cxx $cxxflags $cppflags -c"
+			link "$cxx $ldflags"
+			linkdl "$cxx $ldflags -shared"
+			gendep "$cxx $cxxflags $cppflags -MM"
 			std_values {
 				c++ c++03
 				c++98 c++03
@@ -220,10 +220,10 @@ set profiles {
 		}
 
 		c {
-			compile "$cc -c"
-			link "$cc"
-			linkdl "$cc -shared"
-			gendep "$cc -MM"
+			compile "$cc $cflags $cppflags -c"
+			link "$cc $ldflags"
+			linkdl "$cc $ldflags -shared"
+			gendep "$cc $cflags $cppflags -MM"
 			std_values {
 				c c90
 				"" ""
@@ -237,16 +237,23 @@ set profiles {
 	# profile and in-system installation profile.}
 }
 
+proc import-env {name deflt} {
+	set varname [string tolower $name]
+	upvar $varname vv
+	set vv [::pget ::env($name) $deflt]
+}
+
 # Using a procedure to avoid adding variables
 proc create_cc_custom {profiles} {
 	# Profiles created with the use of environment variables
 	set cc_custom_tpl [dict get $profiles %gcc-template]
 
-	set cc [::pget ::env(CC) cc]
-	set cxx [::pget ::env(CXX) c++]
-
-	# Possibly CFLAGS and CXXFLAGS variables should be also exported,
-	# leave it for later.
+	import-env CC cc
+	import-env CXX c++
+	import-env CFLAGS ""
+	import-env CXXFLAGS ""
+	import-env CPPFLAGS ""
+	import-env LDFLAGS ""
 
 	set cc_custom_resolv [subst $cc_custom_tpl]
 
