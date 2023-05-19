@@ -6,6 +6,10 @@ lassign [split $SRT_VERSION .] SRT_VERSION_MAJOR SRT_VERSION_MINOR SRT_VERSION_P
 
 #set VERSION 1.3.0
 
+if { [info exists ENABLE_CLANG_SANITIZER] } {
+	set USE_CLANG 1
+}
+
 # Choosing the toolchain profile is a little bit more complicated than just select one.
 # There's a separate script for that, pushed there in order not to make so much noise.
 source ag/ag-choose-toolchain-profile.tcl
@@ -43,6 +47,23 @@ if { $STD != "" } {
 } else {
 	set STD_SRTLIB "" ;# use compiler default
 	set STD_APPS c++11
+}
+
+set clang_sanitizers {
+	address
+	leak
+	thread
+	undefined
+	memory
+}
+
+if { [info exists ENABLE_CLANG_SANITIZER] } {
+
+	if {$ENABLE_CLANG_SANITIZER ni $clang_sanitizers} {
+		error "Invalid sanitizer: '$ENABLE_CLANG_SANITIZER'. Available: [join $clang_sanitizers { }]"
+	}
+	ag-profile {c c++} -cflags -- -fsanitize=$ENABLE_CLANG_SANITIZER
+	ag-profile {c c++} -ldflags -- -fsanitize=$ENABLE_CLANG_SANITIZER
 }
 
 # Experimental: Use a separate directory for intermediate files
@@ -194,30 +215,29 @@ if { [pget WITH_HAICRYPT_NAME] != "" } {
 ag $TARGET_haicrypt -type library
 ag $TARGET_srt -type library
 
+proc export-flag {name {target {}}} {
+	if { [uplevel phas $name] } {
+		if {$target == {}} {
+			ag-profile {c c++} -D $name=1
+		} else {
+			ag $target -D $name=1
+		}
+	}
+}
+
 # Use this flag for library and all apps
 if { $ENABLE_LOGGING } {
 	ag-profile general -D ENABLE_LOGGING=1
 
-	if {$ENABLE_HEAVY_LOGGING} {
-		ag-profile general -D ENABLE_HEAVY_LOGGING=1
-	}
+	export-flag ENABLE_HEAVY_LOGGING
 }
 
-if { [phas ENABLE_ENCRYPTION] } {
-	ag $TARGET_srt -D SRT_ENABLE_ENCRYPTION=1
-}
+export-flag ENABLE_ENCRYPTION $TARGET_srt
+export-flag ENABLE_GETNAMEINFO
+export-flag ENABLE_PKTINFO
+export-flag ENABLE_BONDING
+export-flag ENABLE_NEW_RCVBUFFER $TARGET_srt
 
-if { [phas ENABLE_GETNAMEINFO] } {
-	ag-profile {c c++} -D ENABLE_GETNAMEINFO=1
-}
-
-if { [phas ENABLE_PKTINFO] } {
-	ag-profile {c c++} -D SRT_ENABLE_PKTINFO=1
-}
-
-if { [phas ENABLE_BONDING] } {
-	ag $TARGET_srt -D ENABLE_BONDING=1
-}
 
 if { [phas ENABLE_NEW_RCVBUFFER] } {
 	ag $TARGET_srt -D ENABLE_NEW_RCVBUFFER=1
@@ -453,10 +473,12 @@ if { "static" in $srt_libspec } {
 		sprogram $name
 
 		ag $name -s examples/$prg {*}$args
+		ag-maf $name $::appdir support.maf -s SOURCES
 		ag $name -depends $::TARGET_srt/static
 		if { [pget tcl_platform(os)] == "Linux" } {
 			ag $name -ldflags -- -pthread
 		}
+		ag $name -std $::STD_APPS
 	}
 
 	exampleapp sendfile.cpp -std $::STD_APPS
