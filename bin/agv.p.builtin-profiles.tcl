@@ -75,11 +75,6 @@ set profiles {
 			installdir:bin {$prefix/bin}
 			installdir:lib {$prefix/lib$libsuffix}
 
-			# { This should be somehow changed on Cygwin to
-			# point to same as installdir:bin
-			# Mind also that it should usually refer to
-			# either installdir:lib or installdir:bin or
-			# even to something else completely. }
 			installdir:lib:shared {[expr {[info sharedlibextension] == ".dll" ? "$prefix/bin" : "$prefix/lib"}]}
 
 			installdir:data {$prefix/share}
@@ -188,10 +183,76 @@ set profiles {
 		}
 	}
 
+	%gcc-template {
+		default {
+			version "$cc -v"
+			targetspec "Target: "
+			depspec auto
+			depopt "-MMD -MF "
+			defineflag -D
+			libdirflag -L
+			incdirflag -I
+			std_option "-std="
+			archive "ar rcs"
+			ldstatic "-static"
+		}
+		c++ {
+			compile "$cxx -c"
+			link "$cxx"
+			linkdl "$cxx -shared"
+			gendep "$cxx -MM"
+			std_values {
+				c++ c++03
+				c++98 c++03
+				c++11 c++0x
+				c++14 c++1y
+				c++17 c++1z
+				gnu-c++98 gnu++98
+				gnu-c++03 gnu++03
+				gnu-c++0x gnu++0x
+				gnu-c++11 gnu++0x
+				gnu-c++1y gnu++1y
+				gnu-c++14 gnu++1y
+				gnu-c++1z gnu++1z
+				gnu-c++17 gnu++1z
+				"" ""
+			}
+		}
+
+		c {
+			compile "$cc -c"
+			link "$cc"
+			linkdl "$cc -shared"
+			gendep "$cc -MM"
+			std_values {
+				c c90
+				"" ""
+			}
+		}
+	}
+
 	# {XXX Currently you have to manually select profiles
 	# in the Makefile.ag.tcl file. There should be added
 	# a possibility to load a system-default C/C++ compiler
 	# profile and in-system installation profile.}
 }
+
+# Using a procedure to avoid adding variables
+proc create_cc_custom {profiles} {
+	# Profiles created with the use of environment variables
+	set cc_custom_tpl [dict get $profiles %gcc-template]
+
+	set cc [::pget ::env(CC) cc]
+	set cxx [::pget ::env(CXX) c++]
+
+	# Possibly CFLAGS and CXXFLAGS variables should be also exported,
+	# leave it for later.
+
+	set cc_custom_resolv [subst $cc_custom_tpl]
+
+	return $cc_custom_resolv
+}
+
+dict set profiles cc-custom [create_cc_custom $profiles]
 
 
