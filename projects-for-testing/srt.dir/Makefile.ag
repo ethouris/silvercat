@@ -236,12 +236,6 @@ export-flag ENABLE_ENCRYPTION $TARGET_srt
 export-flag ENABLE_GETNAMEINFO
 export-flag ENABLE_PKTINFO
 export-flag ENABLE_BONDING
-export-flag ENABLE_NEW_RCVBUFFER $TARGET_srt
-
-
-if { [phas ENABLE_NEW_RCVBUFFER] } {
-	ag $TARGET_srt -D ENABLE_NEW_RCVBUFFER=1
-}
 
 # XXX
 # As Silvercat doesn't support virtual libraries yet,
