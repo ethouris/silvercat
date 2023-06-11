@@ -859,16 +859,16 @@ proc InstallProfile {name} {
 		error "No such profile: $name"
 	}
 
-	set prof ""
+	set globpdefs ""
 	if { ![array exists agv::profile] } {
-		set prof [dict get $agv::p::profiles default]
-		$::g_debug "FRESH PROFILE: adding defaults: $prof"
+		set globpdefs [dict get $agv::p::profiles default]
+		$::g_debug "FRESH PROFILE: adding defaults: $globpdefs"
 	} else {
 		# Check if this 'existing profile' consists of only name.
 		# If so, still apply the defaults
 		if { [dict remove [pget agv::profile(default)] name] == "" } {
-			set prof [dict get $agv::p::profiles default]
-			$::g_debug "EXISTING PROFILE, but name only: - adding default: $prof"
+			set globpdefs [dict get $agv::p::profiles default]
+			$::g_debug "EXISTING PROFILE, but name only: - adding default: $globpdefs"
 		} else {
 			$::g_debug "EXISTING PROFILE: [array get agv::profile]"
 		}
@@ -882,11 +882,11 @@ proc InstallProfile {name} {
 	# Merge manually - official merging would overwrite keys and therefore
 	# possibly delete sub-keys, while we want
 	# to merge sub-keys.
-	array set tmp_prof $prof
+	array set tmp_prof $globpdefs
 
 	foreach {key val} $newprof {
 		# Skip keys that exist in "profile override" array
-		set tmp_prof($key) [dict merge [pget tmp_prof($key)] $val]
+		set tmp_prof($key) [dict merge [pget tmp_prof($key)] $val [pget agv::profile.$key]]
 	}
 
 	set prof [array get tmp_prof]
@@ -900,10 +900,21 @@ proc InstallProfile {name} {
 	}
 	set prof $o
 
+	# Update the target key, if possible
+
+	if {![dict exists $prof default target]} {
+		# Target not known, so check if components to obtain it exist
+		set vspec [dict:at $prof default version]
+		set tmark [dict:at $prof default targetspec]
+		if {$vspec != "" && $tmark != ""} {
+			set vline [exec {*}$vspec |& grep $tmark]
+			set tname [string trim [string range $vline [string length $tmark] end]]
+			dict set prof default target $tname
+		}
+	}
+
 	# Now merge every language item with default.
 	# Leave the default untouched, however.
-
-	set deflt [dict:at $prof default]
 	foreach lng [dict keys $prof] {
 		if { $lng == "default" } {
 			continue
@@ -1971,6 +1982,13 @@ proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 	# that will only update the target if it's stale or missing.
 	set installcmd [dict:at $agv::profile(default) cmd:install]
 
+	# This is a "compiler platform target", not build target.
+	set target [dict:at $agv::profile(default) target]
+
+	set libsuffix ""
+	if { [string match *64 [lindex [split $target -] 0]] } {
+		set libsuffix 64
+	}
 	set havedir ""
 
 	set icmd ""

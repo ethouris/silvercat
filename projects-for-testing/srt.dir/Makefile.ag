@@ -236,8 +236,6 @@ export-flag ENABLE_ENCRYPTION $TARGET_srt
 export-flag ENABLE_GETNAMEINFO
 export-flag ENABLE_PKTINFO
 export-flag ENABLE_BONDING
-export-flag ENABLE_NEW_RCVBUFFER $TARGET_srt
-
 
 # XXX
 # As Silvercat doesn't support virtual libraries yet,
@@ -479,6 +477,9 @@ if { "static" in $srt_libspec } {
 
 	exampleapp sendfile.cpp -std $::STD_APPS
 	exampleapp recvfile.cpp -std $::STD_APPS
+	exampleapp recvlive.cpp -std $::STD_APPS
+	exampleapp recvmsg.cpp -std $::STD_APPS
+	exampleapp sendmsg.cpp -std $::STD_APPS
 	exampleapp testcapi-connect.c
 
 	#puts "APP SOURCES: $appsources"

@@ -240,6 +240,22 @@ proc psearch {files args} {
 	return $out
 }
 
+proc pnormalize {relpath dir} {
+	# Simple replacement for file normalize
+	# when the path to which this one is relative
+	# is not [pwd].
+
+	if {[file pathtype $dir] != "absolute"} {
+		set dir [file normalize $dir]
+	}
+
+	set cwd [pwd]
+	cd $dir
+	set path [file normalize $relpath]
+	cd $cwd
+	return $path
+}
+
 proc prelocate {path {wd .} {top ""}} {
 
 	if { $wd == "." } {
@@ -248,7 +264,10 @@ proc prelocate {path {wd .} {top ""}} {
 		set wd [file normalize $wd]
 	}
 
+	set cwd [pwd]
+	cd $wd
 	set norm [file normalize $path]
+	cd $cwd
 
 	if { $norm == $wd } {
 		return .
@@ -915,6 +934,7 @@ set public_export_util [puncomment {
 	plist
 	pmap
 	prelocate
+	pnormalize
 	puncomment
 	pflat
 	pluniq
