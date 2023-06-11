@@ -291,7 +291,7 @@ set sourcedirs ""
 if {$ENABLE_ENCRYPTION} {
 
 	# XXX Provide support for mbedtls and gnutls/nettle.
-	set USE_ENCLIB openssl
+	pinit USE_ENCLIB openssl
 
 	set maf_haicrypt [ag-maf $TARGET_haicrypt haicrypt filelist-$USE_ENCLIB.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 	ag $TARGET_haicrypt -hidir srt
@@ -367,7 +367,7 @@ if { $SRT_BUILD_PROFILE } {
 
 pset sources [pluniq [concat [ag $TARGET_srt ?sources] [ag $TARGET_haicrypt ?sources]]]
 
-puts "SOURCES: $sources"
+#puts "SOURCES: $sources"
 
 # Extract all header files for tag generations
 
@@ -481,7 +481,7 @@ if { "static" in $srt_libspec } {
 	exampleapp recvfile.cpp -std $::STD_APPS
 	exampleapp testcapi-connect.c
 
-	puts "APP SOURCES: $appsources"
+	#puts "APP SOURCES: $appsources"
 
 	lappend sources {*}[pluniq $appsources]
 
@@ -489,7 +489,7 @@ if { "static" in $srt_libspec } {
 	puts "NOTE: apps are disabled due to turning off static srt"
 }
 
-puts "ALL SOURCES: $sources"
+#puts "ALL SOURCES: $sources"
 
 set ignoredpp {
 	ATR_NOEXCEPT

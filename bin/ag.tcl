@@ -435,11 +435,16 @@ proc CreateLibraryFilename {target type oldname} {
 		set rootname [file rootname $rootname]
 	}
 
+	set proflang [dict:at $agv::target($target) language]
+	if {$proflang == ""} {
+		set proflang general
+	}
+
 	if { $type == "shared" } {
-		set form [ag-profile general ?form:sharedroot]
+		set form [ag-profile $proflang ?form:sharedroot]
 		set outname [pdip $form $target][info sharedlibextension]
 	} elseif { $type == "static" } {
-		set form [ag-profile general ?form:archive]
+		set form [ag-profile $proflang ?form:archive]
 		set outname [pdip $form $target]
 	} else {
 		error "Invalid libspec '$type' for target '$target': use 'static' or 'shared'"
@@ -1012,6 +1017,7 @@ proc AccessDatabase {array target args} {
 		if { $query != "" } {
 			# This is considered argument for the query, which is a mask.
 			set current [dict:at $agv_db($target) {*}$keypath $query]
+			$::g_debug "AC/DB Q: keypath=$keypath query='$query'"
 			set out ""
 			foreach v $current {
 				if { [string match $o $v] } {

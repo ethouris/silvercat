@@ -645,7 +645,10 @@ proc prun args {
 # Return a list of transformed names from @c list.
 # Elements are put into the place of % in @c format.
 proc pdip {format list} {
-	set pproc {return [string map [list % \$n] $format]}
+	if {$format == ""} {
+		error "pdip: format cannot be empty"
+	}
+	set pproc {return [string map "[list % \$n]" $format]}
 	set pproc [subst -nocommands $pproc]
 	return [[namespace current]::pmap [list n $pproc] [[namespace current]::plist $list]]
 }

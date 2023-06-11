@@ -29,6 +29,8 @@ if { $cc != "" } {
 	set GCCBASE $cc
 	set GXXBASE $cxx
 
+	puts stderr "PROFILE: using custom based on CC=$cc"
+
 	source ag/ag-profile-gcc-custom.tcl
 	ag-profile gcc-custom
 
@@ -36,10 +38,12 @@ if { $cc != "" } {
 # Otherwise use the "current best default" gcc-native profile.
 } elseif { $tcl_platform(os) == "Darwin" || [phas USE_CLANG] } {
 
+	puts stderr "PROFILE: using clang"
 	# use clang on Mac.
 	ag-profile clang-native
 } else {
 
+	puts stderr "PROFILE: using gcc"
 	# Use the default profile.
 	ag-profile gcc-native
 }
