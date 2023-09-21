@@ -1376,8 +1376,10 @@ proc ProcessSources target {
 
 		set info [pget agv::fileinfo($s)]
 		set lang [dict:at $info language]
-
-		set depspec [dict:at $agv::profile($lang) depspec]
+		set depspec [dict:at $db depspec]
+		if {$depspec == ""} {
+			set depspec [dict:at $agv::profile($lang) depspec]
+		}
 		#$::g_debug "DEPSPEC: $depspec"
 		if { $depspec == "auto" } {
 			# Check if you have depends declared explicitly. If so, use them.
@@ -1422,7 +1424,10 @@ proc ProcessSources target {
 		set s [prelocate $s_abs $agv::builddir]
 
 		set lang [dict:at $info language]
-		set depspec [dict:at $agv::profile($lang) depspec]
+		set depspec [dict:at $db depspec]
+		if {$depspec == ""} {
+			set depspec [dict:at $agv::profile($lang) depspec]
+		}
 		set depopt [dict:at $agv::profile($lang) depopt]
 
 		set imgen [dict:at $db imgen]

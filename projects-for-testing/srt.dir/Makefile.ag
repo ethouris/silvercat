@@ -507,7 +507,7 @@ foreach i $ignoredpp {
 ag tags -type custom -s $sources $all_headers -runon demand  -output //tags -clean none -flags noclean distclean
 
 # Source dir as relative to the build path - needed where // would not be expanded
-set relsrcdir [prelocate // //b:]
+set relsrcdir [prelocate $agv::srcdir $agv::builddir]
 
 ag tags -command {
 	cd $relsrcdir && ctags --c++-kinds=+px $ignoreppopt -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px $ignoreppopt -R $sourcedirs
