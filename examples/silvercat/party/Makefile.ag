@@ -6,7 +6,8 @@ if { $agv::srcdir == $agv::toplevel } {
 	ag-profile posix-install
 }
 
-ag test -type custom -output ./test.txt -sources test.txt.in -install data -command {
+ag test -type custom -install data -usein runtime
+ag test -output test.txt -sources test.txt.in -command {
 	
 	# Commands in the -command key are taken literally, and the only
 	# substitition done here are those from Tcl langauge: \, [] and $.

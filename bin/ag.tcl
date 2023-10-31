@@ -1721,6 +1721,7 @@ proc Process:custom target {
 	set sources [dict:at $db sources]
 	set command [dict:at $db command]
 	set deps [dict:at $db depends]
+	set usein [dict:at $db usein]
 
 	foreach i {phony output outfile sources command deps} {
 		$::g_debug "...D: $i: [set $i]"
@@ -1762,11 +1763,29 @@ proc Process:custom target {
 	set prefix [dict:at $agv::profile(default) install:prefix]
 	set icmds [GenerateInstallCommand $icat $outfile $prefix $subdir]
 
-	if { $icmds != "" } {
+	set install_parts ""
+
+	if {[IsDataUsage $target runtime]} {
 		set installdeps [GetRuntimeDeps $target]
 		dict set db runtimedeps $installdeps
-		dict set db rules install-$target [list $outfile {*}$installdeps \n$icmds\n]
-		dict set db phony install-$target ""
+		if {$icmds != ""} {
+			dict set db rules install-$target-runtime [list $outfile {*}$installdeps \n$icmds\n]
+		}
+		dict set db phony install-$target-runtime ""
+		lappend install_parts install-$target-runtime
+	}
+
+	if {[IsDataUsage $target devel]} {
+		set installdeps [dict:at $db depends]
+		if {$icmds != ""} {
+			dict set db rules install-$target-devel [list $outfile {*}$installdeps \n$icmds\n]
+		}
+		dict set db phony install-$target-devel ""
+		lappend install_parts install-$target-devel
+	}
+
+	if {$install_parts != ""} {
+		dict set db phony install-$target {*}$install_parts
 	}
 
 	set agv::target($target) $db
@@ -1774,6 +1793,19 @@ proc Process:custom target {
 	DebugDisplayDatabase agv::target $target
 
 	Process:phony $target
+}
+
+# If -usein is not present, the default is runtime only.
+# Otherwise it can be runtime or devel or both
+proc IsDataUsage {target type} {
+	set db $agv::target($target)
+	set usein [dict:at $db usein]
+
+	if {$usein == ""} {
+		return [expr {$type == "runtime"}]
+	}
+
+	return [expr {$type in $usein}]
 }
 
 proc ReplaceVars s {
@@ -2000,7 +2032,8 @@ proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 
 	$::g_debug "GenerateInstallCommand cat=$cat outfiles={$outfiles} prefix=$prefix"
 
-	switch -- $cat {
+	lassign [split $cat :] catmain libspec
+	switch -- $catmain {
 		noinst - {} {
 			# Nothing.
 			set icmd "# Nothing to install for '$outfiles' (noinst)"
@@ -2012,8 +2045,7 @@ proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 			set form [dict:at $agv::profile(default) installdir:$cat]
 			# Fallback to form without extension, if not found
 			if { $form == "" } {
-				lassign [split $cat :] cat drop
-				set form [dict:at $agv::profile(default) installdir:$cat]
+				set form [dict:at $agv::profile(default) installdir:$catmain]
 			}
 
 			set instdir [subst $form]
@@ -2027,7 +2059,8 @@ proc GenerateInstallCommand {cat outfiles prefix {subdir ""}} {
 				}
 			} else {
 				puts stderr "+++AG WARNING: No installdir for -install $cat - can't install: $outfiles"
-				puts stderr "+++ Available: [dict filter $agv::profile(default) key installdir:*]"
+				set idirkeys [dict keys [dict filter $agv::profile(default) key installdir:*]]
+				puts stderr "+++ Available: [pmap {k {string range $k 11 end}} $idirkeys]"
 			}
 		}
 	}
@@ -2063,6 +2096,9 @@ proc GetFlatInstallDeps {target} {
 	return $all_install_deps
 }
 
+# XXX This is kinda controversial - it should extract only runtime
+# dependencies, so not devel, but then what is the static library
+# doing there?
 proc GetRuntimeDeps {target} {
 
 	set db $agv::target($target)
@@ -2088,9 +2124,13 @@ proc GetRuntimeDeps {target} {
 
 	# Cases when this function is called are:
 	switch -- $runtype {
-		data {
+		custom {
+			# Check if the target has a specified -usein devel, if so
+			# then it doesn't have runtime dependencies
+			if { ![IsDataUsage $target runtime] } {
+				return
+			}
 
-			# - data
 			# --> so find targets being data
 			#    - targets of type 'library' mean error
 			#    - targets of type 'program' are ignored (build dependency only)
@@ -2098,13 +2138,15 @@ proc GetRuntimeDeps {target} {
 			foreach d $deps {
 				lassign [CheckDefinedTarget $d shared] d spec
 				set ddb $agv::target($d)
-
 				set t [dict get $ddb type]
-				if { $t == "library" && $spec == "shared" } {
-					error "SEMANTIC: data target '$target' depends on library target '$d'"
+
+				if {$t == "custom"} {
+					if { [IsDataUsage $d runtime] } {
+						lappend deplist $d
+					}
 				}
 
-				if { $t == "data" } {
+				if { $t == "library" && $spec == "shared" } {
 					lappend deplist $d
 				}
 
@@ -2298,7 +2340,6 @@ proc ProcessCompileLink {type target} {
 		} else {
 			vlog "NOT adding phony $target -> $outfile because $outfile is $target or among '[dict:at $phony $target]'"
 		}
-
 	}
 
 	# Ok, ready. Write back to the database
