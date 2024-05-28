@@ -513,5 +513,16 @@ ag tags -command {
 	cd $relsrcdir && ctags --c++-kinds=+px $ignoreppopt -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px $ignoreppopt -R $sourcedirs
 }
 
+set gtest_inc $agv::builddir/googletest/googletest-src/googletest/include
+
+if {![file exists $agv::builddir/googletest] || ![file exists $agv::builddir/lib]} {
+	ag test-srt -type custom -runon demand -command {
+		@echo "You need to copy 'googletest' and 'lib' directories from a cmake build directory"
+		@echo "Then re-run agcat. Automatic installation is not yet supported."
+	}
+} else {
+	ag test-srt -type program -s [glob test/*.cpp] -I $gtest_inc -depends $TARGET_srt -L //b:lib -libs -- -lgtest -lgtest_main
+}
+
 
 # vim:ft=tclmake
