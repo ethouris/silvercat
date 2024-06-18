@@ -325,6 +325,12 @@ if { [pget tcl_platform(os)] == "Linux" } {
 	}
 }
 
+# In case when using clang, add -Wthread-safety
+if {$GCCBASE == "clang"} {
+	ag $TARGET_srt -cflags -- -Wthread-safety
+}
+
+
 # Instantiate and install config header
 ag-instantiate ag/version.h.in include/version.h
 ag $TARGET_srt -h //b:include/version.h
@@ -466,20 +472,20 @@ if { "static" in $srt_libspec } {
 
 		sprogram $name
 
-		ag $name -s examples/$prg {*}$args
+		ag $name -s examples/$prg {*}$args -imgen target-name
 		ag-maf $name $::appdir support.maf -s SOURCES
 		ag $name -depends $::TARGET_srt/static
 		if { [pget tcl_platform(os)] == "Linux" } {
 			ag $name -ldflags -- -pthread
 		}
-		ag $name -std $::STD_APPS
+		if {[file extension $prg] != ".c"} {
+			ag $name -std $::STD_APPS
+		}
 	}
 
 	exampleapp sendfile.cpp -std $::STD_APPS
 	exampleapp recvfile.cpp -std $::STD_APPS
 	exampleapp recvlive.cpp -std $::STD_APPS
-	exampleapp recvmsg.cpp -std $::STD_APPS
-	exampleapp sendmsg.cpp -std $::STD_APPS
 	exampleapp testcapi-connect.c
 
 	#puts "APP SOURCES: $appsources"

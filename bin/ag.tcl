@@ -2248,16 +2248,27 @@ proc GenerateInstallDevel {target prefix} {
 	set agv::target($target) $db
 }
 
-proc GenerateInstallRuntime {target prefix itarget} {
+proc GenerateInstallRuntime {target prefix itarget {type library}} {
 	set db $agv::target($target)
 
-	# Outputs may be multiple and defined according to libspec.
-	# We have to find libspec shared, otherwise this output is
-	# not to be generated
-	set libspec [dict:at $db libspec]
-	set ipos [lsearch $libspec shared]
-	if { $ipos != -1 } {
-		set outfile [ppipe dict:at $db output | set output % | lindex % $ipos]
+	set needgen 0
+	if {$type == "library"} {
+
+		# Outputs may be multiple and defined according to libspec.
+		# We have to find libspec shared, otherwise this output is
+		# not to be generated
+		set libspec [dict:at $db libspec]
+		set ipos [lsearch $libspec shared]
+		if {$ipos != -1} {
+			set neeedgen 1
+			set outfile [ppipe dict:at $db output | set output % | lindex % $ipos]
+		}
+	} elseif {$type == "program"} {
+		# Always generate for type "program"
+		set needgen 1
+		set outfile [dict:at $db output]
+	}
+	if { $needgen } {
 		if { $outfile == "" } {
 			error "IPE: no filename defined for shared library target: $target (libspec:$libspec output:$output)"
 		}
@@ -2280,7 +2291,7 @@ proc GenerateInstallRuntime {target prefix itarget} {
 }
 
 proc GenerateInstallTarget:program {target prefix} {
-	GenerateInstallRuntime $target $prefix install-$target
+	GenerateInstallRuntime $target $prefix install-$target program
 }
 
 proc ProcessCompileLink {type target} {

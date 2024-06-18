@@ -41,11 +41,15 @@ if { $cc != "" } {
 	puts stderr "PROFILE: using clang"
 	# use clang on Mac.
 	ag-profile clang-native
+	set GCCBASE clang
+	set GXXBASE clang++
 } else {
 
 	puts stderr "PROFILE: using gcc"
 	# Use the default profile.
 	ag-profile gcc-native
+	set GCCBASE gcc
+	set GXXBASE g++
 }
 
 # vim: ft=tclmake
