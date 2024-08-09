@@ -57,13 +57,21 @@ set clang_sanitizers {
 	memory
 }
 
-if { [info exists ENABLE_CLANG_SANITIZER] } {
+ag-option --san "none"
+
+puts "OPTION --san: [ag-option --san]"
+
+pinit ENABLE_CLANG_SANITIZER [ag-option --san]
+
+if { $ENABLE_CLANG_SANITIZER != "none" } {
 
 	if {$ENABLE_CLANG_SANITIZER ni $clang_sanitizers} {
 		error "Invalid sanitizer: '$ENABLE_CLANG_SANITIZER'. Available: [join $clang_sanitizers { }]"
 	}
 	ag-profile {c c++} -cflags -- -fsanitize=$ENABLE_CLANG_SANITIZER
 	ag-profile {c c++} -ldflags -- -fsanitize=$ENABLE_CLANG_SANITIZER
+
+	puts stderr "ENABLED SANITIZER: $ENABLE_CLANG_SANITIZER"
 }
 
 # Experimental: Use a separate directory for intermediate files
