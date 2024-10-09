@@ -1411,6 +1411,9 @@ proc ProcessSources target {
 	# Re-read cache after possible changes were applied by the fw.
 	set db $agv::target($target)
 
+	# Moved here because the framework could have added something
+	set target_deps [dict:at $db depends]
+
 	foreach s $sources {
 
 		set info [pget agv::fileinfo($s)]
@@ -1507,7 +1510,7 @@ proc ProcessSources target {
 		if { ![info exists mkv::generated($o)] } {
 
 			# Generate rule for the target
-			set rule [GenerateCompileRule $db $lang $o $s $deps]
+			set rule [GenerateCompileRule $db $lang $o $s $deps $target_deps]
 
 			# Don't override rules that are set already.
 			if { ![dict exists $rules $o] } {
@@ -1520,7 +1523,7 @@ proc ProcessSources target {
 			vlog "NOTE: already generated rule for $target:$o from $s"
 		} else {
 			# Generate rule for the target
-			set rule [GenerateCompileRule $db $lang $o $s $deps]
+			set rule [GenerateCompileRule $db $lang $o $s $deps $target_deps]
 			# Check if the rule is the same as the one already generated. If so, just pass on.
 			# If not, report error.
 			set oldrule [lindex $mkv::generated($o) 2]
@@ -2389,7 +2392,7 @@ proc CompleteFlags {db lang flagtype} {
 	return $flags
 }
 
-proc GenerateCompileRule {db lang objfile source deps} {
+proc GenerateCompileRule {db lang objfile source deps target_deps} {
 
 	if { ![info exists agv::profile($lang)] } {
 		error "Silvercat doesn't know how to compile '$lang' files.\nPlease select correct profile"
@@ -2406,6 +2409,10 @@ proc GenerateCompileRule {db lang objfile source deps} {
 	set compiler [dict get $agv::profile($lang) compile]
 	set oflag [dict get $agv::profile($lang) compile_oflag]
 
+	if {$target_deps != ""} {
+		append target_deps " "
+	}
+
 	set depflags ""
 	set depopt [dict:at $agv::profile($lang) depopt]
 	if { [string index $deps 0] == "<" && $depopt != "" } {
@@ -2413,9 +2420,11 @@ proc GenerateCompileRule {db lang objfile source deps} {
 		# It's predicted to generate depfile and object file in one step
 		set depfile [string range $deps 1 end]
 		set depflags "${depopt}$depfile"
-		set deps "$source $deps"
+		set deps "$source $target_deps$deps"
 
 		$::g_debug "ONESTEP dep for '$source': $deps ($source from $agv::srcdir relative to $agv::builddir)"
+	} else {
+		set deps "$target_deps$deps"
 	}
 
 	# Ok, now we need to readjust source and deps to be in
