@@ -57,21 +57,13 @@ set clang_sanitizers {
 	memory
 }
 
-ag-option --san "none"
-
-puts "OPTION --san: [ag-option --san]"
-
-pinit ENABLE_CLANG_SANITIZER [ag-option --san]
-
-if { $ENABLE_CLANG_SANITIZER != "none" } {
+if { [info exists ENABLE_CLANG_SANITIZER] } {
 
 	if {$ENABLE_CLANG_SANITIZER ni $clang_sanitizers} {
 		error "Invalid sanitizer: '$ENABLE_CLANG_SANITIZER'. Available: [join $clang_sanitizers { }]"
 	}
 	ag-profile {c c++} -cflags -- -fsanitize=$ENABLE_CLANG_SANITIZER
 	ag-profile {c c++} -ldflags -- -fsanitize=$ENABLE_CLANG_SANITIZER
-
-	puts stderr "ENABLED SANITIZER: $ENABLE_CLANG_SANITIZER"
 }
 
 # Experimental: Use a separate directory for intermediate files
@@ -321,7 +313,7 @@ if {$ENABLE_ENCRYPTION} {
 
 set maf_srt [ag-maf $TARGET_srt srtcore filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 ag $TARGET_srt -hidir srt
-lappend sourcedirs srtcore
+lappend sourcedirs srtcore logging
 
 if { [pget tcl_platform(os)] == "Linux" } {
 	ag $TARGET_srt -ldflags -- -lpthread
@@ -338,6 +330,18 @@ if {$GCCBASE == "clang"} {
 	ag $TARGET_srt -cflags -- -Wthread-safety
 }
 
+set DEFINE_SRT_VERSION_BUILD ""
+
+proc define_if_env {envcheck envvalue} {
+	if {[info exists ::env($envcheck)] && [info exists ::env($envvalue)]} {
+		set ::DEFINE_SRT_VERSION_BUILD "#define SRT_VERSION_BUILD $env($envvalue)"
+		set hdr [lindex [split $envcheck _] 0]
+		puts "Added build number to version header - $hdr detected"
+	}
+}
+
+define_if_env APPVEYOR_BUILD_NUMBER APPVEYOR_BUILD_NUMBER
+define_if_env TEAMCITY_VERSION CI_BUILD_COUNTER
 
 # Instantiate and install config header
 ag-instantiate ag/version.h.in include/version.h
