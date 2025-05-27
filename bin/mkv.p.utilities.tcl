@@ -29,6 +29,23 @@ proc pset {name args} {
 	return $var
 }
 
+proc pdset {name args} {
+	set parts [split $name .]
+	if {[llength $parts] == 1} {
+		return [pset $name {*}$args]
+	}
+
+	set path [lassign $parts varname]
+	set args [lassign $args arg1]
+	upvar $varname d
+
+    dict set d {*}$path [[namespace current]::pexpand $arg1]
+    foreach a $args {
+		dict append d {*}$path " [[namespace current]::pexpand $a]"
+    }
+	return $d
+}
+
 proc RegexpJoinWords {a1 args} {
 	set out "^($a1"
 	foreach a $args {
@@ -918,6 +935,7 @@ set public_export_util [puncomment {
 	plremove
 	pset
 	pset+
+	pdset
 	pinit
 	pget
 	phas

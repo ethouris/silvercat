@@ -105,7 +105,7 @@ namespace eval agv {
 	}
 
 	proc path {pathspec} {
-		return [ResolveOutput1 $pathspec s]
+		return [ResolveMetaPath $pathspec s]
 	}
 
 	# Per-file set information
@@ -145,6 +145,12 @@ proc RealSourcePath target {
 	# return [prelocate [file join $agv::srcdir $target]]
 
 	#vlog "*** RESOLVING '$target' in $agv::srcdir"
+
+	set metafixed [ResolveMetaPath $target s source]
+	if {$metafixed != $target} {
+		$::g_debug "RealSourcePath: resolved metapath '$target' -> '$metafixed'"
+		return $metafixed
+	}
 
 	# THIS IS "if" - repeatable by continue
 	while { [string first / $target] } {
@@ -1534,7 +1540,7 @@ proc ProcessSources target {
 				puts stderr "+++ $target: [string map {\n "; "} $rule]"
 				error "IM-file conflict. Please use -imgen with target-name or target-path"
 			} else {
-				puts stderr "+++ Note: Rule $s -> $o generated for both '$target' and '[lindex $mkv::generated($o) 0]'"
+				puts stderr "+++ Note: Rule $s -> $o for '$target' reuses one from '[lindex $mkv::generated($o) 0]'"
 			}
 
 			$::g_debug "NOT generating rule for '$o' - already generated for [lindex $mkv::generated($o) 0]:$s: $rule"
@@ -1601,6 +1607,18 @@ proc Process:library target {
 	set libspec [pget agv::target($target).libspec]
 	if { $libspec == "" } {
 		set libspec static
+	}
+
+	if { "virtual" in $libspec } {
+		if { $libspec != "virtual" } {
+			error "Libspec 'virtual' cannot coexist with other libspec types"
+		}
+
+		Process:phony $target
+
+		# Do not do anything else; the virtual library real
+		# processing is with the dependency resolution.
+		return
 	}
 
 	set ipos 0
@@ -1717,29 +1735,25 @@ proc Process:custom target {
 
 	set db $agv::target($target)
 
-	set rules [dict:at $db rules]
-	set phony [dict:at $db phony]
-	set output [dict:at $db output]
+	foreach v {rules phony output sources command depends usein} {
+		set $v [pget db.$v]
+	}
 	set outfile [ResolveOutput $output]
-	set sources [dict:at $db sources]
-	set command [dict:at $db command]
-	set deps [dict:at $db depends]
-	set usein [dict:at $db usein]
 
-	foreach i {phony output outfile sources command deps} {
+	foreach i {phony output outfile sources command depends} {
 		$::g_debug "...D: $i: [set $i]"
 	}
 
-	# This will throw exception if any target in deps list
+	# This will throw exception if any target in depends list
 	# cannot be resolved
-	set deptargets [ExtractActualDepends $target $deps]
+	set deptargets [ExtractActualDepends $target $depends]
 
 	set rsrc ""
 	foreach s $sources {
 		lappend rsrc [FixShadowPath $s]
 	}
 
-	$::g_debug "DEP TARGETS: $deps"
+	$::g_debug "DEP TARGETS: $depends"
 	$::g_debug "DEP ACTUAL: $deptargets"
 	$::g_debug "DEP SOURCES: $rsrc"
 
@@ -1758,13 +1772,45 @@ proc Process:custom target {
 		dict set rules $target $rule
 	}
 
-	dict set db rules $rules
-	dict set db phony $phony
+	pdset db.rules $rules
+	pdset db.phony $phony
 
 	set subdir [pget db.installdir]
 	set icat [pget db.install noinst]
 	set prefix [dict:at $agv::profile(default) install:prefix]
 	set icmds [GenerateInstallCommand $icat $outfile $prefix $subdir]
+
+	# --- OLD VERSION - check if anything requires update below
+   # --- if { $icmds != "" } {
+   # --- 	# When usein is empty, pin the installation directly to install.
+   # --- 	# Otherwise try devel or runtime.
+   # --- 	set installdeps [GetRuntimeDeps $target]
+   # --- 	switch -- [pget db.usein] {
+   # --- 		default {
+   # --- 			error "Wrong value for $target -usein - only 'devel' and 'runtime' or empty."
+   # --- 		}
+   # --- 
+   # --- 		devel {
+   # --- 			set inst install-$target-devel
+   # --- 		}
+   # --- 
+   # --- 		runtime {
+   # --- 			set inst install-$target-runtime
+   # --- 		}
+   # --- 
+   # --- 		"" {
+   # --- 			set inst install-$target
+   # --- 		}
+   # --- 	}
+   # --- 	pdset db.runtimedeps $installdeps
+   # --- 	# Double depth list required because pdset uses 'args' and therefore
+   # --- 	# strips the first list
+   # --- 	pdset db.rules $inst [list [list {*}$outfile {*}$installdeps \n$icmds\n]]
+   # --- 	pdset db.phony $inst ""
+   # --- 	if { $inst != "install-$target" } {
+   # --- 		pdset db.phony install-$target $inst
+   # --- 	}
+   # --- }
 
 	set install_parts ""
 
@@ -1949,7 +1995,7 @@ proc Process:pkg-config target {
 	PrependIfNotFound varset prefix [agv::prefix]
 
 	# Good, all data are now complete. Open the file and write to it.
-	set realtarget [file normalize [ResolveOutput1 $output b]]
+	set realtarget [file normalize [ResolveMetaPath $output b]]
 	$::g_debug "Creating PC file: $realtarget"
 
 	$::g_debug "PC VARIABLES: $varset"
@@ -2002,8 +2048,10 @@ proc Process:phony target {
 	# any earlier processing facility didn't set it at all.
 	# Normally a processing facility should set a rule to build the target.
 	set db $agv::target($target)
-	if { [dict:at $db phony $target] == "" && [dict:at $db rules $target] == "" } {
+	if { ![dict exists $db phony] && ![dict exists $db rules] } {
+	#if { [dict:at $db phony $target] == "" && [dict:at $db rules $target] == "" } 
 		vlog "TARGET '$target' has no rule nor phony - setting phony with '$deps'"
+		DebugDisplayDatabase agv::target $target
 		dict set agv::target($target) phony $target $deps
 	}
 }
@@ -2299,13 +2347,21 @@ proc GenerateInstallTarget:program {target prefix} {
 
 proc ProcessCompileLink {type target} {
 
+	# This function will add all sources from virtual dependent targets
+	# and import them into its own.
+	ProcessDependentVirtualTargets $target
+
 	# The ProcessLanguage does only language check for all sources
 	# and defines the languages for every source file as well as for
 	# the whole target. This is required prior to ProcessFlags, as
 	# it will have to ask profile about prospective additional options.
 	ProcessLanguage $target
 	ProcessFlags $target
-	ProcessSources $target
+
+	# Do not process sources for virtual targets
+	if {[dict:at $agv::target($target) libspec] != "virtual"} {
+		ProcessSources $target
+	}
 
 	# XXX BUG DEBUG - still a bug, remove after fixing
 	set prev_outfile [pget agv::target($target).filename]
@@ -2495,7 +2551,7 @@ proc GetTargetFile {target reqspec} {
 	set outs ""
 
 	foreach o $output {
-		set filename [ResolveOutput1 $o]
+		set filename [ResolveMetaPath $o]
 		if { $filename == "" } {
 			$::g_debug "ERROR: no filename set in this database:"
 			DebugDisplayDatabase agv::target $target
@@ -2522,9 +2578,15 @@ proc GetTargetFile {target reqspec} {
 # WINDOWS NOTES: Drive based path c:/sources/file.cc will work
 # normally because it's not //-based. However UNC paths won't work,
 # you should mount the path to a local drive to be able to use it.
-proc ResolveOutput1 {o {defaultprefix b}} {
+proc ResolveMetaPath {o {defaultprefix b} {otype output}} {
 
-	$::g_debug "ResolveOutput1: $o (default: $defaultprefix)"
+	$::g_debug "ResolveMetaPath: $o (default: $defaultprefix)"
+
+	if {$otype == "output"} {
+		set defaultoutput $agv::builddir
+	} else {
+		set defaultoutput $agv::srcdir
+	}
 
 	# The output path is expected to be a relative path
 	# to builddir, unless it's a path outside the toplevel,
@@ -2542,13 +2604,13 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 
 		if { [file pathtype $o] == "absolute" } {
 			$::g_debug "... ABSOLUTE PATH. Relocating to '$agv::builddir' up to '$agv::toplevel'"
-			return [prelocate $o $agv::builddir $agv::toplevel]
+			return [prelocate $o $defaultoutput $agv::toplevel]
 		}
 
 		# If this is a builddir, with prefix=builddir
 		# expected relative to builddir, then simply
 		# return it as is.
-		if { $defaultprefix == "b" } {
+		if { $defaultprefix == "b" && $otype == "output" } {
 			$::g_debug "... NO PREFIX, returning unchanged: $o"
 			return $o
 		}
@@ -2609,7 +2671,7 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 		error "Invalid special-path specification: $prefix (in $o) - use '//SPEC:', where SPEC is s, b, t"
 	}
 
-	set relpath [prelocate [file join $apath $restpath] $agv::builddir]
+	set relpath [prelocate [file join $apath $restpath] $defaultoutput]
 
 	return $relpath
 }
@@ -2617,13 +2679,51 @@ proc ResolveOutput1 {o {defaultprefix b}} {
 proc ResolveOutput {output {f b}} {
 	set out ""
 	foreach o $output {
-		lappend out [ResolveOutput1 $o $f]
+		lappend out [ResolveMetaPath $o $f]
 	}
 	return $out
 }
 
+proc ProcessDependentVirtualTargets {target} {
+	# This is a simple procedure that should check if
+	# a dependent target is a virtual target, and if so,
+	# extract its sources and also sources from its own
+	# dependencies
+
+	set dependent_sources ""
+	foreach d [dict:at $agv::target($target) depends] {
+		lassign [CheckDefinedTarget $d] d spec
+		$::g_debug "Checking $d for being virtual:"
+		if {[dict:at $agv::target($d) libspec] == "virtual"} {
+			$::g_debug "... yes, checking virtual target's sources"
+			lappend dependent_sources [GetVirtualTargetSources $d]
+		} else {
+			$::g_debug "... No, skipping"
+		}
+	}
+
+	if { $dependent_sources != "" } {
+		$::g_debug "Virtual-dependency sources for $target: $dependent_sources"
+		AccessDatabase agv::target $target -sources $dependent_sources
+	}
+}
+
+proc GetVirtualTargetSources {target} {
+
+	set own_sources [dict:at $agv::target($target) sources]
+	set dependent_sources ""
+	foreach d [dict:at $agv::target($target) depends] {
+		if {[dict:at $agv::target($target) libspec] == "virtual"} {
+			lappend dependent_sources {*}[GetVirtualTargetSources $d]
+		}
+	}
+	return [concat $own_sources $dependent_sources]
+}
+
 proc GetDependentLibraryTargets {target {transit transit}} {
-	set depends [dict:at $agv::target($target) depends]  
+	set db $agv::target($target)
+	set depends [dict:at $db depends]
+
 	$::g_debug "Getting dependent targets for '$target': $depends"
 	set libpacks ""
 	set langs ""
@@ -2663,7 +2763,7 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 		if { $type == "library" } {
 			set slibs ""
 			lassign [GetTargetFile $d $spec] libofile ospec
-			if { $libofile == "" } {
+			if { $spec != "virtual" && $libofile == "" } {
 				error "Target '$target' requested dep '$d' in spec '$spec' which '$d' does not define"
 			}
 			$::g_debug " -- LIBRARY DEP '$d': output=[pget agv::target($d).output] ($libofile) SPEC: $spec"
@@ -2681,14 +2781,16 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 			set langs [dict:at $agv::target($d) language]
 			$::g_debug " --- Target '$d' provides libraries: $libpack (language: $langs)"
 
+			set dtransit [pif {$spec in {static virtual}} ? transit : notransit]
+
 			# Recursive call
 			# XXX consider unwinding - recursion in Tcl is limited and may
 			# result in internal error!
 			if { $transit == "transit" || ( $spec == "static" && $tspec == "static") } {
 				$::g_debug "--> DESCENDING INTO '$d' to get transitive dependencies {"
-				lassign [GetDependentLibraryTargets $d [pif {$spec == {static}} ? transit : notransit]] adlibpacks adlangs addeps
-				$::g_debug "} LIBPACKS from dep '$d': $adlibpacks; DEPS: $addeps, adding if spec($spec) is static"
-				if { $spec == "static" } {
+				lassign [GetDependentLibraryTargets $d $dtransit] adlibpacks adlangs addeps addsrc
+				$::g_debug "} LIBPACKS from dep '$d': $adlibpacks; DEPS: $addeps, adding if spec($spec) is static, sources: $addsrc"
+				if { $dtransit == "transit" } {
 					lappend deps {*}$addeps
 				}
 				# Ok, according to the libpack rule, REQUESTER PROVIDER order should be kept.
@@ -2702,14 +2804,12 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 			if { $spec == "static" } {
 				$::g_debug "ADDING DEP: $libofile (because static library)"
 				lappend deps $libofile
-
 			} else {
 				$::g_debug "ADDING DEP: $d (because shared library)"
 				lappend deps $d
 			}
-
 		} elseif { $type == "object"} {
-			lappend libpacks [dict get $agv::target($d) output]
+			lappend libpacks {*}[dict get $agv::target($d) output]
 			# XXX Object file may also have dependencies!
 			$::g_debug "ADDING DEP: $d (because object file)"
 			lappend deps $d
@@ -2720,8 +2820,10 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 		}
 	}
 
-	$::g_debug " --- RESULTING DEP LDFLAGS FOR '$target': $libpacks"
-
+	$::g_debug " --- RESULTING DEP FOR '$target':"
+	$::g_debug " --- ... LIBPACKS: $libpacks"
+	$::g_debug " --- ... LANGS: $langs"
+	$::g_debug " --- ... DEPS: $deps"
 	return [list $libpacks $langs $deps]
 }
 
@@ -2778,7 +2880,12 @@ proc GenerateExecutableLinkRule {type db outfile} {
 
 	# Check dependent targets. If this target has any dependent targets of type library,
 	# add its library specification to the flags.
-	lassign [GetDependentLibraryTargets [dict:at $db name]] libpacks langs depends
+
+	# TODO PROBLEM: This function extracts sources TOO LATE.
+	# This whole processing should be done before processing sources
+	# of the processed targets, and here should be passed only results
+	# of this processing.
+	lassign [GetDependentLibraryTargets [dict:at $db name]] libpacks langs linkdeps
 	lappend langs {*}[dict:at $db language]
 	set langs [lsort -unique $langs]
 	set lang [agv::p::GetCommonLanguage $langs]
@@ -2817,7 +2924,7 @@ proc GenerateExecutableLinkRule {type db outfile} {
 	# (be it phony or file-based target). The exact file that
 	# needs to be used in the command is already extracted
 	# by GetDependentLibraryTargets.
-	set rule "$objects $depends {\n\t$command$maybe_dump\n}"
+	set rule "$objects $linkdeps {\n\t$command$maybe_dump\n}"
 
 	return $rule
 }
@@ -2948,7 +3055,7 @@ proc ag-do-genrules target {
 			-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr !options $maybe_options] $cmdf]}
 
 	ag reconfigure-ifneeded -type custom -flags noclean distclean -clean none -sources $::agfile -output Makefile.tcl $agv::generated_files \
-			-command {	%submake reconfigure}
+			-command {	%submake reconfigure} -install none
 
 	vlog "([pwd]) ALL DEFINED TARGETS:\n\t[array names agv::target]"
 		
@@ -3005,20 +3112,28 @@ proc GenerateMakefile {target fd} {
 		$::g_debug "NOTE: not generating any rules for toplevel target"
 	} else {
 
-		# Normal targets, including 'all'.
-		$::g_debug "Generating rules for '$target'"
-
 		set rules [dict:at $agv::target($target) rules]
 		set type [dict:at $agv::target($target) type]
 		set flags [dict:at $agv::target($target) flags]
 		set phony [dict:at $agv::target($target) phony]
+
+		# Normal targets, including 'all'.
+		$::g_debug "Generating rules for '$target':\n----\n$rules\n===="
 
 		# Rules is itself also a dictionary.
 		# Key is target file, value is dependencies and command at the end.
 
 		if { $rules != "" } {
 			foreach {tarfile data} $rules {
-				puts $fd "rule $tarfile $data"
+				$::g_debug "Rule '$tarfile', Data: '[string map {"\n" \\n} $data]'"
+				if {[string trim $tarfile] == ""} {
+					error "Target '$target': empty target at rule. Rules:\n$rules"
+				}
+				if {[llength $data] == 1 && [string trim [lindex $data 0]] == "" } {
+					puts $fd "# Not generating rule for '$tarfile': '[string map {"\n" \\n} $data]'"
+				} else {
+					puts $fd "rule $tarfile $data"
+				}
 				if { $flags != "" } {
 					puts $fd "setflags $tarfile $flags"
 				}
@@ -3595,11 +3710,11 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 	set wd [pwd]
 	cd $agv::builddir
 
-	# Use ResolveOutput1 to provide the correct path to the target file.
+	# Use ResolveMetaPath to provide the correct path to the target file.
 	# Exceptionally, this file is by default to be put into the build directory,
 	# just as all output files do.
 	# Users may override this default location by using the explicit // prefix.
-	set realtarget [file normalize [ResolveOutput1 $target b]]
+	set realtarget [file normalize [ResolveMetaPath $target b]]
 	cd $wd
 
 	set fd [open $realsource r]

@@ -2,10 +2,6 @@ package require ag 0.3
 
 set SRT_VERSION 1.4.0
 
-lassign [split $SRT_VERSION .] SRT_VERSION_MAJOR SRT_VERSION_MINOR SRT_VERSION_PATCH
-
-#set VERSION 1.3.0
-
 if { [info exists ENABLE_CLANG_SANITIZER] } {
 	set USE_CLANG 1
 }
@@ -109,7 +105,7 @@ if { [info exists WITH_LIBSPEC] } {
 # Enable static and shared by default
 # Disable shared only if ENABLE_STATIC
 # Keep default shared enabled due to LGPL requirements.
-# Keep also static enabled because it's required as a dependency of stransmit.
+# Keep also static enabled because it's required as a dependency of srt-live-transmit.
 
 if { $srtshared == 0 && $srtstatic == 1 } {
 	pset srt_libspec static
@@ -249,19 +245,21 @@ export-flag ENABLE_BONDING
 # the cflags defined in the depending library. Only linker flags
 # are just integrated linker flags for both. Here it's not preserved.
 # {
-if { $haicrypt_libspec == "virtual" } {
-
-	# Turn off automatic compiling of this library. Just stays for formality.
-	# Set the language manually because without sources it won't be autodetected.
-	ag $TARGET_haicrypt -runon demand -language c++
-
-	# Make all next settings for haicrypt apply directly on srt
-	set TARGET_haicrypt $TARGET_srt
-} else {
+# ---if { $haicrypt_libspec == "virtual" } {
+# ---
+# ---	# Turn off automatic compiling of this library. Just stays for formality.
+# ---	# Set the language manually because without sources it won't be autodetected.
+# ---	ag $TARGET_haicrypt -runon demand -language c++
+# ---
+# ---	# Make all next settings for haicrypt apply directly on srt
+# ---	set TARGET_haicrypt $TARGET_srt
+# ---} else {
 	ag $TARGET_haicrypt -install lib -libspec $haicrypt_libspec
 	ag $TARGET_srt -depends $TARGET_haicrypt
-}
+# --- }
 # }
+
+puts "SETUP: $TARGET_haicrypt -libspec $haicrypt_libspec"
 
 ag $TARGET_srt -install lib -libspec $srt_libspec
 
@@ -379,8 +377,7 @@ if { $SRT_BUILD_PROFILE } {
 	ag $TARGET_srt -ldflags -- -g -pg
 }
 
-# Now collect all source file names for tags
-
+# Now collect all source file names and directories for tags
 pset sources [pluniq [concat [ag $TARGET_srt ?sources] [ag $TARGET_haicrypt ?sources]]]
 
 #puts "SOURCES: $sources"
