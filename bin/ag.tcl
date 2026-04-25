@@ -1661,6 +1661,9 @@ proc Process:library target {
 
 	if { $outfiles != "" } {
 		dict set agv::target($target) output $outfiles
+		foreach type $libspec o $outfiles {
+			dict set agv::target($target) phony $target/$type $o
+		}
 	}
 
 	ProcessCompileLink library $target
