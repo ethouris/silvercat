@@ -2911,7 +2911,13 @@ proc ag-do-genrules target {
 		}
 	}
 
-	set agfile_inmake [prelocate $::agfile $agv::builddir]
+	if {$::agfiledir == ""} {
+		set agfilepath $::agfile
+	} else {
+		set agfilepath [file join $::agfiledir $::agfile]
+	}
+
+	set agfile_inmake [prelocate $agfilepath $agv::builddir]
 	set variables [pget ::g_variables]
 	set varexpr ""
 	foreach {vname vval} $variables {
