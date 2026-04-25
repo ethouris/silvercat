@@ -40,7 +40,7 @@ Two modes are currently supported:
 * agcat make - Synthesize rules and execute them in place
 
 
-The project is currently hosted on Gitlab, here's the Wiki homepage:
+The project is currently hosted on Github, here's the Wiki homepage:
 
-https://gitlab.com/silvercat/silvercat/wikis/home
+https://github.com/ethouris/silvercat/wiki
 
