@@ -31,7 +31,7 @@ ag-export TOP
 
 # To be automatically added by configurator
 
-ag-profile c++ -incdir $agv::toplevel
+ag-profile c++ -incdir $agv::toplevel $agv::builddir
 
 ag-profile c++ -defines HAVE_CONFIG_H=1
 

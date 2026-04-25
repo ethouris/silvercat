@@ -12,6 +12,9 @@ ag-export {
 ag-profile c++ -incdir $agv::srcdir/FbTk
 ag-profile general -depspec cached
 
+set VERSION 1.3.5
+ag-instantiate //../version.h.in
+
 set defaults_tpl_h {
 // This file is generated from Makefile. Do not edit!
 #include <string>
@@ -51,7 +54,7 @@ proc generate-defaults-file {indir} {
 	if { [file isdirectory $gitdir] && [file readable $gitdir/HEAD] } {
 		set head [pread $gitdir/HEAD]
 		set headref [string trim [lindex [split $head " "] 1]]
-		set sver [pread $gitdir/$headref]
+		set sver [string trim [pread $gitdir/$headref]]
 	} else {
 		set sver this_is_tar_ball_build
 	}
