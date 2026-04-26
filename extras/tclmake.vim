@@ -11,10 +11,8 @@ elseif exists("b:current_syntax")
 	" We've passed Tcl syntax, but not yet this file. Continue
   else
 	" We have something else, so clear syntax and apply Tcl syntax first
+	unlet b:current_syntax
 	syntax clear
-	if exists("b:current_syntax")
-		unlet b:current_syntax
-	endif
 	source $VIMRUNTIME/syntax/tcl.vim
   endif
 else
@@ -50,6 +48,7 @@ TclmakeDefineCommand ag-make
 TclmakeDefineCommand ag-export
 TclmakeDefineCommand ag-config
 TclmakeDefineCommand ag-maf
+TclmakeDefineCommand ag-require
 
 
 syn keyword silvercatSwitch contained -s -sources -h -headers -nh -noinst-headers -hidir
