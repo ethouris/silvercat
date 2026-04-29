@@ -15,6 +15,6 @@ all $(ANYTHINGELSE): check-ag-capable
 # This should check if Silvercat is installed and informs about any problems
 
 check-ag-capable:
-	@M=`type -p agmake` && C=`type -p agcat` || (echo "Silvercat not installed, please install from http://gitlab.com/silvercat/silvercat"; echo; exit 1)
+	@M=`type -p agmake` && C=`type -p agcat` || (echo "Silvercat not installed, please install from http://github.com/ethouris/silvercat"; echo; exit 1)
 
 
