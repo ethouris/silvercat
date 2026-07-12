@@ -64,20 +64,14 @@
 #include "FbTk/IntMenuItem.hh"
 #include "FbTk/RadioMenuItem.hh"
 
-#ifdef HAVE_SYS_STAT_H
 #include <sys/types.h>
 #include <sys/stat.h>
-#endif // HAVE_SYS_STAT_H
 
 #include <X11/Xatom.h>
 
 #include <iostream>
 #include <algorithm>
-#ifdef HAVE_CSTRING
-  #include <cstring>
-#else
-  #include <string.h>
-#endif
+#include <cstring>
 
 using std::string;
 using std::pair;

@@ -44,17 +44,13 @@
 extern "C" {
 #include <nl_types.h>
 }
-#elif defined(__CYGWIN__) || defined(__EMX__) || defined(__APPLE__)
-#ifdef __cplusplus
+#else
 extern "C" {
-#endif // __cplusplus
 typedef int nl_catd;
 char *catgets(nl_catd cat, int set_number, int message_number, char *message);
 nl_catd catopen(char *name, int flag);
 void catclose(nl_catd cat);
-#ifdef __cplusplus
 }
-#endif // __cplusplus
 
 #endif // HAVE_NL_TYPES_H
 

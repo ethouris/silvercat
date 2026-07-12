@@ -77,6 +77,41 @@ namespace eval agv {
 		source $here/agv.p.builtin-profiles.tcl
 		source $here/agv.p.builtin-frameworks.tcl
 
+		# Target Key Aliases
+
+		set key_alias [puncomment {
+			s	sources
+			h	headers
+			nh	noinst-headers
+			hidir headers-installdir
+			idir installdir
+			o	output
+			I	incdir
+			D	defines
+			L	libdir
+			libs ldflags
+			lflags ldflags
+
+			# XXX WARNING! elements of 'depends' list must be filtered through [CheckDefinedTarget]!
+			requires depends
+		}]
+
+		# config_avail: options available for use (a list).
+		# The one selected as currently used is in config_use
+		# Items in avail can be prepended by *, which means that
+		# multiple values are allowed. The first option in avail
+		# is considered default; in case of options prepended by *
+		# all options with * are considered default until single *.
+		array set config_avail ""
+		array set config_use ""
+
+		# boolean enablers - controlled by enable/disable. Default
+		# should be explicitly specified.
+		array set config_enable "" 
+
+		# A property of the build system, usually set through ag-check tools
+		array set config_have ""
+
 		# Variable and procedures that should be exported from
 		# the silverball file to the makefile.
 		set exported_proc ""
@@ -112,6 +147,10 @@ namespace eval agv {
 	variable fileinfo
 	namespace export fileinfo
 
+	# Dictionary with some its own data, not shared with targets
+	variable project
+	namespace export project
+
 	# Private variable of genrules. Marks targets for which
 	# the rules have been already generated.
 	variable genrules_done ""
@@ -133,16 +172,22 @@ namespace eval agv {
 	variable useropt ""
 	variable useropt_filter ""
 	variable useropt_override ""
+	variable useropt_help ""
+	variable config_override ""
+	variable config_help ""
 	namespace export useropt
 	namespace export useropt_filter
 	namespace export useropt_override
+	namespace export config_override
 }
 
 namespace import agv::p::GenFileBase
 
 proc RealSourcePath target {
 
-	# return [prelocate [file join $agv::srcdir $target]]
+	if { [string range $target 0 1] == "//" } {
+		set target [prelocate [file join $agv::srcdir $target]]
+	}
 
 	#vlog "*** RESOLVING '$target' in $agv::srcdir"
 
@@ -321,6 +366,30 @@ proc ProcessFlags target {
 
 	set flagmap [dict:filterkey $db ldflags libdir std]
 	dict set agv::target($target) ldflags [TranslateFlags $lang $flagmap ldflags prepend]
+
+	# Optimization and debug info flags
+	set optflag [pget agv::target($target).optlevel]
+	set debflag [pget agv::target($target).debinfo]
+
+	if {$optflag != ""} {
+		set optkey build:opt$oprflag
+		if {![dict exists agv::profile(default) $optkey]} {
+			error "-optlevel: build:opt$optflag not found in the profile"
+		}
+		dict lappend agv::target($target) cflags [dict get agv::profile(default) $optkey]
+	}
+
+	if {$debflag != ""} {
+		set bval [pget agv::profile(default).build:debuginfo]
+		if {$bval == ""} {
+			error "-debuginfo: no build:debuginfo key found in the profile"
+		}
+
+		if {$debflag} {
+			dict lappend agv::target($target) cflags $bval
+			dict lappend agv::target($target) ldflags $bval
+		}
+	}
 
 # --- 	set defines_flag [pget agv::profile($lang).defineflag]
 # --- 	set incdir_flag [pget agv::profile($lang).incdirflag]
@@ -691,6 +760,213 @@ proc ag-require args {
 	return true
 }
 
+# ag-config is required in the Silverball script to declare
+# available config options. Specifications passed in the command
+# line are considered after the script. That's why some options
+# are possible only in query mode.
+proc ag-config {category key args} {
+
+	# Asking blindly an unknown key can be erroneous,
+	# so a possibility exists to just ask by ? for just
+	# the key
+
+	if {$args == "?"} {
+		# Query key
+		return [info exists "::agv::p::config_${category}($key)"]
+	}
+
+	if {$args == ""} {
+		set outval [pget ::agv::p::config_${category}($key)]
+
+		#puts stderr "AG-CONFIG $category $key: QUERY - OUT: $outval"
+
+		if {$category == "use" && $outval == ""} {
+			# Check avail for default value
+			if {![info exists agv::p::config_avail($key)]} {
+				error "ag-config avail $key: entry not defined"
+			}
+			set avail $::agv::p::config_avail($key)
+			if {$avail != "*"} {
+				if {[llength $avail] == 1} {
+					set outval [set ::agv::p::config_${category}($key) $avail]
+				} else {
+					# Multiple, check if multi-val
+					if {[string index $avail 0] == "*"} {
+						set a0 [lindex $avail 0]
+						set n [lsearch -exact $avail *]
+						if {$n == -1} {
+							set outval [string range $a0 1 end]
+						} elseif {$n == 0} {
+							# Leave empty
+						}
+					} else {
+						set outval [lindex $avail 0]
+					}
+				}
+				set ::agv::p::config_use($key) $outval
+			}
+		}
+		# Query mode
+		if { ![info exists "::agv::p::config_${category}($key)"] } {
+			error "ag-config $category $key: this key doesn't exist"
+		}
+
+		return $outval
+	}
+
+	#puts stderr "AG-CONFIG $category $key: DEFINE ORIGINAL: $args"
+
+	# Setting facility.
+	# Before the value, you can add options.
+	set options ""
+
+	# XXX This is a bit wrong; there are some options added OOTB
+	# and they can have arguments; -h is one of them. It's not even
+	# handled here.
+
+	while {[string index $args 0] == "-"} {
+		set args [lassign $args first]
+		if {$first == "--"} {
+			break
+		}
+		lappend options $first
+	}
+
+	# Usage: ag-config avail <KEY> [options] values...
+	# Options:
+	# -check: specified values are added * at front
+	# -add: given values are appended to the existing list
+	#
+	# With -add, the avail list is only modified.
+	# Without -add, the list is set completely anew and the
+	# corresponding use is reset to an empty string.
+	#
+	# Normal method: add the value as is. Then use can only
+	# select one of these values.
+	#
+	# ag-config avail enclib openssl gnutls mbedtls
+	#
+	# Multi method: add the value with * in the beginning,
+	# or use -check option. Then use can select multiple
+	# values from it. Special cases:
+	# 
+	# - if multiple values shall constitute the default form,
+	#   the * on the way marks the end of these values. For
+	#   this case you can't use the -check option.
+	# - if the list contains only a single *, then any value
+	#   is allowed; this is required if you want to have a
+	#   free-form use
+	#
+	# ag-config avail tools *unittests *format *lint
+	# OR:
+	# ag-config avail tools -check unittests format lint
+	#
+	# Both methods can be mixed, although use cannot mix
+	# multi- and single values.
+
+	switch -- $category {
+		avail {
+			if { "-check" in $options} {
+				# This is an alternative to specify *value
+				set val ""
+				foreach v $args {
+					lappend val *$v
+				}
+				set args $val
+			}
+
+			if { "-add" in $options } {
+				lappend ::agv::p::config_avail($key) $args
+			} else {
+				set ::agv::p::config_avail($key) $args
+			}
+
+			# Check (possibly again) the overrides.
+			if {[dict exists $::agv::config_override use $key]} {
+				set vals [dict get $::agv::config_override use $key]
+				CheckSetConfigUse $key $vals
+			}
+		}
+
+		use {
+			# Ok, if you have the "use" call inside the build script,
+			# the only thing it does is to change the default value. If the
+			# override is available, simply do nothing (it's considered set already).
+
+			# For `use` there must exist a corresponding `avail`.
+			# If it doesn't, this must be rejected.
+			if {![info exists ::agv::p::config_avail($key)]} {
+				error "To --use an option, there must exist --avail-$key"
+			}
+
+			# So, the trick relies on that we check if there is override provided.
+			# If it is, we use the value from override. Otherwise we use the passed one.
+			if {[dict exists $agv::config_override use $key]} {
+				# Note: we state that as we have passed already the check for avail,
+				# then this function should have been called and set the override value.
+				# So if it's found, just do nothing.
+				#puts stderr "AG-CONFIG $category $key: OVERRIDE: [dict get $agv::config_override use $key]"
+				return
+			}
+
+			CheckSetConfigUse $key $args
+		}
+
+		enable - have {
+			# Enable/disable/have is simple. Just write the value
+
+			if {![string is boolean $args]} {
+				error "ag-config $category $key: Use boolean value, not $args"
+			}
+
+			set varname "::agv::p::config_${category}($key)"
+
+			if {[dict exists $agv::config_override $category $key]} {
+				set oval [dict get $agv::config_override $category $key]
+				if {$oval == ""} {
+					set oval on
+				}
+				if {![string is boolean $args]} {
+					error "ag-config: For --$category-$key use boolean value or empty"
+				}
+				#puts stderr "AG-CONFIG $category $key: OVERRIDE: [dict get $agv::config_override $category $key]"
+				set $varname $oval
+				return
+			}
+
+			# Translate the universal boolean option into 0/1.
+			set $varname [expr {!!$args}]
+		}
+
+		default {
+			error "Uknown config category. Available: avail, use, enable, have"
+		}
+	}
+}
+
+proc CheckSetConfigUse {key vals} {
+	set ln [llength $vals]
+	if {$ln != 1} {
+		set val ""
+		foreach v $vals {
+			if {*$v in $::agv::p::config_avail($key)} {
+				lappend val $v
+			} else {
+				error "For --use-$key, '$v' is not available as a multi-value"
+			}
+		}
+		set ::agv::p::config_use($key) $val
+	} else {
+		# Single option can be still a multi-value!
+		if {$vals in $::agv::p::config_avail($key) ||
+				*$vals in $::agv::p::config_avail($key)} {
+			set ::agv::p::config_use($key) $vals
+		} else {
+			error "For --use-$key, '$v' is not available"
+		}
+	}
+}
+
 proc ag-profile {name args} {
 	if { $args == "" } {
 		return [InstallProfile $name]
@@ -701,9 +977,21 @@ proc ag-profile {name args} {
 	# - lang or {lang1 lang2} to apply to selected languages
 
 	if { $name == "general" } {
+		set isquery no
+		if { [string index $args 0] == "?" } {
+			# Query - check overrides
+			if { [llength $args] != 1} {
+				error "Queries require only one key argument, not '$args'"
+			}
+			set key [string range $args 1 end]
+			if {[dict exists $agv::p::profile_overrides $key]} {
+				return [dict get $agv::p::profile_overrides $key]
+			}
+			set isquery yes
+		}
 
 		set results [AccessDatabase agv::profile default {*}$args]
-		if { [string index [lindex $args 0] 0] == "?" } {
+		if {$isquery} {
 			# It was a query, so stop on querying the value for general.
 			return $results
 		}
@@ -725,6 +1013,25 @@ proc ag-profile {name args} {
 	$::g_debug "Updated profile($name): $agv::profile([lindex $name 0])"
 	return $results
 }
+
+#
+# ---------------------------------
+#
+# ag-option and ag-config must use the common resolution base.
+# 
+# 1. The very first call defines the option. If you try to use reading
+#    of the option without defining it first, you get an error.
+#
+# 2. The definition of the option must extract the overrides provided in
+#    the command line. The override should be removed after extraction.
+#
+# 3. Reading of the option, provided that it happened after it was defined,
+#    should return the override, if exists, or the default value otherwise.
+#
+# 4. The after-parsing action should check which overrides haven't been
+#    removed and report those as error.
+#
+# ---------------------------------
 
 proc ag-option {name args} {
 
@@ -754,23 +1061,49 @@ proc ag-option {name args} {
 		return [dict get $agv::useropt $name]
 	}
 
-	set others [lassign $args deflt filter]
-	if {$others != ""} {
-		error "Usage: ag-option --<name> <default-value> ?filter?"
-	}
-
 	lassign [split $name -] prefix
 
 	if {$prefix in {avail disable enable have use}} {
-		error "ag-option: option with a prefix reserved for config is not allowed"
+		error "ag-option: prefix '$prefix' is reserved for ag-config"
+	}
+
+#  	set others [lassign $args deflt filter]
+#  	if {$others != ""} {
+#  		error "Usage: ag-option --<name> <default-value> ?filter?"
+#  	}
+
+	set filter ""
+	set helptext ""
+	set avail ""
+	set optargs {-h helptext -f filter -a avail}
+	lassign [process-options $args $optargs] deflt
+
+	#puts "AG-OPTION: $name '$args' -> -h {$helptext} -f {$filter} -a {$avail} -- {$deflt}"
+
+	if {[llength $deflt] > 1} {
+  		error "Usage: ag-option --<name> <default-value> ?-f filter? ?-h helptext?"
 	}
 
 	if {$filter != ""} {
 		set fi [string index $filter 0]
 		if {$fi != "/" && $fi != "~" && $filter ni {number bool keyword}} {
-			error "ag-option: filter keywords allowed: number, bool, keyword or /regexp or ~globmatch"
+			error "ag-option: wrong filter expression; allowed: number, bool, keyword or /regexp or ~globmatch"
 		}
 		dict set agv::useropt_filter $name $filter
+	}
+
+	if {$avail != ""} {
+		# Install it also as a filter
+		set ln [llength $avail]
+		if {$ln < 2} {
+			error "ag-option: -a {avail-list} requires at least two elements"
+		}
+
+		dict set agv::useropt_filter $name ":$avail"
+	}
+
+	if {$helptext != ""} {
+		dict set agv::useropt_help $name $helptext
 	}
 
 	dict set agv::useropt $name $deflt
@@ -792,7 +1125,7 @@ proc ag-option {name args} {
 # and consumed, otherwise tried another possibility.
 proc OverrideUserOption {name value} {
 	if {![dict exists $agv::useropt $name]} {
-		return false
+		return [list false "The --$name option is undefined"]
 	}
 
 	# Check if the value matches the filter
@@ -813,15 +1146,21 @@ proc OverrideUserOption {name value} {
 	#   - keyword: same as /[a-zA-Z_][a-zA-Z_0-9]*
 
 	set filter [dict get $agv::useropt_filter $name]
-	if {[string index $filter 0] == "/"} {
+	set fid [string index $filter 0]
+	if {$fid == "/"} {
 		set rex "^[string range $filter 1 end]\$"
 		if {![regexp $rex $value]} {
 			return [list false "The --$name option argument must match regexp '$rex'"]
 		}
-	} elseif {[string index $filter 0] == "~"} {
+	} elseif {$fid == "~"} {
 		set mat [string range $filter 1 end]
 		if {![string match $mat $value]} {
 			return [list false "the --$name option argument must match pattern '$mat'"]
+		}
+	} elseif {$fid == ":"} {
+		set lst [string range $filter 1 end]
+		if {$value ni $lst} {
+			return [list false "the --$name option must be one of: $lst"]
 		}
 	} else {
 		switch -- $filter {
@@ -903,14 +1242,7 @@ proc InstallProfile {name} {
 	# Update the target key, if possible
 
 	if {![dict exists $prof default target]} {
-		# Target not known, so check if components to obtain it exist
-		set vspec [dict:at $prof default version]
-		set tmark [dict:at $prof default targetspec]
-		if {$vspec != "" && $tmark != ""} {
-			set vline [exec {*}$vspec |& grep $tmark]
-			set tname [string trim [string range $vline [string length $tmark] end]]
-			dict set prof default target $tname
-		}
+		TrySetDefaultTarget prof
 	}
 
 	# Now merge every language item with default.
@@ -939,26 +1271,46 @@ proc InstallProfile {name} {
 	array set agv::profile $prof
 }
 
-proc UnaliasOption alias {
-	switch -- $alias {
-		s { return sources }
-		h { return headers }
-		nh { return noinst-headers }
-		fw { return frameworks }
-		hidir { return headers-installdir }
-		idir { return installdir }
-		o { return output }
-		I { return incdir }
-		D { return defines }
-		L { return libdir }
-		libs { return ldflags }
-		lflags { return ldflags }
-		requires {
-			return depends;# XXX WARNING! elements of 'depends' list must be filtered through [CheckDefinedTarget]!
-		}
+proc TrySetDefaultTarget {r_dict} {
+	upvar $r_dict prof
+
+	# Target not known, so check if components to obtain it exist
+	set vspec [dict:at $prof default version]
+	set tmark [dict:at $prof default targetspec]
+	if {$vspec == "" || $tmark == ""} {
+		return
 	}
 
-	return $alias
+	set rex [string cat $tmark {\s*([^\s]+)}]
+	set vtext [exec {*}$vspec 2>@1]
+	set vlines [split $vtext \n]
+	set found [regexp $rex [lsearch -regexp -inline $vlines $rex] 0 tname]
+	if {$found} {
+		dict set prof default target $tname
+	}
+}
+
+proc UnaliasTargetKey alias {
+
+	# Maintain the : spec as subkey
+	set sufx [string first : $alias]
+	if {$sufx == -1} {
+		set suffix ""
+		set name $alias
+	} else {
+		if {$sufx == 0} {
+			error "Invalid key name: '$alias'"
+		}
+		set suffix [string range $alias $sufx end]
+		set name [string range $alias 0 $sufx-1]
+	}
+
+	if {![dict exists $agv::p::key_alias $name]} {
+		# No alias for that name
+		return $alias
+	}
+	set name [dict get $agv::p::key_alias $name]
+	return $name$suffix
 }
 
 proc DebugDisplayDatabase {array target} {
@@ -1097,7 +1449,7 @@ proc AccessDatabase {array target args} {
 		# can be no more options passed in this command call.
 		if { !$nomoreoptions && [string index $o 0] == "-" } {
 			set lastopt [string range $o 1 end]
-			set lastopt [UnaliasOption $lastopt]
+			set lastopt [UnaliasTargetKey $lastopt]
 			continue
 		}
 
@@ -2813,7 +3165,7 @@ proc GenerateExecutableLinkRule {type db outfile} {
 	set di [psfirst [dict:at $db dumpinfo] [dict:at $agv::profile($lang) dumpinfo]]
 	if { $di != "" && [string is true $di] } {
 		set infofile $outfile.ag.info
-		set maybe_dump "\n\t%pwrite $infofile {[GenerateInfoGen $objects $outfile $command]}"
+		set maybe_dump "\n\t@%pwrite $infofile {[GenerateInfoGen $objects $outfile $command]}"
 	}
 	# The rule should contain all ingredient files
 	# and all "targets" declared here as its dependency
@@ -2865,7 +3217,7 @@ proc GenerateLinkRule:library {libtype db outfile} {
 	set di [psfirst [dict:at $db dumpinfo] [dict:at $agv::profile($lang) dumpinfo]]
 	if { $di != "" && [string is true $di] } {
 		set infofile $outfile.ag.info
-		set maybe_dump "\n\t%pwrite $infofile {[GenerateInfoGen $objects $outfile $command]}"
+		set maybe_dump "\n\t@%pwrite $infofile {[GenerateInfoGen $objects $outfile $command]}"
 	}
 
 	set rule "$objects {\n\t$command$maybe_dump\n}"
@@ -2951,8 +3303,6 @@ proc ag-do-genrules target {
 		}
 	}
 
-	# XXX config_overrides (-c) is also required, add when implemented
-
 	ag reconfigure -type custom -flags noclean distclean -clean none -runon demand \
 			-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr !options $maybe_options] $cmdf]}
 
@@ -2960,7 +3310,7 @@ proc ag-do-genrules target {
 			-command {	%submake reconfigure}
 
 	vlog "([pwd]) ALL DEFINED TARGETS:\n\t[array names agv::target]"
-		
+
 	# Complete lacking values that have to be generated.
 	if { ![agp-prepare-database $target] } {
 		puts stderr "+++ ERROR: Failed to prepare database for '$target'"
@@ -2984,6 +3334,59 @@ proc ag-do-genrules target {
 
 	close $fd
 	return [expr {$ok ? 0 : 1}]
+}
+
+proc ResolveProfileDetails {} {
+
+	# Make sure that the profile contains at least the "default"
+	# key with empty contents.
+
+	if { ![info exists agv::profile(default)] } {
+		set agv::profile(default) ""
+
+		# Nothing more to do, if the profile is empty.
+		return
+	}
+
+	# This should apply various fixes by using high-level flags
+	# in the profile to reintroduce low-level flags basing on it.
+	# High level flags remain where they are for later check.
+
+	# First: default values
+	set debinfo no
+	set opt 2
+
+	# Now check of you have build type defined. Default is release.
+	set buildtype [pget agv::profile(default).buildtype]
+	if {$buildtype == ""} {
+		set buildtype release
+	}
+	switch -- $buildtype {
+		release {
+			# Remain with default
+		}
+
+		debug {
+			set debinfo yes
+			set opt 0
+		}
+
+		release-debug-info {
+			set debinfo yes
+		}
+
+		default {
+			error "Profile option -buildtype must be: debug, release, release-debug-info or left empty"
+		}
+	}
+
+	if { [pget agv::profile(default).debuginfo NOTFOUND] == "NOTFOUND" } {
+		dict set agv::profile(default) debuginfo $debinfo
+	}
+
+	if { [pget agv::profile(default).optlevel] == "" } {
+		dict set agv::profile(default) optlevel $opt
+	}
 }
 
 proc GenerateMakefile {target fd} {
@@ -3420,13 +3823,6 @@ proc CheckDefinedTarget {target {dspec {}}} {
 proc agp-prepare-database {target {parent ""}} {
 	vlog "--- Preparing database for target '$target'"
 
-	# Make sure that the profile contains at least the "general"
-	# key with empty contents.
-
-	if { ![info exists agv::profile(default)] } {
-		set agv::profile(default) ""
-	}
-
 	# Auto-generate targets "all" and ".", if not defined
 	if { $target == "all" || $target == "." } {
 		if { ![info exists agv::target(all)] } {
@@ -3601,6 +3997,8 @@ proc ag-instantiate {source {target ""} {varspec @}} {
 
 	set realsource [RealSourcePath $source]
 
+	vlog "Instantiate: real source '$source' -> '$realsource'"
+
 	set wd [pwd]
 	cd $agv::builddir
 
@@ -3706,6 +4104,45 @@ proc ag-declare-generated {filename {wdstate b}} {
 	lappend agv::generated_files $f
 }
 
+# The interface for executing a code in the child interpreter
+# by referring to the parent interpreter
+proc RootEval {script} {
+	return [uplevel #0 $script]
+}
+
+proc ag-interp {target script} {
+
+	# XXX Likely something to refer to the root project would be useful.
+	# Something like / or // should refer to it.
+
+	if {$target == "."} {
+		# Stupid, but just for formality.
+		return [$script]
+	}
+
+	if {$target == ".."} {
+		return [ParentEval $script]
+	}
+
+	# XXX This needs to be fixed. Target must be split into
+	# smaller paths by taking out paths from the end until
+	# reaching the smallest number of path items. For example,
+	# it should be tolerated that submodules/roj/src is searched,
+	# but submodules/roj does exist, so it should be then
+	# forwarded to the interpreter by doing
+	# return [$agv::p::slaves(submodules/roj) eval ag-slave src $script]
+
+	if {![info exists agv::p::slaves($target)]} {
+		error "No such subdirectory: $target"
+	}
+
+	return [$agv::p::slaves($target) eval $script]
+}
+
+proc AllowParentEval {child} {
+	interp alias $child ParentEval {} RootEval
+}
+
 proc ag-subdir args {
 	if { [llength $args] == 1 } {
 		set args [lindex $args 0]
@@ -3780,32 +4217,34 @@ proc ag-subdir1 target {
 		lappend cmd_args "$name=$value"
 	}
 
-	interp create ag-interp-indir
+	set slave [interp create]
+	set agv::p::slave($target) $slave
+	AllowParentEval $slave
 
 	# XXX Pass the config and profile databases?
-	ag-interp-indir eval set argv0 $::argv0
-	ag-interp-indir eval set argv [list $cmd_args]
-	ag-interp-indir eval set me_is_slave 1
+	$slave eval set argv0 $::argv0
+	$slave eval set argv [list $cmd_args]
+	$slave eval set me_is_slave 1
 
 	# Export declared private variables
-	ag-interp-indir eval [list namespace eval agv {namespace eval p {}}]
+	$slave eval [list namespace eval agv {namespace eval p {}}]
 	foreach v $agv::p::subdir_export {
 		#puts stderr "DEBUG export:\t$v = [set $v]"
-		ag-interp-indir eval [list set $v [set $v]]
+		$slave eval [list set $v [set $v]]
 	}
 	#puts stderr "DEBUG: SUBDIR processing: $sd"
 	#puts stderr "DEBUG: PRIVATE VARIABLES:"
-	#foreach vv [ag-interp-indir eval info vars agv::p::*] {
-	#	puts stderr "DEBUG:\t$vv = [ag-interp-indir eval set $vv]"
+	#foreach vv [$slave eval info vars agv::p::*] {
+	#	puts stderr "DEBUG:\t$vv = [$slave eval set $vv]"
 	#}
 
 	# XXX THIS SKIPS OPTIONS - must be somehow supported!
-	ag-interp-indir eval source [lindex $cmd_exe 0]
+	$slave eval source [lindex $cmd_exe 0]
 
 	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Pinning in database."
 	set imported_targets ""
-	foreach t [ag-interp-indir eval array names agv::target] {
-		set agv::foreign($target/$t) [ag-interp-indir eval set agv::target($t)]
+	foreach t [$slave eval array names agv::target] {
+		set agv::foreign($target/$t) [$slave eval set agv::target($t)]
 		lappend imported_targets $target/$t
 	}
 
@@ -3814,7 +4253,8 @@ proc ag-subdir1 target {
 		$::g_debug " --- $t (type: [pget agv::foreign($t).type])"
 	}
 
-	interp delete ag-interp-indir
+	# Don't. Keep it until the whole config is compiled.
+	# interp delete $slave
 
 	# Restore environment
 
@@ -3897,7 +4337,6 @@ set topdir ""
 set runmode genrules
 set install_prefix ""
 set profile_overrides ""
-set config_overrides ""
 set readdbspec ""
 
 #puts stderr "CURRENT DIR: [pwd]"
@@ -3914,7 +4353,6 @@ set ag_optargs {
 	-t topdir
 	-m runmode
 	-p -profile_overrides
-	-c -config_overrides
 	-r %readdbspec
 	--prefix install_prefix
 }
@@ -4025,48 +4463,26 @@ foreach {ln lv} $g_longoptions {
 	set keyname [join $keyname -]
 
 	switch -- $entry {
-		avail {
-			# Avail: declare that an option with given name occurs
-			# in several alternatives, of which 'use' can select one.
-			# Example: ag-config avail crypto {openssl gnutls}
-			ag-config avail $keyname $lv
-		}
-
+		avail -
 		use {
-			# Use one of alternatives (if declared with avail) or
-			# use istallation path of a dependent library or package.
-			# Example: ag-config use crypto gnutls
-			ag-config use $keyname $lv
+			dict set agv::config_override $entry $keyname $lv
 		}
 
-		enable {
-			if { $lv == "" } {
-				set lv 1
-			}
-			if { ![string is boolean $lv] }  {
-				error "For --$ln allowed value is a boolean value only"
-			}
-			ag-config enable $keyname $lv
-		}
-
-		disable {
-			if { $lv == "" } {
-				set lv 1
-			}
-			if { ![string is boolean $lv] }  {
-				error "For --$ln allowed value is a boolean value only"
-			}
-			ag-config enable $keyname [expr {!$lv}]
-		}
-
+		enable -
+		disable -
 		have {
 			if { $lv == "" } {
 				set lv 1
 			}
-			if { ![string is boolean $lv] } {
-				error "For --$ln allowed value is a boolean value only"
+			if { ![string is boolean $lv] }  {
+				error "For --$ln allowed are only boolean values, or empty value"
 			}
-			ag-config have $keyname $lv
+			if {$entry == "disable"} {
+				set lv [expr {!$lv}]
+				set entry enable
+			}
+			#puts "CMDLINE override: --$entry-$keyname = $lv"
+			dict set agv::config_override $entry $keyname $lv
 		}
 
 	    default {
@@ -4149,6 +4565,8 @@ foreach {k v} $agv::p::profile_overrides {
 	dict set agv::profile(default) $k $v
 }
 
+ResolveProfileDetails
+		
 #puts stderr "DEBUG: RESULTING PROFILE (general):"
 #parray agv::profile
 #foreach {k v} $agv::profile(default) {

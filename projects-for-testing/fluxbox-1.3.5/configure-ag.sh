@@ -4,7 +4,7 @@ if [[ ! -x `type -p tclsh` ]]; then echo "Tcl 8.5 and Silvercat are required to 
 
 if { [catch {package require ag 1.0} problem] } {
 	puts stderr "You need Silvercat 1.0 to configure and build this package."
-	puts stderr "You can download it from https://gitlab.com/silvercat"
+	puts stderr "You can download it from https://github.com/ethouris/silvercat"
 	exit 1
 }
 

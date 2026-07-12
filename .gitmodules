@@ -11,7 +11,7 @@
 	path = projects-for-testing/phasor.sub
 	url = https://gitlab.com/fluorine/phasor.git
 [submodule "projects-for-testing/yaml-cpp11.sub"]
-	path = projects-for-testing/yaml-cpp11.sub
+	path = projects-for-testing/yaml-cpp.sub
 	url = https://gitlab.com/berenm/yaml-cpp11.git
 [submodule "projects-for-testing/srt.sub"]
 	path = projects-for-testing/srt.sub
@@ -19,3 +19,9 @@
 [submodule "projects-for-testing/universal-ctags.sub"]
 	path = projects-for-testing/universal-ctags.sub
 	url = https://github.com/universal-ctags/ctags.git
+[submodule "projects-for-testing/yaml-cpp.sub"]
+	path = projects-for-testing/yaml-cpp.sub
+	url = https://github.com/jbeder/yaml-cpp.git
+[submodule "projects-for-testing/phasor.dir/glbinding.sub"]
+	path = projects-for-testing/phasor.dir/glbinding.sub
+	url = ../../cginternals/glbinding.git

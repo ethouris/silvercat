@@ -689,7 +689,10 @@ proc psfirst args {
 proc pif args {
 	set isq [lsearch -exact $args ?]
 	if { $isq == -1 } {
-		lassign $args cond iftrue iffalse
+		set rest [lassign $args cond iftrue iffalse]
+		if {$rest != ""} {
+			error "pif: with no operators, expected <condition> <true value> <false value>"
+		}
 	} else {
 		set cond [lrange $args 0 $isq-1]
 		set end [lsearch -start $isq -exact $args :]
@@ -701,18 +704,30 @@ proc pif args {
 			set iffalse [lrange $args $end+1 end]
 		}
 	}
+	#puts stderr "PIF: cond='$cond' ? '$iftrue' : '$iffalse'"
 
-	if [uplevel expr $cond] {
+	# If both are empty, return 1 or 0, respectively
+	# If only false is empty, make it an empty string.
+	if { $iffalse == "" } {
+		if {$iftrue == ""} {
+			set iftrue 1
+			set iffalse 0
+		} else {
+			set iffalse ""
+		}
+	}
+
+	if {[uplevel expr $cond]} {
 		return $iftrue
 	}
 	return $iffalse
 }
 
-proc pis args {
-	set rest [lassign $args value pattern]
-
-	if { [lindex $rest 0] == "?" } {
-		set rest [lrange $rest 1 end]
+proc pis {value pattern args} {
+	if { [lindex $args 0] == "?" } {
+		set rest [lrange $args 1 end]
+	} else {
+		set rest $args
 	}
 
 	set end [lsearch $rest :]
@@ -720,6 +735,7 @@ proc pis args {
 		set iftrue $rest
 		set iffalse ""
 	} elseif {$end == 0} {
+		# : after ? of rider - remaininig part is else
 		set iftrue ""
 		set iffalse [lrange $rest 1 end]
 	} else {
@@ -727,22 +743,19 @@ proc pis args {
 		set iffalse [lrange $rest $end+1 end]
 	}
 
+	#puts stderr "PIS: $value == $pattern ? '$iftrue' : '$iffalse'"
+
 	set istrue 0
 
-	if {$value != $pattern} {
-		if {![string match $pattern $value]} {
-			if { ![string match -nocase $pattern $value] } {
-			} else {
-				set istrue 1
-			}
-		} else {
-			set istrue 1
-		}
-	} else {
-		set istrue 1
+	if {$value == $pattern} {
+		return $iftrue
+	}
+	
+	if {[string match -nocase $pattern $value]} {
+		return $iftrue
 	}
 
-	return [pif $istrue $iftrue $iffalse]
+	return $iffalse
 }
 
 
