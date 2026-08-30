@@ -24,4 +24,4 @@
 	url = https://github.com/jbeder/yaml-cpp.git
 [submodule "projects-for-testing/phasor.dir/glbinding.sub"]
 	path = projects-for-testing/phasor.dir/glbinding.sub
-	url = ../../cginternals/glbinding.git
+	url = git@github.com:cginternals/glbinding.git
