@@ -75,6 +75,21 @@ if { ![file exists $prefix] } {
 	exit 1
 }
 
+set stack ""
+while { [file type $prefix] == "link" } {
+	lappend stack $prefix
+
+	set WD [pwd]
+	cd [file dirname $prefix]
+	set fn [file tail $prefix]
+	set prefix [file normalize [file readlink $fn]]
+	cd $WD
+
+	if { $prefix in $stack } {
+		error "Prefix is a self-recursive link. Please supply a directory or a link to a directory."
+	}
+}
+
 if { ![file isdirectory $prefix] } {
 	puts "Prefix is not a directory: $prefix"
 	exit 1
