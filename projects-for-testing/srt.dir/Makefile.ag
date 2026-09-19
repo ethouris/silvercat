@@ -80,6 +80,10 @@ if { [info exists ENABLE_CLANG_SANITIZER] } {
 pinit ENABLE_WIN32_SHARED 0
 pinit ENABLE_STDCXX_SYNC 0
 
+if {!$ENABLE_STDCXX_SYNC} {
+	ag-profile c++ -D HVU_EXT_INCLUDE_SYNC="../srtcore/srt_sync_cxx98.h"
+}
+
 set srtstatic 0
 set srtshared 0
 
@@ -218,18 +222,20 @@ ag $TARGET_srt -type library
 proc export-flag {name {target {}}} {
 	if { [uplevel phas $name] } {
 		if {$target == {}} {
-			ag-profile {c c++} -D $name=1
+			ag-profile {c c++} -D SRT_${name}=1
 		} else {
-			ag $target -D $name=1
+			ag $target -D SRT_${name}=1
 		}
 	}
 }
 
 # Use this flag for library and all apps
 if { $ENABLE_LOGGING } {
-	ag-profile general -D ENABLE_LOGGING=1
+	ag-profile general -D SRT_ENABLE_LOGGING=1 HVU_ENABLE_LOGGING=1
 
-	export-flag ENABLE_HEAVY_LOGGING
+	if {[phas ENABLE_HEAVY_LOGGING]} {
+		ag-profile general -D SRT_ENABLE_HEAVY_LOGGING=1 HVU_ENABLE_HEAVY_LOGGING=1
+	}
 }
 
 export-flag ENABLE_ENCRYPTION $TARGET_srt
@@ -284,8 +290,12 @@ set enclib_modules {
 	mbedtls {mbedtls mbedcrypto}
 }
 
-set sourcedirs ""
+set host_system [lindex [split $tcl_platform(os) _] 0]
+pinit BUILD_HOST $host_system
+pinit BUILD_TARGET $BUILD_HOST
 
+set sourcedirs ""
+set enclib_defines ""
 if {$ENABLE_ENCRYPTION} {
 
 	# XXX Provide support for mbedtls and gnutls/nettle.
@@ -296,7 +306,7 @@ if {$ENABLE_ENCRYPTION} {
 	ag $TARGET_haicrypt -packages [dict get $enclib_modules $USE_ENCLIB]
 	lappend sourcedirs haicrypt
 
-	if { $tcl_platform(os) == "Windows" } {
+	if { $BUILD_TARGET == "Windows" } {
 		ag-maf $TARGET_haicrypt common filelist_win32.maf -s SOURCES -h "PUBLIC HEADERS"
 		lappend sourcedirs common
 	}
@@ -306,7 +316,9 @@ if {$ENABLE_ENCRYPTION} {
 	   HAICRYPT_USE_OPENSSL_AES
 	}
 
-	ag $TARGET_haicrypt -D USE_[string toupper $USE_ENCLIB]
+	set enclib_defines "-D USE_[string toupper $USE_ENCLIB]"
+
+	ag $TARGET_haicrypt {*}$enclib_defines
 }
 
 # HaiSRT
@@ -361,6 +373,7 @@ ag-profile general -I [pdip $agv::srcdir/% {
 	srtcore
 	haicrypt
 	common
+	logging
 }]
 
 # Definitions
@@ -368,10 +381,14 @@ ag-profile general -D {
    _GNU_SOURCE
 }
 
-set linux [expr {[pget tcl_platform(os)] == "Linux" }]
+set TARGET_CFLAGS ""
+switch -- $BUILD_TARGET {
+	Linux { lappend TARGET_CFLAGS LINUX=1 }
+	Windows { lappend TARGET_CFLAGS _WIN32=1 }
+}
 
-if { $linux } {
-	ag-profile general -D LINUX
+if { $TARGET_CFLAGS != "" } {
+	ag-profile general -D {*}$TARGET_CFLAGS
 }
 
 if { $SRT_BUILD_PROFILE } {
@@ -396,7 +413,37 @@ if {$ENABLE_ENCRYPTION} {
 
 set appdir apps
 #set appdeveldir devel-apps
-set appdeveldir testing
+# "testing" was renamed to "tools"; check which of these is there
+proc find-top-dir {args} {
+	if { [catch {exec git rev-parse --show-toplevel} gittop] } {
+		puts "ERROR: not running in a repository"
+		return
+	}
+	puts "Checking if any found in toplevel '$gittop': $args"
+
+	# List all ls-files at toplevel, filter directory-based, cut off dirname, collect in dirs
+	ppipe exec git ls-files --full-name $gittop | \
+		lsearch -all -inline % */* | \
+		pmap [pbind file dirname %] % | \
+		set dirs %
+	# Alternative method for [file dirname], but looks more entangled
+	# First % is interpreted by pbind, second %% turned to % by pbind
+	# pmap [pbind ppipe split % / | lindex %% 0] % | 
+
+
+	foreach name $args {
+		if {$name in $dirs} {
+			return $name
+		}
+	}
+}
+
+# Handle rename in dev
+set appdeveldir [find-top-dir tools testing]
+if {$appdeveldir == ""} {
+	error "No 'testing' or 'tools' directory found in toplevel"
+}
+puts "DEVEL APPS DIR FOUND: $appdeveldir"
 set exampledir examples
 
 # Turn off compiling applications if static srt is unwanted
@@ -438,6 +485,7 @@ if { "static" in $srt_libspec } {
 	proc testapp {prg args} {
 		set name $prg
 		sprogram $name
+		ag $name -std $::STD_APPS
 
 		# Add extra target settins if any
 		ag $name {*}$args
@@ -455,7 +503,6 @@ if { "static" in $srt_libspec } {
 	proc testapp-srt {prg args} {
 		set name [testapp $prg {*}$args]
 
-		ag $name -std $::STD_APPS
 		ag $name -depends $::TARGET_srt/static
 		if { [pget tcl_platform(os)] == "Linux" } {
 			ag $name -ldflags -- -pthread
@@ -467,10 +514,15 @@ if { "static" in $srt_libspec } {
 	# - optional extra sources in common/ directory
 
 	testapp utility-test
-	testapp uriparser-test -D TEST -std $::STD_APPS
+	testapp uriparser-test -D TEST
 	testapp-srt srt-test-live
 	testapp-srt srt-test-file
 	testapp-srt srt-test-relay
+
+	# Not available on all versions, check first
+	if {[file exists $agv::srcdir/$appdeveldir/srt-test-stow.maf]} {
+		testapp-srt srt-test-stow
+	}
 	ag srt-test-relay -D SRT_ENABLE_VERBOSE_LOCK -imgen target-name
 
 	testapp-srt srt-test-multiplex
@@ -539,7 +591,9 @@ if {![file exists $agv::builddir/googletest] || ![file exists $agv::builddir/lib
 		@echo "Then re-run agcat. Automatic installation is not yet supported."
 	}
 } else {
-	ag test-srt -type program -s [glob test/*.cpp] -I $gtest_inc -depends $TARGET_srt -L //b:lib -libs -- -lgtest -lgtest_main
+	set system [lindex [split $tcl_platform(os) _] 0]
+	ag test-srt -type program -s [glob test/*.cpp] -I $gtest_inc //apps -depends $TARGET_srt -L //b:lib -libs -- -lgtest -lgtest_main
+	ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$system\"}
 }
 
 
