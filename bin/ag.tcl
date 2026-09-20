@@ -372,7 +372,7 @@ proc ProcessFlags target {
 	set debflag [pget agv::target($target).debinfo]
 
 	if {$optflag != ""} {
-		set optkey build:opt$oprflag
+		set optkey build:opt$optflag
 		if {![dict exists agv::profile(default) $optkey]} {
 			error "-optlevel: build:opt$optflag not found in the profile"
 		}
@@ -1140,6 +1140,7 @@ proc OverrideUserOption {name value} {
 	#
 	# - regular expression - starts from /
 	# - glob match - starts from ~
+	# - enumeration list - starts from :
 	# - special keyword:
 	#   - number: accepts a number, specified as hex/dec with dot etc.
 	#   - bool: standard Tcl boolean value
@@ -3366,7 +3367,7 @@ proc ResolveProfileDetails {} {
 	set debinfo no
 	set opt 2
 
-	# Now check of you have build type defined. Default is release.
+	# Now check if you have build type defined. Default is release.
 	set buildtype [pget agv::profile(default).buildtype]
 	if {$buildtype == ""} {
 		set buildtype release
@@ -4127,7 +4128,7 @@ proc ag-interp {target script} {
 
 	if {$target == "."} {
 		# Stupid, but just for formality.
-		return [$script]
+		return [eval $script]
 	}
 
 	if {$target == ".."} {
@@ -4140,7 +4141,7 @@ proc ag-interp {target script} {
 	# it should be tolerated that submodules/roj/src is searched,
 	# but submodules/roj does exist, so it should be then
 	# forwarded to the interpreter by doing
-	# return [$agv::p::slaves(submodules/roj) eval ag-slave src $script]
+	# return [$agv::p::slaves(submodules/roj) eval ag-interp src $script]
 
 	if {![info exists agv::p::slaves($target)]} {
 		error "No such subdirectory: $target"
