@@ -75,6 +75,21 @@ if { ![file exists $prefix] } {
 	exit 1
 }
 
+set stack ""
+while { [file type $prefix] == "link" } {
+	lappend stack $prefix
+
+	set WD [pwd]
+	cd [file dirname $prefix]
+	set fn [file tail $prefix]
+	set prefix [file normalize [file readlink $fn]]
+	cd $WD
+
+	if { $prefix in $stack } {
+		error "Prefix is a self-recursive link. Please supply a directory or a link to a directory."
+	}
+}
+
 if { ![file isdirectory $prefix] } {
 	puts "Prefix is not a directory: $prefix"
 	exit 1
@@ -91,14 +106,22 @@ set nuptodate 0
 set noverwritten 0
 set ndenied 0
 
+# This procedure returns the same as [file type] except
+# if the file doesn't exist, returns "none" instead of throwing an error.
+proc file-type-nocomplain tool {
+	if { [catch {file type $tool} ft] } {
+		return
+	}
+	return $ft
+}
 
 foreach tool $TOOLS {
 
 	set path [file join $WD $tool]
 	set tarpath [prelocate $path [pwd]]
 
-	if { [file exists $tool] } {
-		set type [file type $tool]
+	set type [file-type-nocomplain $tool]
+	if { $type != "" } {
 
 		# Check if this is a symbolic link that points to a correct location.
 		# If so, silently ignore it.

@@ -4391,6 +4391,7 @@ set ag_optargs {
 	-p -profile_overrides
 	-r %readdbspec
 	--prefix install_prefix
+	--options *display_options
 }
 
 set opt_help {
@@ -4608,6 +4609,57 @@ ResolveProfileDetails
 #foreach {k v} $agv::profile(default) {
 #	puts [format "%20s = %s" $k $v]
 #}
+
+if {$display_options} {
+	# Do not go processing. Display the options' helptext.
+	set maxlen 0
+	foreach k [dict keys $agv::useropt_help] {
+		set maxlen [expr {max($maxlen,[string length $k])}]
+	}
+	if {$maxlen == 0} {
+		puts "No options defined in the project"
+		exit 1
+	}
+
+	#puts "OPTIONS DEBUG:\nFILTER: $agv::useropt_filter"
+
+	puts "Project options:"
+	# XXX Sort alpha?
+	foreach {k v} $agv::useropt_help {
+		set deflt ""
+		if {[dict exists $agv::useropt $k]} {
+			set d [dict get $agv::useropt $k]
+			if {$d != ""} {
+				set deflt " default:$d"
+			} else {
+				#set deflt " default:empty"
+			}
+		}
+		if {[dict exists $agv::useropt_filter $k]} {
+			set filter [dict get $agv::useropt_filter $k]
+			set ft [string index $filter 0]
+			set fn [string range $filter 1 end]
+			#puts "HAVE FILTER: $k : type '$ft' value '$fn'"
+			if {$ft == ":"} {
+				# Flatten the list!
+				set ofn ""
+				lappend ofn {*}$fn
+				set opttype "<one of: ${ofn}$deflt>"
+			} elseif {$ft == "/"} {
+				set opttype "<regexp: ${fn}$deflt>"
+			} elseif {$ft == "~"} {
+				set opttype "<pattern: ${fn}$deflt>"
+			} else {
+				set opttype "<$filter$deflt>"
+			}
+		} else {
+			#puts "HAVE NO FILTER: $k"
+			set opttype "<value>"
+		}
+		puts "  --[format "%-${maxlen}s : %s\n      %s" $k $opttype $v]"
+	}
+	exit 1
+}
 
 puts stderr "+++ Processing runmode '$agv::runmode':  @[prelocate [pwd] $agv::toplevel]"
 

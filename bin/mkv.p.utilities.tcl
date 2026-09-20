@@ -201,6 +201,51 @@ proc pmap {lambda list} {
 	return $result
 }
 
+# Some people do not like lambdas and prefer just argument number.
+# This translates the "body" into a lambda
+
+proc pbind {args} {
+	# Unpack 1 level if necessary
+	if { [llength $args] == 1} {
+		set args [lindex $args 0]
+	}
+
+	# Now collect all information about the used % tags
+	# They must exist as single tokens on the toplevel only.
+
+	# Ok, the meaning is:
+	# % - alias to %0
+	# %* - all arguments, having variadic arguments
+	# %<n> - nth argument
+	set outpipe ""
+	foreach it $args {
+		if {[string index $it 0] == "%"} {
+			switch -glob -- [string index $it 1] {
+				% {
+					# if this is % followed by %, simply append
+					# whatever follows this %. This allows multiplying
+					# % in nested ppipe expressions
+					append outpipe "[string range $it 1 end] "
+				}
+				"" {
+					append outpipe {[lindex $args 0] }
+				}
+				[0-9] {
+					set n [expr 0+[string range $it 1 end]]
+					append outpipe "\[lindex \$args $n\] "
+				}
+				* {
+					append outpipe "\$args "
+				}
+			}
+		} else {
+			append outpipe "$it "
+		}
+	}
+
+	return [list args $outpipe]
+}
+
 proc pfind {args} {
 	# First, test if the last one is a list of directories or a mask
 	set last [lindex $args end]
@@ -839,6 +884,10 @@ proc dict:sel {dic args} {
 }
 
 proc ppipe args {
+	# Unpack 1 level if necessary
+	if { [llength $args] == 1} {
+		set args [lindex $args 0]
+	}
 	set esets ""
 	set cset ""
 	foreach arg $args {
@@ -852,19 +901,29 @@ proc ppipe args {
 		}
 	}
 	lappend esets $cset
+	#puts "PPIPE DEBUG: consolidated args: [list $esets]"
 
 	set thru ""
 	foreach cset $esets {
 		set cmd ""
+		set explicit no
 		foreach c $cset {
-			if { $c == "%%" } {
-				lappend cmd %
-			} elseif { $c == "%" } {
-				lappend cmd $thru
+			#puts "PPIPE DEBUG: ... '$c'"
+			if { [string index $c 0] == "%" } {
+				if { [string index $c 1] == "%" } {
+					lappend cmd [string range $c 1 end]
+				} elseif { $c == "%" } {
+					lappend cmd $thru
+					set explicit yes
+				}
 			} else {
 				lappend cmd $c
 			}
 		}
+		if {!$explicit && $thru != ""} {
+			lappend cmd $thru
+		}
+		#puts "PPIPE DEBUG: exec: [list $cmd]"
 
 		set thru [uplevel $cmd]
 	}
@@ -913,6 +972,9 @@ proc pdispatch {value body} {
         #puts stderr "TRACE KEY: $key -> $kv"
         lappend sw $kv $val
    }
+   if {![info exists sw]} {
+	   return
+   }
    #puts stderr "TRACE: $sw"
    uplevel switch -- $value $sw
 }
@@ -946,6 +1008,7 @@ set public_export_util [puncomment {
 	psearch
 	plist
 	pmap
+	pbind
 	prelocate
 	pnormalize
 	puncomment
