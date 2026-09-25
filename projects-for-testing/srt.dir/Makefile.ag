@@ -193,6 +193,36 @@ ag-profile general -depspec cached -dumpinfo on
 # -- Turn on all best warnings
 ag-profile general -cflags -- -Wall -Wextra
 
+# -- Utilities -- 
+
+#puts "HEADERS FOR CTAGS: $all_headers"
+if { [catch {exec git rev-parse --show-toplevel} gittop] } {
+	puts "No git top: not running in a repository"
+	set toplevel_dirs ""
+} else {
+	# List all ls-files at toplevel,
+	#  filter in directory-based,
+	#  cut off dirname,
+	#  collect in toplevel_dirs
+	ppipe exec git ls-files --full-name $gittop | \
+		  lsearch -all -inline % */* | \
+		  pmap [pbind file dirname %] % | \
+		  set toplevel_dirs %
+	# Alternative method for [file dirname], but looks more entangled
+	# First % is interpreted by pbind, second %% turned to % by pbind
+	# pmap [pbind ppipe split % / | lindex %% 0] % | 
+}
+proc find-top-dir {args} {
+	puts "Checking if any found in toplevel '$::gittop': $args"
+
+	foreach name $args {
+		if {$name in $::toplevel_dirs} {
+			return $name
+		}
+	}
+}
+
+
 
 # ------------
 # Targets
@@ -325,7 +355,7 @@ if {$ENABLE_ENCRYPTION} {
 
 set maf_srt [ag-maf $TARGET_srt srtcore filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 ag $TARGET_srt -hidir srt
-lappend sourcedirs srtcore logging
+lappend sourcedirs srtcore {*}[find-top-dir logging]
 
 if { [pget tcl_platform(os)] == "Linux" } {
 	ag $TARGET_srt -ldflags -- -lpthread
@@ -409,35 +439,9 @@ if {$ENABLE_ENCRYPTION} {
 	lappend all_headers {*}[dict:sel $maf_haicrypt -glob "* HEADERS"]
 }
 
-#puts "HEADERS FOR CTAGS: $all_headers"
-
 set appdir apps
 #set appdeveldir devel-apps
 # "testing" was renamed to "tools"; check which of these is there
-proc find-top-dir {args} {
-	if { [catch {exec git rev-parse --show-toplevel} gittop] } {
-		puts "ERROR: not running in a repository"
-		return
-	}
-	puts "Checking if any found in toplevel '$gittop': $args"
-
-	# List all ls-files at toplevel, filter directory-based, cut off dirname, collect in dirs
-	ppipe exec git ls-files --full-name $gittop | \
-		lsearch -all -inline % */* | \
-		pmap [pbind file dirname %] % | \
-		set dirs %
-	# Alternative method for [file dirname], but looks more entangled
-	# First % is interpreted by pbind, second %% turned to % by pbind
-	# pmap [pbind ppipe split % / | lindex %% 0] % | 
-
-
-	foreach name $args {
-		if {$name in $dirs} {
-			return $name
-		}
-	}
-}
-
 # Handle rename in dev
 set appdeveldir [find-top-dir tools testing]
 if {$appdeveldir == ""} {
