@@ -587,18 +587,21 @@ ag tags -command {
 	cd $relsrcdir && ctags --c++-kinds=+px $ignoreppopt -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px $ignoreppopt -R $sourcedirs
 }
 
-set gtest_inc $agv::builddir/googletest/googletest-src/googletest/include
+# Test app
 
-if {![file exists $agv::builddir/googletest] || ![file exists $agv::builddir/lib]} {
-	ag test-srt -type custom -runon demand -command {
-		@echo "You need to copy 'googletest' and 'lib' directories from a cmake build directory"
-		@echo "Then re-run agcat. Automatic installation is not yet supported."
-	}
+ag test-srt -type program -s [glob test/*.cpp] -I //apps -depends $TARGET_srt
+set system [lindex [split $tcl_platform(os) _] 0]
+ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$system\"}
+
+# Using GTEST_BASEDIR you can override the Google Test library spec.
+# If not specified, the pkg-config should provide the specs
+pinit GTEST_BASEDIR ""
+if {$GTEST_BASEDIR == ""} {
+	ag test-srt -packages gtest gtest_main
 } else {
-	set system [lindex [split $tcl_platform(os) _] 0]
-	ag test-srt -type program -s [glob test/*.cpp] -I $gtest_inc //apps -depends $TARGET_srt -L //b:lib -libs -- -lgtest -lgtest_main
-	ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$system\"}
+	set GTEST_LIB [file join $GTEST_BASEDIR lib]
+	set GTEST_INC [file join $GTEST_BASEDIR googletest googletest-src googletest include]
+	ag test-srt -I $GTEST_INC -L $GTEST_LIB -libs -- -lgtest -lgtest_main
 }
-
 
 # vim:ft=tclmake
