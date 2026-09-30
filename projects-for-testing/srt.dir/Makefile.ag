@@ -80,11 +80,10 @@ if { $csan != "" } {
 #ag-profile general -imgen mydir-path
 
 # XXX These are not implemented -- please add!
-ag-config enable win32-shared no
+ag-config enable win32-shared no -h "Generate definitions for Win32 DLL"
 
 # This should add -DENABLE_STDCXX_SYNC=1 macro.
-# XXX Helptext for ag-config not supported, please add support!
-ag-config enable stdc++-sync [expr {$STD == "c++03" ? no : yes}] ;# -h "Use C++11 implementation of the sync module"
+ag-config enable stdc++-sync [expr {$STD == "c++03" ? no : yes}] -h "Use C++11 implementation of the sync module"
 
 if {[ag-config enable stdc++-sync ?]} {
 	ag-profile c++ -D HVU_EXT_INCLUDE_SYNC="../srtcore/srt_sync_cxx98.h"
@@ -93,9 +92,9 @@ if {[ag-config enable stdc++-sync ?]} {
 set srtstatic 0
 set srtshared 0
 
-ag-config avail libspec *static *shared
-ag-config enable shared no
-ag-config enable static no
+ag-config avail libspec *static *shared -h "Request static or shared library to build"
+ag-config enable shared no -h "Build shared library"
+ag-config enable static no -h "Build static library"
 set WITH_LIBSPEC [ag-config use libspec]
 
 if { $WITH_LIBSPEC != "" } {
@@ -199,6 +198,36 @@ ag-profile general -depspec cached -dumpinfo on
 # -- Turn on all best warnings
 ag-profile general -cflags -- -Wall -Wextra
 
+# -- Utilities -- 
+
+#puts "HEADERS FOR CTAGS: $all_headers"
+if { [catch {exec git rev-parse --show-toplevel} gittop] } {
+	puts "No git top: not running in a repository"
+	set toplevel_dirs ""
+} else {
+	# List all ls-files at toplevel,
+	#  filter in directory-based,
+	#  cut off dirname,
+	#  collect in toplevel_dirs
+	ppipe exec git ls-files --full-name $gittop | \
+		  lsearch -all -inline % */* | \
+		  pmap [pbind file dirname %] % | \
+		  set toplevel_dirs %
+	# Alternative method for [file dirname], but looks more entangled
+	# First % is interpreted by pbind, second %% turned to % by pbind
+	# pmap [pbind ppipe split % / | lindex %% 0] % | 
+}
+proc find-top-dir {args} {
+	puts "Checking if any found in toplevel '$::gittop': $args"
+
+	foreach name $args {
+		if {$name in $::toplevel_dirs} {
+			return $name
+		}
+	}
+}
+
+
 
 # ------------
 # Targets
@@ -242,25 +271,25 @@ proc config-define {pfx cat name {target {}}} {
 	}
 }
 
-ag-config enable logging on
+ag-config enable logging on -h "Enable logging facility"
 config-define hvu enable logging
 
-ag-config enable heavy-logging $ENABLE_HEAVY_LOGGING_DEFAULT
+ag-config enable heavy-logging $ENABLE_HEAVY_LOGGING_DEFAULT -h "Enable HLOG logging entries, too"
 if {![ag-config enable logging]} {
 	ag-config enable heavy-logging off
 }
 config-define hvu enable heavy-logging
 
-ag-config enable encryption on
+ag-config enable encryption on -h "Build with encryption supported"
 config-define srt enable encryption $TARGET_srt
 
-ag-config enable getnameinfo no
+ag-config enable getnameinfo no -h "Use getnameinfo() to resolve IP names"
 config-define srt enable getnameinfo
 
-ag-config enable pktinfo [expr {$tcl_platform(platform) == "Linux"}]
+ag-config enable pktinfo [expr {$tcl_platform(platform) == "Linux"}] -h "Support pktinfo (prevents same-IP confusion)"
 config-define srt enable pktinfo
 
-ag-config enable bonding on
+ag-config enable bonding on -h "Build with Bonding feature"
 config-define srt enable bonding
 
 # XXX
@@ -304,7 +333,7 @@ if {$STD_SRTLIB != ""} {
 
 # HaiCrypt
 
-ag-config avail enclib  openssl gnutls mbedtls
+ag-config avail enclib  openssl gnutls mbedtls -h "Select encryption library"
 
 set enclib_modules {
 	openssl {libssl libcrypto}
@@ -348,7 +377,7 @@ if {[ag-config enable encryption]} {
 set maf_srt [ag-maf $TARGET_srt srtcore filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 ag $TARGET_srt -hidir srt
 
-lappend sourcedirs srtcore logging
+lappend sourcedirs srtcore {*}[find-top-dir logging]
 
 # XXX This kind of check checks the host, not targed, and is not
 # suitable for cross compiling.
@@ -436,35 +465,9 @@ if {[ag-config enable encryption]} {
 	lappend all_headers {*}[dict:sel $maf_haicrypt -glob "* HEADERS"]
 }
 
-#puts "HEADERS FOR CTAGS: $all_headers"
-
 set appdir apps
 #set appdeveldir devel-apps
 # "testing" was renamed to "tools"; check which of these is there
-proc find-top-dir {args} {
-	if { [catch {exec git rev-parse --show-toplevel} gittop] } {
-		puts "ERROR: not running in a repository"
-		return
-	}
-	puts "Checking if any found in toplevel '$gittop': $args"
-
-	# List all ls-files at toplevel, filter directory-based, cut off dirname, collect in dirs
-	ppipe exec git ls-files --full-name $gittop | \
-		lsearch -all -inline % */* | \
-		pmap [pbind file dirname %] % | \
-		set dirs %
-	# Alternative method for [file dirname], but looks more entangled
-	# First % is interpreted by pbind, second %% turned to % by pbind
-	# pmap [pbind ppipe split % / | lindex %% 0] % | 
-
-
-	foreach name $args {
-		if {$name in $dirs} {
-			return $name
-		}
-	}
-}
-
 # Handle rename in dev
 set appdeveldir [find-top-dir tools testing]
 if {$appdeveldir == ""} {
@@ -610,17 +613,36 @@ ag tags -command {
 	cd $relsrcdir && ctags --c++-kinds=+px $ignoreppopt -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px $ignoreppopt -R $sourcedirs
 }
 
-set gtest_inc $agv::builddir/googletest/googletest-src/googletest/include
+# Test app
 
-if {![file exists $agv::builddir/googletest] || ![file exists $agv::builddir/lib]} {
-	ag test-srt -type custom -runon demand -command {
-		@echo "You need to copy 'googletest' and 'lib' directories from a cmake build directory"
-		@echo "Then re-run agcat. Automatic installation is not yet supported."
-	}
+ag test-srt -type program -I //apps -depends $TARGET_srt
+#ag test-srt -s [glob test/*.cpp]
+ag-maf test-srt test filelist.maf -s SOURCES
+
+puts "SOURCES EXTRACTED FOR test-srt:\n[ag test-srt ?sources]"
+
+ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$BUILD_TARGET\"}
+
+# Using --with-gtest-basedir you can override the Google Test library spec.
+# If not specified, the pkg-config should provide the specs
+
+ag-option --with-gtest-basedir "" -h "Specify manually gtest directory"
+
+# You can also use GTEST_BASEDIR call variable.
+pinit GTEST_BASEDIR [ag-option --with-gtest-basedir]
+if {$GTEST_BASEDIR == ""} {
+	ag test-srt -packages gtest gtest_main
 } else {
-	ag test-srt -type program -s [glob test/*.cpp] -I $gtest_inc //apps -depends $TARGET_srt -L //b:lib -libs -- -lgtest -lgtest_main
-	ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$BUILD_TARGET\"}
-}
+	set GTEST_LIB [file join $GTEST_BASEDIR lib]
+	set GTEST_INC [file join $GTEST_BASEDIR googletest googletest-src googletest include]
+	puts "GTEST_BASEDIR: [file normalize $GTEST_BASEDIR]"
 
+	if {![file isdirectory $GTEST_LIB] || ![file isdirectory $GTEST_INC]
+			|| [glob -nocomplain $GTEST_LIB/*] == ""} {
+		error "Wrong GTEST_BASEDIR=$GTEST_BASEDIR (empty or nonexistent)"
+	}
+
+	ag test-srt -I $GTEST_INC -L $GTEST_LIB -libs -- -lgtest -lgtest_main
+}
 
 # vim:ft=tclmake

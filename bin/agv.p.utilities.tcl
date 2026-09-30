@@ -386,7 +386,7 @@ proc MafRead {directory {filename {}}} {
 
 	set isgo 1
 
-	set gotempty no
+	set gotempty yes ;# must start with at least one label
 
 	while { [gets $fd line] >= 0 } {
 		set oline [string trim $line]

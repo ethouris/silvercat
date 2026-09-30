@@ -824,13 +824,36 @@ proc ag-config {category key args} {
 	# and they can have arguments; -h is one of them. It's not even
 	# handled here.
 
-	while {[string index $args 0] == "-"} {
+	# Default is 0
+	set optscheme(-h) 1
+
+	set values() ""
+	set lastkey ""
+
+	while {$args != ""} {
 		set args [lassign $args first]
 		if {$first == "--"} {
 			break
 		}
-		lappend options $first
+		if {[string index $first 0] == "-"} {
+			lappend options $first
+			if {[info exists optscheme($first)]} {
+				if {$optscheme($first) == 1} {
+					set args [lassign $args values($first)]
+				} elseif {$optscheme($first) == -1} {
+					# Extract all
+					set values($first) $args
+					set args ""
+				}
+				# For 0 same as nonexistent: do not grab
+			}
+		} else {
+			lappend values() $first
+		}
 	}
+	set args $values()
+
+	#puts stderr "*DEBUG* ag-config $category-$key ARGS='$args' OPTS='[array get values]'"
 
 	# Usage: ag-config avail <KEY> [options] values...
 	# Options:
@@ -866,7 +889,7 @@ proc ag-config {category key args} {
 
 	switch -- $category {
 		avail {
-			if { "-check" in $options} {
+			if { "-check" in $options } {
 				# This is an alternative to specify *value
 				set val ""
 				foreach v $args {
@@ -885,6 +908,10 @@ proc ag-config {category key args} {
 			if {[dict exists $::agv::config_override use $key]} {
 				set vals [dict get $::agv::config_override use $key]
 				CheckSetConfigUse $key $vals
+			}
+
+			if {[info exists values(-h)]} {
+				dict set ::agv::config_help use-$key $values(-h)
 			}
 		}
 
@@ -921,6 +948,10 @@ proc ag-config {category key args} {
 
 			set varname "::agv::p::config_${category}($key)"
 
+			if {[info exists values(-h)]} {
+				dict set ::agv::config_help $category-$key $values(-h)
+			}
+
 			if {[dict exists $agv::config_override $category $key]} {
 				set oval [dict get $agv::config_override $category $key]
 				if {$oval == ""} {
@@ -935,6 +966,7 @@ proc ag-config {category key args} {
 			}
 
 			# Translate the universal boolean option into 0/1.
+			#puts stderr "*DEBUG* CONFIG: '$varname = $args'"
 			set $varname [expr {!!$args}]
 		}
 
@@ -4657,6 +4689,42 @@ if {$display_options} {
 			set opttype "<value>"
 		}
 		puts "  --[format "%-${maxlen}s : %s\n      %s" $k $opttype $v]"
+	}
+	if {$agv::config_help != ""} {
+		set maxlen 0
+		foreach {k v} $agv::config_help {
+			set maxlen [expr {max($maxlen,[string length $k])}]
+		}
+		puts "Configuration options:"
+
+		# XXX Default value not printed!
+		foreach {k help} $agv::config_help {
+			set knp [lassign [split $k -] cat]
+			set key [join $knp -]
+			if {$cat == "use"} {
+				# One selected is default, enumerate values
+				set opttype [pget agv::p::config_avail($key)]
+				if {$opttype != "" && [info exists agv::p::config_use($key)]} {
+					append opttype " (default: $agv::p::config_use($key)"
+				}
+			} else {
+				# Only boolean allowed here
+				#parray ::agv::p::config_$cat
+				set aname "::agv::p::config_$cat\($key)"
+				if {[info exists $aname]} {
+					set enabled [set $aname]
+					if {[string is boolean $enabled]} {
+						set enabled [lindex {DISABLED ENABLED} [expr {!!$enabled}]]
+					} elseif {$enabled == ""} {
+						set enabled DISABLED
+					}
+					set opttype "(default: $enabled)"
+				} else {
+					set opttype "UNKNOWN?"
+				}
+			}
+			puts "  --[format "%-${maxlen}s : %s\n      %s" $k $opttype $help]"
+		}
 	}
 	exit 1
 }
