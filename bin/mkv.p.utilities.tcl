@@ -186,19 +186,31 @@ proc pupdate {filename contents} {
 
 # This function is directly copied from 'apply' Tcl manpage.
 # Just wanted to be clear about it, although it doesn't kick, but...
-proc pmap {lambda list} {
+proc pmaps {lambda list} {
 	set result {}
 	if { [llength $lambda] == 1 } {
 		# Then it's a command name
 		foreach item $list {
-		        lappend result [$lambda $item]
+			lappend result [$lambda $item]
 		}
 	} else {
 		foreach item $list {
-		        lappend result [apply $lambda $item]
+			lappend result [apply $lambda $item]
 		}
 	}
 	return $result
+}
+
+proc pmap {lambda list} {
+	lassign $lambda arglist body
+	if {$body == ""} {
+		error "pmap: Not a lambda expression: '$lambda'"
+	}
+	if {[llength $arglist] != 1} {
+		error "pmap: expected lambda with one argument, got '$arglist'"
+	}
+	#puts stderr "*DEBUG*:pmap: lmap $arglist {$list} { $body }"
+	return [lmap $arglist $list $body]
 }
 
 # Some people do not like lambdas and prefer just argument number.
@@ -217,33 +229,73 @@ proc pbind {args} {
 	# % - alias to %0
 	# %* - all arguments, having variadic arguments
 	# %<n> - nth argument
-	set outpipe ""
-	foreach it $args {
-		if {[string index $it 0] == "%"} {
-			switch -glob -- [string index $it 1] {
-				% {
-					# if this is % followed by %, simply append
-					# whatever follows this %. This allows multiplying
-					# % in nested ppipe expressions
-					append outpipe "[string range $it 1 end] "
-				}
-				"" {
-					append outpipe {[lindex $args 0] }
-				}
-				[0-9] {
-					set n [expr 0+[string range $it 1 end]]
-					append outpipe "\[lindex \$args $n\] "
-				}
-				* {
-					append outpipe "\$args "
-				}
+
+
+	# Mind a problem if __arg__ is already there, in
+	set argpx __arg__
+	set keeppx __keep__
+
+	set found no
+	if {[string first $argpx $args] != -1} {
+		for {set i 65} {$i < 91} {incr i} {
+			set argpx [format "__arg%c__" $i]
+			if {[string first $argpx $args] != -1} {
+				set found yes
+				break
 			}
-		} else {
-			append outpipe "$it "
+		}
+		if {!$found} {
+			error "pbind: body must not contain __arg*__ named variables"
 		}
 	}
 
-	return [list args $outpipe]
+	# Pre-fetch %% to avoid replacement of % later
+	set outbody [string map [list %% $keeppx] $args]
+
+	# Now all % -> __arg__ and %% -> __keep__
+	set outbody [string map [list % $argpx] $outbody]
+	#puts stderr "DEBUG: phase1: '$outbody'"
+
+	# Now all % -> __arg__ and %% -> %
+	set outbody [string map [list $keeppx %] $outbody]
+	#puts stderr "DEBUG: phase2: '$outbody'"
+
+	set found no
+
+	# Extract the numbers following __arg__; so
+	# every __arg__3 is turned into [lindex $args 3]
+	set match_indices [regexp -all -inline -indices "${argpx}(\[0-9\]*)" $outbody] 
+
+	set out ""
+	set lastend 0
+	foreach {argmatch submatch} $match_indices {
+		lassign $argmatch abegin end
+		lassign $submatch begin end
+
+		# First, grab the string fragment in between
+		if {$lastend < $abegin} {
+			set send [expr $abegin-1]
+			append out [string range $outbody $lastend $send]
+		}
+
+		if {$begin > $end} {
+			# single __arg__ 
+			append out "\$\{args\}"
+		} else {
+			# Identify the number
+			set n [string range $outbody $begin $end]
+			append out "\[lindex \$args $n\]"
+		}
+		#puts stderr "* pbind: append @$lastend + @$abegin-@${end}([string range $outbody $abegin $end]): $out"
+		set lastend [expr {$end+1}]
+	}
+	if {$end < [string length $outbody]} {
+		incr end
+		append out [string range $outbody $end end]
+		#puts stderr "* pbind: final append @$end-end([string range $outbody $end end]): $out"
+	}
+	return [list args $out]
+
 }
 
 proc pfind {args} {
@@ -666,6 +718,36 @@ proc process-options {argv optargd} {
 	return [list $args $variables $longoptions]
 }
 
+proc help-options {help {width 80}} {
+
+	set fortext {}
+	set maxlen 0
+	foreach l [split $help \n] {
+		set l [string trim $l]
+		if {$l == ""} {
+			continue
+		}
+		set parts [split $l :]
+		set parts [lassign $parts name]
+		set txt [string trim [join $parts :]]
+		set name [string trim $name]
+		lappend fortext $name $txt
+		set maxlen [expr {max($maxlen,[string length $name])}]
+	}
+	# This can be improved to maintain the maximum width
+	# Simple version, skipped for now
+
+	set output ""
+	foreach {name txt} $fortext {
+		if {$txt == ""} {
+			append output "  $name\n"
+		} else {
+			append output [format "  %-${maxlen}s: %s\n" $name $txt]
+		}
+	}
+	return $output
+}
+
 proc pass args { return $args }
 
 proc pver {args} {
@@ -712,9 +794,19 @@ proc pdip {format list} {
 	if {$format == ""} {
 		error "pdip: format cannot be empty"
 	}
-	set pproc {return [string map "[list % \$n]" $format]}
+
+	set pproc {string map "[list % \$n]" $format}
 	set pproc [subst -nocommands $pproc]
-	return [[namespace current]::pmap [list n $pproc] [[namespace current]::plist $list]]
+	set pmap_cmd [namespace current]::pmap
+	set lamda [list n $pproc]
+	set post_list [[namespace current]::plist {*}$list]
+
+	#puts stderr "*DEBUG* pdip: format=$format list=$list ;"
+	#puts stderr "... lamda='$lamda' real-list=$post_list"
+
+	set post [$pmap_cmd $lamda $post_list]
+	#puts stderr "... processed: $post"
+	return $post
 }
 
 # Returns first string from the list that is nonempty
@@ -987,6 +1079,7 @@ proc pswap {ra rb} {
 	return
 }
 
+
 set public_export_util [puncomment {
 
 	# Utility functions
@@ -1027,6 +1120,7 @@ set public_export_util [puncomment {
 	pswap
 	pdispatch
 	process-options
+	help-options
 	number-cores
 	dict:at
 	dict:filterkey

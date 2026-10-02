@@ -6,7 +6,10 @@ lassign [split $SRT_VERSION .] SRT_VERSION_MAJOR SRT_VERSION_MINOR SRT_VERSION_P
 
 #set VERSION 1.3.0
 
-if { [info exists ENABLE_CLANG_SANITIZER] } {
+# Check prior to selecting the toolchain
+ag-config enable clang-tsa no -h "Compile with clang Thread Safety Analysis mode (requires clang as compiler)"
+
+if {[ag-config enable clang-tsa ?]} {
 	set USE_CLANG 1
 }
 
@@ -93,8 +96,8 @@ set srtstatic 0
 set srtshared 0
 
 ag-config avail libspec *static *shared -h "Request static or shared library to build"
-ag-config enable shared no -h "Build shared library"
-ag-config enable static no -h "Build static library"
+ag-config enable shared no -h "Build shared library (--use-libspec overrides this)"
+ag-config enable static no -h "Build static library (--use-libspec overrides this)"
 set WITH_LIBSPEC [ag-config use libspec]
 
 if { $WITH_LIBSPEC != "" } {
@@ -208,23 +211,25 @@ if { [catch {exec git rev-parse --show-toplevel} gittop] } {
 	# List all ls-files at toplevel,
 	#  filter in directory-based,
 	#  cut off dirname,
+	# (( here % is interpreted by `pbind`, then %% by `ppipe` ))
+	set filter_dirname [pbind ppipe file split % | lindex %% 0]
 	#  collect in toplevel_dirs
 	ppipe exec git ls-files --full-name $gittop | \
 		  lsearch -all -inline % */* | \
-		  pmap [pbind file dirname %] % | \
+		  pmap $filter_dirname % | \
+          pluniq % | \
 		  set toplevel_dirs %
-	# Alternative method for [file dirname], but looks more entangled
-	# First % is interpreted by pbind, second %% turned to % by pbind
-	# pmap [pbind ppipe split % / | lindex %% 0] % | 
 }
 proc find-top-dir {args} {
-	puts "Checking if any found in toplevel '$::gittop': $args"
+	puts -nonewline "Checking dir at '$::gittop': $args ... "; flush stdout
 
 	foreach name $args {
 		if {$name in $::toplevel_dirs} {
+			puts $name
 			return $name
 		}
 	}
+	puts "NONE FOUND!"
 }
 
 
@@ -263,7 +268,7 @@ proc config-define {pfx cat name {target {}}} {
 	
 	if {[ag-config $cat $name]} {
 		if {$target == {}} {
-			ag-profile {c c++} -D SRT_$ppvar=1
+			ag-profile {c c++} -D $ppvar=1
 		} else {
 			ag $target -D SRT_$ppvar=1
 		}
@@ -333,12 +338,24 @@ if {$STD_SRTLIB != ""} {
 
 # HaiCrypt
 
-ag-config avail enclib  openssl gnutls mbedtls -h "Select encryption library"
+ag-config avail enclib openssl-evp openssl gnutls mbedtls botan -h "Select encryption library"
 
 set enclib_modules {
+	openssl-evp {libssl libcrypto}
 	openssl {libssl libcrypto}
 	gnutls {gnutls nettle}
 	mbedtls {mbedtls mbedcrypto}
+	botan botan
+}
+
+set enclib_cryspr2 {
+	openssl-evp
+	openssl
+	botan
+}
+
+proc macroflag {flag} {
+	return [string toupper [string map {- _ + X} $flag]]
 }
 
 set host_system [lindex [split $tcl_platform(os) _] 0]
@@ -364,12 +381,15 @@ if {[ag-config enable encryption]} {
 		lappend sourcedirs common
 	}
 
-	ag $TARGET_haicrypt -D {
-	   HAICRYPT_USE_OPENSSL_EVP=1
-	   HAICRYPT_USE_OPENSSL_AES
+	if {$USE_ENCLIB == "openssl-evp"} {
+		ag $TARGET_haicrypt -D HAICRYPT_USE_OPENSSL_EVP=1
+	}
+	ag $TARGET_haicrypt -D HAICRYPT_USE_OPENSSL_AES
+	if {$USE_ENCLIB in $enclib_cryspr2} {
+		ag $TARGET_haicrypt -D CRYSPR2
 	}
 
-	set enclib_defines "-D USE_[string toupper $USE_ENCLIB]"
+	set enclib_defines "-D USE_[macroflag $USE_ENCLIB]"
 
 	ag $TARGET_haicrypt {*}$enclib_defines
 }
@@ -394,8 +414,9 @@ if { [pget tcl_platform(os)] == "Linux" } {
 }
 
 # In case when using clang, add -Wthread-safety
-if {$GCCBASE == "clang"} {
-	ag $TARGET_srt -cflags -- -Wthread-safety
+if {$GCCBASE == "clang" && [ag-config enable clang-tsa ?]} {
+	ag $TARGET_srt -cflags -- -Wthread-safety -Wthread-safety-beta
+	ag $TARGET_srt -D SRT_ENABLE_CLANG_TSA=1
 }
 
 set DEFINE_SRT_VERSION_BUILD ""
@@ -425,12 +446,14 @@ ag srt_pc -type custom -install lib -installdir pkgconfig -s scripts/srt.pc.in -
 # XXX Use MAF file to specify these details!
 
 # Include directories (see Issue #72)
-ag-profile general -I [pdip $agv::srcdir/% {
+set extra_incdir [pdip $agv::srcdir/% {
 	srtcore
 	haicrypt
 	common
 	logging
 }]
+ag-profile {c c++} -I $extra_incdir
+#puts "EXTRA -I: $extra_incdir"
 
 # Definitions
 ag-profile general -D {
@@ -473,7 +496,6 @@ set appdeveldir [find-top-dir tools testing]
 if {$appdeveldir == ""} {
 	error "No 'testing' or 'tools' directory found in toplevel"
 }
-puts "DEVEL APPS DIR FOUND: $appdeveldir"
 set exampledir examples
 
 # Turn off compiling applications if static srt is unwanted
@@ -619,7 +641,7 @@ ag test-srt -type program -I //apps -depends $TARGET_srt
 #ag test-srt -s [glob test/*.cpp]
 ag-maf test-srt test filelist.maf -s SOURCES
 
-puts "SOURCES EXTRACTED FOR test-srt:\n[ag test-srt ?sources]"
+#puts "SOURCES EXTRACTED FOR test-srt:\n[ag test-srt ?sources]"
 
 ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$BUILD_TARGET\"}
 

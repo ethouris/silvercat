@@ -3311,11 +3311,6 @@ proc ag-do-genrules target {
 		append varexpr "'$vname=$vval' "
 	}
 
-	set cmdf \
-{
-	[mkv::MAKE] clean && !agcmd -f !agfile !varexpr !options
-}
-
 	# These actions were added previously to enforce restarting make and do nothing afterwards.
 	# This is now supported by make as autodetected makefile regeneration, so it's no longer needed
 	#%submake [pget mkv::targets]
@@ -3337,9 +3332,28 @@ proc ag-do-genrules target {
 			lappend maybe_options -p $k $v
 		}
 	}
+	if { $agv::config_override != "" } {
+		foreach {cat d} $agv::config_override {
+			foreach {name val} $d {
+				lappend maybe_options "--$cat-$name=$val"
+			}
+		}
+	}
+	if { $agv::useropt_override != "" } {
+		foreach {k v} $agv::useropt_override {
+			lappend maybe_options "--$k=$v"
+		}
+	}
 
-	ag reconfigure -type custom -flags noclean distclean -clean none -runon demand \
-			-command {[string map [list !agcmd [agv::AG] !agfile $agfile_inmake !varexpr $varexpr !options $maybe_options] $cmdf]}
+	set cmdf "\t[mkv::MAKE] clean && !agcmd -f !agfile !varexpr !options"
+
+	set cmdsub [plist {
+		!agcmd [agv::AG]
+		!agfile $agfile_inmake
+		!varexpr $varexpr
+		!options $maybe_options
+	}]
+	ag reconfigure -type custom -flags noclean distclean -clean none -runon demand -command {[string map $cmdsub $cmdf]}
 
 	ag reconfigure-ifneeded -type custom -flags noclean distclean -clean none -sources $::agfile -output Makefile.tcl $agv::generated_files \
 			-command {	%submake reconfigure}
@@ -4686,7 +4700,7 @@ if {$display_options} {
 			}
 		} else {
 			#puts "HAVE NO FILTER: $k"
-			set opttype "<value>"
+			set opttype ""
 		}
 		puts "  --[format "%-${maxlen}s : %s\n      %s" $k $opttype $v]"
 	}
@@ -4695,7 +4709,7 @@ if {$display_options} {
 		foreach {k v} $agv::config_help {
 			set maxlen [expr {max($maxlen,[string length $k])}]
 		}
-		puts "Configuration options:"
+		puts "\nConfiguration options ((*)=selected \[x\]=included):"
 
 		# XXX Default value not printed!
 		foreach {k help} $agv::config_help {
@@ -4703,9 +4717,37 @@ if {$display_options} {
 			set key [join $knp -]
 			if {$cat == "use"} {
 				# One selected is default, enumerate values
-				set opttype [pget agv::p::config_avail($key)]
-				if {$opttype != "" && [info exists agv::p::config_use($key)]} {
-					append opttype " (default: $agv::p::config_use($key)"
+				set values [pget agv::p::config_avail($key)]
+
+				set defval ""
+				if { $values != "" && [info exists agv::p::config_use($key)] } {
+					set defval $agv::p::config_use($key)
+				}
+				set check no
+				if {[string index $values 0] == "*"} {
+					# NOTE: ASSUMED that config_avail contains
+					# only and exclusively correct syntax.
+					set check yes
+				}
+				if {$check} {
+					set markdef "\[x\]"
+					set markopt "\[ \]"
+				} else {
+					set markdef "(*)"
+					set markopt "( )"
+				}
+				set opttype ""
+				foreach v $values {
+					if {$check} {
+						set v [string range $v 1 end]
+					}
+						
+					if {$v == $defval} {
+						append opttype $markdef
+					} else {
+						append opttype $markopt
+					}
+					append opttype "$v "
 				}
 			} else {
 				# Only boolean allowed here
@@ -4714,13 +4756,13 @@ if {$display_options} {
 				if {[info exists $aname]} {
 					set enabled [set $aname]
 					if {[string is boolean $enabled]} {
-						set enabled [lindex {DISABLED ENABLED} [expr {!!$enabled}]]
+						set enabled [expr {!!$enabled}]
 					} elseif {$enabled == ""} {
-						set enabled DISABLED
+						set enabled 0
 					}
-					set opttype "(default: $enabled)"
+					set opttype [lindex {(/)DISABLED (*)ENABLED} $enabled]
 				} else {
-					set opttype "UNKNOWN?"
+					set opttype "(UNDEFINED)"
 				}
 			}
 			puts "  --[format "%-${maxlen}s : %s\n      %s" $k $opttype $help]"

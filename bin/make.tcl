@@ -685,7 +685,7 @@ proc check_generic_upd_first {target} {
 	variable first_rule
 	# remove all "* ? [ ]", but leave untouched "\* \? \[ \]"
 	set checked [string map {{\*} {\*} {\?} {\?} {\[} {\[} {\]} {\]} * {} ? {} {[} {} {]} {}} $target]
-	if { $checked != $target } {
+if { $checked != $target } {
 		return true
 	} else {
 		if { $first_rule == "" } {
@@ -2122,7 +2122,21 @@ proc main argv {
 		-j jobs
 		-x tcl_command
 		-v *verbose
+		-p print_rule
 		--submake-parentdir parentdir
+	}
+
+	set g_opthelp {
+		--help :
+		-h : This help text
+		-C <dir> : Change directory to <dir> before running
+		-f <file> : Use <file> as makefile configuration
+		-k : Do not stop at first error
+		-j <N> : Use <N> max jobs ('j' = number of cores)
+		-x <command> : Execute a Tcl command in makefile
+		-v : Display verbose information
+		-d : Display debugging information
+		-p <rule> : Display command assigned to specified rule
 	}
 
 	set keep_going 0
@@ -2134,14 +2148,16 @@ proc main argv {
 	set jobs 1
 	set parentdir ""
 	set tcl_command ""
+	set print_rule ""
 
 	lassign [process-options $argv $g_optargs] cmd_args cmd_variables
 
 	if { $help } {
 		puts stderr "Options:"
-		foreach {opt arg} $g_optargs {
-		        puts stderr [format "  %-8s %s" $opt: $arg]
-		}
+		#foreach {opt arg} $g_optargs {
+		#        puts stderr [format "  %-8s %s" $opt: $arg]
+		#}
+		puts stderr [help-options $g_opthelp]
 		return 1
 	}
 
@@ -2223,6 +2239,31 @@ proc main argv {
 		uplevel #0 $tcl_command
 	} elseif {$cmd_args == ""} {
 		set cmd_args $mkv::p::first_rule
+	}
+
+	if {$print_rule != ""} {
+		if {[info exists mkv::p::db_actions($print_rule)]} {
+			set ac $mkv::p::db_actions($print_rule)
+			set back ""
+			foreach l [split $ac \n] {
+				set o [string trim $l]
+				if {$o == ""} {
+					continue
+				}
+				if {[string index $o end] == "\\"} {
+					append back " [string range $o 0 end-1]"
+				} else {
+					puts "$back$o"
+					set back ""
+				}
+			}
+			if {$back != ""} {
+				puts $back
+			}
+			exit 0
+		}
+		puts stderr "No action found for '$print_rule'"
+		exit 1
 	}
 
 	# Here cmd_args can only be empty if there was an -x command.
