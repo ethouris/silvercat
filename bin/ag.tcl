@@ -826,34 +826,17 @@ proc ag-config {category key args} {
 
 	# Default is 0
 	set optscheme(-h) 1
+	set optscheme(-default) -1
 
-	set values() ""
-	set lastkey ""
+	set vald [mkv::p::ParseOptionsConfig $args [array get optscheme]]
+	array set values $vald
+	set options [array names values]
 
-	while {$args != ""} {
-		set args [lassign $args first]
-		if {$first == "--"} {
-			break
-		}
-		if {[string index $first 0] == "-"} {
-			lappend options $first
-			if {[info exists optscheme($first)]} {
-				if {$optscheme($first) == 1} {
-					set args [lassign $args values($first)]
-				} elseif {$optscheme($first) == -1} {
-					# Extract all
-					set values($first) $args
-					set args ""
-				}
-				# For 0 same as nonexistent: do not grab
-			}
-		} else {
-			lappend values() $first
-		}
-	}
+	#puts stderr "CONFIG/DEBUG($category-$key): PARSE: $args ; VALUES: $vald"
+
 	set args $values()
 
-	#puts stderr "*DEBUG* ag-config $category-$key ARGS='$args' OPTS='[array get values]'"
+	# puts stderr "*DEBUG* ag-config $category-$key ARGS='$args' OPTS='[array get values]'"
 
 	# Usage: ag-config avail <KEY> [options] values...
 	# Options:
@@ -889,26 +872,80 @@ proc ag-config {category key args} {
 
 	switch -- $category {
 		avail {
+
+			# Default value handling:
+			# - args may be empty, but all -default options must be also
+			# added to the list.
+			# - these arguments are ALSO there.
+			set default_values ""
+			if { "-default" in $options } {
+				set default_values $values(-default)
+				# puts stderr "CONFIG/DEBUG: have defaults: $default_values"
+				foreach v $values(-default) {
+					if {$v ni $args} {
+						lappend args $v
+					}
+				}
+			}
+			# puts stderr "CONFIG/DEBUG: args='$args' defaults=$default_values"
+
+			set check no
 			if { "-check" in $options } {
 				# This is an alternative to specify *value
+				set check yes
 				set val ""
 				foreach v $args {
+					if {[string index $v 0] == "*"} {
+						error "ag-config avail $key: if -check is used, do not use * with options"
+					}
 					lappend val *$v
 				}
 				set args $val
+				#puts stderr "CONFIG/DEBUG: FOUND -check option; values: $args"
+			} else {
+				if {[string index $args 0] == "*"} {
+					set check yes
+					foreach v $args {
+						if {[string index $v 0] != "*"} {
+							error "ag-config avail $key: all or none of options shall use *"
+						}
+					}
+				}
 			}
+			# puts stderr "CONFIG/DEBUG: avail check=$check values: $args"
 
 			if { "-add" in $options } {
-				lappend ::agv::p::config_avail($key) $args
+				lappend ::agv::p::config_avail($key) {*}$args
 			} else {
 				set ::agv::p::config_avail($key) $args
 			}
+
+			# puts stderr "CONFIG/DEBUG: AVAIL(declared): $::agv::p::config_avail($key)"
+			if {!$check} {
+				# If there's no check, only one can be default
+				if {$default_values == ""} {
+					set default_values [lindex $::agv::p::config_avail($key) 0]
+				} else {
+					set default_values [lindex $default_values 0]
+				}
+			} else {
+				set o ""
+				foreach d $default_values {
+					lappend o [string range $d 1 end] ;# strip *
+				}
+				set default_values $o
+				unset o
+			}
+			# puts stderr "CONFIG/DEBUG: AVAIL: $::agv::p::config_avail($key) DEFAULT(declared): $default_values"
 
 			# Check (possibly again) the overrides.
 			if {[dict exists $::agv::config_override use $key]} {
 				set vals [dict get $::agv::config_override use $key]
 				CheckSetConfigUse $key $vals
+			} else {
+				CheckSetConfigUse $key $default_values
 			}
+			# puts stderr "CONFIG/DEBUG: EFFECTIVE USE: $::agv::p::config_use($key)"
 
 			if {[info exists values(-h)]} {
 				dict set ::agv::config_help use-$key $values(-h)
@@ -981,7 +1018,7 @@ proc CheckSetConfigUse {key vals} {
 	if {$ln != 1} {
 		set val ""
 		foreach v $vals {
-			if {*$v in $::agv::p::config_avail($key)} {
+			if {"*$v" in $::agv::p::config_avail($key)} {
 				lappend val $v
 			} else {
 				error "For --use-$key, '$v' is not available as a multi-value"
@@ -991,7 +1028,7 @@ proc CheckSetConfigUse {key vals} {
 	} else {
 		# Single option can be still a multi-value!
 		if {$vals in $::agv::p::config_avail($key) ||
-				*$vals in $::agv::p::config_avail($key)} {
+				"*$vals" in $::agv::p::config_avail($key)} {
 			set ::agv::p::config_use($key) $vals
 		} else {
 			error "For --use-$key, '$v' is not available"
@@ -4390,7 +4427,16 @@ if { !$tcl_interactive } {
 }
 
 if { [info exists ::env(AG_LIB_PATH)] } {
-	foreach p $::env(AG_LIB_PATH) {
+
+	set sep " "
+	if {$tcl_platform(platform) == "unix"} {
+		set sep :
+	} else {
+		set sep ;
+	}
+	set libpath [split $::env(AG_LIB_PATH) $sep]
+
+	foreach p $libpath {
 		lappend agv::libpath [file nornalize $p]
 	}
 } elseif { $def_ag_lib_path != "" } {
@@ -4451,9 +4497,13 @@ set opt_help {
 	-c "<key> <val>..." "Override settings provided from a config file"
 	-r "<agfile> ?key?..." "Read and print database entries from a file"
 	--prefix "<path>" "Enforce install prefix (same as -p install:prefix <path>)"
+	--options "" "Display available project options (not running generation)"
 }
 
-lassign [process-options $argv $ag_optargs] g_args g_variables g_longoptions
+if {[catch {lassign [process-options $argv $ag_optargs] g_args g_variables g_longoptions} outmsg]} {
+	puts "\nError: $outmsg\n"
+	set help 1
+}
 
 if { $help } {
 	puts "Usage: [file tail $::argv0] ?options? <target>"
@@ -4768,6 +4818,34 @@ if {$display_options} {
 			puts "  --[format "%-${maxlen}s : %s\n      %s" $k $opttype $help]"
 		}
 	}
+	exit 1
+}
+
+# Ok, before you proceed to processing, check if all overrides refer to existing options.
+set erroropt 0
+foreach {opt val} $agv::useropt_override {
+	if {![dict exists $agv::useropt $opt]} {
+		puts stderr "*** ERROR: unknown option: --$opt"
+		incr erroropt
+	}
+}
+foreach {ocat ocdix} $agv::config_override {
+	set container agv::p::config_$ocat
+	if {![info exists $container]} {
+		puts stderr "*** ERROR: No option with --$ocat* category"
+		incr erroropt
+	} else {
+		foreach name [dict keys $ocdix] {
+			set holder "${container}($name)"
+			if {![info exists $holder]} {
+				puts stderr "*** ERROR: No such config option: --$ocat-$name"
+				incr erroropt
+			}
+		}
+	}
+}
+if {$erroropt} {
+	puts stderr "+++ Generation stopped - $erroropt invalid options"
 	exit 1
 }
 

@@ -215,8 +215,8 @@ namespace eval fw {
 			$::g_debug "Unrecognized packages: $newpkg"
 
 			if { $newpkg != "" } {
-				puts stderr "ERROR: Packages not found: $newpkg"
-				error "Cannot configure due to lacking packages"
+				puts stderr "*** fw/pkg-config: ERROR: Packages not found: $newpkg"
+				error "Cannot configure due to missing packages"
 			}
 
 			dict set db packages ""

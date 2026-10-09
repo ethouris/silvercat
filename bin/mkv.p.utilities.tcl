@@ -29,6 +29,18 @@ proc pset {name args} {
 	return $var
 }
 
+proc pshift {r_list {nelems 1}} {
+	upvar $r_list list
+
+	set len [llength $list]
+	if {$len == 0 || $nelems <= 0} {
+		return
+	}
+	set out [lrange $list 0 [expr {$nelems-1}]]
+	set list [lrange $list $nelems end]
+	return $out
+}
+
 proc RegexpJoinWords {a1 args} {
 	set out "^($a1"
 	foreach a $args {
@@ -134,6 +146,71 @@ proc pget {name {default ""}} {
 
     return $lname
 }
+
+# Looks like general-purpose utility; consider merging with process-options.
+proc ParseOptionsConfig {arglist scheme} {
+	array set optscheme $scheme
+
+	set values() ""
+	set lastkey ""
+
+	while {$arglist != ""} {
+		set first [pshift arglist]
+		## puts stderr "GRAB: '$first' - remain: $arglist"
+		if {$first == "--"} {
+			break
+		}
+		if {[string index $first 0] == "-"} {
+			lappend options $first
+			## puts stderr "OPTION: $first SCHEME: [pget optscheme($first) 0(default)]"
+			if {[info exists optscheme($first)]} {
+				if {$optscheme($first) == 1} {
+					set arglist [lassign $arglist values($first)]
+					## puts stderr "ARG: 1, val=$values($first), remain: $arglist"
+				} elseif {$optscheme($first) == -1} {
+					# Consume all up to the next option
+					# Unless you get --, in which case others
+					# are consumed with no regard of option
+					## puts stderr "ARG: INF, CHECKING END: $arglist..."
+
+					set trackopt yes
+					set stopped no
+					for {set i 0} {$i < [llength $arglist]} {incr i} {
+						set v [lindex $arglist $i]
+						## puts stderr "... '$v' - will track option: $trackopt"
+						if {$trackopt} {
+							if {[string index $v 0] == "-"} {
+								if {$v == "--"} {
+									## puts stderr "... NOOPT. val=$values($first) rem: will be added: [lrange $arglist $i+1 end]"
+									set trackopt no
+									continue
+								}
+								# Break here, remove used values
+								set arglist [lrange $arglist $i end]
+								#puts stderr "... v=$v STOP HERE. remain: $arglist"
+								set stopped yes
+								break
+							}
+						}
+						## puts stderr "... val=[pget values($first)] ADDING: '$v', REMAIN: [lrange $arglist $i+1 end]"
+						lappend values($first) $v
+					}
+					## puts stderr "ARG: INF: val=[pget values($first)] remain: $arglist"
+					if {!$stopped} {
+						#set values($first) $arglist
+						set arglist ""
+					}
+				}
+				# For 0 same as nonexistent: do not grab
+			}
+		} else {
+			lappend values() $first
+		}
+	}
+
+	return [array get values]
+}
+
 
 proc palias {name body} {
 	set procbody "return \[$body {*}\$args\]"
