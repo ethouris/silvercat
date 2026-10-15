@@ -73,6 +73,25 @@ if { $csan != "" } {
 	ag-profile {c c++} -ldflags -- -fsanitize=$csan
 }
 
+proc macroflag {flag} {
+	return [string toupper [string map {- _ + X} $flag]]
+}
+
+proc config-define {pfx cat name {target {}}} {
+	set fullname "$pfx-$cat-$name"
+	set ppvar [macroflag $fullname]
+	
+	if {[ag-config $cat $name]} {
+		if {$target == {}} {
+			ag-profile {c c++} -D $ppvar=1
+		} else {
+			ag $target -D SRT_$ppvar=1
+		}
+		#puts "Per --$cat-$name, add -DSRT_$ppvar=1"
+	}
+}
+
+
 # Experimental: Use a separate directory for intermediate files
 #namespace eval agv::p {
 #proc gen-imfile-mydir-path {target srcfile} {
@@ -88,9 +107,10 @@ ag-config enable win32-shared no -h "Generate definitions for Win32 DLL"
 # This should add -DENABLE_STDCXX_SYNC=1 macro.
 ag-config enable stdc++-sync [expr {$STD == "c++03" ? no : yes}] -h "Use C++11 implementation of the sync module"
 
-if {[ag-config enable stdc++-sync]} {
+if {![ag-config enable stdc++-sync]} {
 	ag-profile c++ -D HVU_EXT_INCLUDE_SYNC="../srtcore/srt_sync_cxx98.h"
 }
+config-define srt enable stdc++-sync
 
 set srtstatic 0
 set srtshared 0
@@ -252,20 +272,6 @@ if { [pget WITH_HAICRYPT_NAME] != "" } {
 
 ag $TARGET_srt -type library
 
-proc config-define {pfx cat name {target {}}} {
-	set fullname "$pfx-$cat-$name"
-	set ppvar [string toupper [string map {- _} $fullname]]
-	
-	if {[ag-config $cat $name]} {
-		if {$target == {}} {
-			ag-profile {c c++} -D $ppvar=1
-		} else {
-			ag $target -D SRT_$ppvar=1
-		}
-		#puts "Per --$cat-$name, add -DSRT_$ppvar=1"
-	}
-}
-
 ag-config enable logging on -h "Enable logging facility"
 config-define hvu enable logging
 
@@ -344,15 +350,21 @@ set enclib_cryspr2 {
 	botan
 }
 
-proc macroflag {flag} {
-	return [string toupper [string map {- _ + X} $flag]]
-}
-
 set host_system [lindex [split $tcl_platform(os) _] 0]
 pinit BUILD_HOST $host_system
 pinit BUILD_TARGET $BUILD_HOST
 set sourcedirs ""
 set enclib_defines ""
+
+# XXX IMPORTANT!!!
+# The MAF format still requires that the build system provide variables.
+# It was designed for CMake, hence conditional inclusion rquires global
+# variables to enable them.
+
+# Worse: you need to have all option already defined before you table it.
+
+set ENABLE_STDCXX_SYNC [ag-config enable stdc++-sync]
+set ENABLE_BONDING [ag-config enable bonding]
 
 if {[ag-config enable encryption]} {
 

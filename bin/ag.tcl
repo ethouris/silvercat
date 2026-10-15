@@ -124,6 +124,11 @@ namespace eval agv {
 		set subdir_export {
 			agv::p::profile_overrides
 		}
+
+		# Index: target
+		# Data: {flags sources depends} 
+		# Missing = not processed yet. Use lappend processed(target) sources
+		array set processed ""
 	}
 
 	set exe $p::exefor([info sharedlibextension])
@@ -356,7 +361,17 @@ proc GetUnifiedProfile-ldflags lang {
 # the profile (e.g. for gcc it's -D for 'defines', -L for 'libdir'
 # etc.).
 proc ProcessFlags target {
-	set db $agv::target($target)
+
+	# Check if the target was processed already
+	set processed [pget agv::p::processed($target)]
+	if {"flags" in $processed} {
+		#puts stderr "DEBUG:ProcessFlags target=$target ALREADY PROCESSED, SKIPPING"
+		return
+	}
+
+	pref db ::agv::target($target)
+
+	#puts stderr "DEBUG:ProcessFlags $target: [dict:filterkey $db cflags ldflags]"
 
 	set lang [dict get $db language]
 
@@ -370,13 +385,21 @@ proc ProcessFlags target {
 	# Optimization and debug info flags
 	set optflag [pget agv::target($target).optlevel]
 	set debflag [pget agv::target($target).debinfo]
+	if {$optflag == ""} {
+		set optflag [pget agv::profile(default).optlevel]
+	}
+	if {$debflag == ""} {
+		set debflag [pget agv::profile(default).debinfo]
+	}
+
+	#puts stderr "DEBUG TARGET $target optlevel=$optflag debinfo=$debflag"
 
 	if {$optflag != ""} {
 		set optkey build:opt$optflag
-		if {![dict exists agv::profile(default) $optkey]} {
-			error "-optlevel: build:opt$optflag not found in the profile"
+		if {![dict exists $agv::profile(default) $optkey]} {
+			error "-optlevel: build:opt$optflag not found in the profile."
 		}
-		dict lappend agv::target($target) cflags [dict get agv::profile(default) $optkey]
+		dict lappend agv::target($target) cflags [dict get $agv::profile(default) $optkey]
 	}
 
 	if {$debflag != ""} {
@@ -386,10 +409,15 @@ proc ProcessFlags target {
 		}
 
 		if {$debflag} {
+			#puts stderr "DEBUG:ProcessFlags target=$target adding debug: $bval"
 			dict lappend agv::target($target) cflags $bval
 			dict lappend agv::target($target) ldflags $bval
 		}
 	}
+
+	lappend agv::p::processed($target) flags
+
+	#puts stderr "DEBUG:ProcessFlags PROCESSED $target: [dict:filterkey $db cflags ldflags]"
 
 # --- 	set defines_flag [pget agv::profile($lang).defineflag]
 # --- 	set incdir_flag [pget agv::profile($lang).incdirflag]
@@ -1438,8 +1466,8 @@ proc AccessDatabase {array target args} {
 	set uniques [pget agv::p::keytype(unique)]
 
 	# Get old options
-	set db $agv_db($target)
-	array set options [dict get $db {*}$keypath]
+
+	array set options [dict get $agv_db($target) {*}$keypath]
 
 	set query ""
 	set nomoreoptions false
@@ -1727,7 +1755,15 @@ proc ag-maf {target directory args} {
 
 
 proc ProcessLanguage target {
-	set db $agv::target($target)
+	pref db ::agv::target($target)
+	set lang [dict:at $db language]
+
+	# No need to process anything, if the language is set already.
+	if { $lang != "" } {
+		return
+	}
+
+	#set db $agv::target($target)
 
 	set sources [dict:at $db sources]
 	set used_langs ""
@@ -1758,29 +1794,32 @@ proc ProcessLanguage target {
 		dict lappend used_langs $lang $s
 	}
 
-	set lang [dict:at $db language]
-	if { $lang == "" } {
 
-		if { $used_langs != "" } {
-			set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
-			dict set db language $lang
-		} else {
-			set default_language [dict:at $agv::profile(default) language]
-			if { $default_language == "" } {
-				set default_language default
-			}
-			dict set db language $default_language
+	if { $used_langs != "" } {
+		set lang [agv::p::GetCommonLanguage [dict keys $used_langs]]
+		dict set db language $lang
+	} else {
+		set default_language [dict:at $agv::profile(default) language]
+		if { $default_language == "" } {
+			set default_language default
 		}
+		dict set db language $default_language
 	}
 
 	# Write the database before running framework's hook
-	set agv::target($target) $db
+	# set agv::target($target) $db
 }
 
 
 proc ProcessSources target {
 
-	set db $agv::target($target)
+	pref db ::agv::target($target)
+
+	if {"sources" in [pget ::agv::p::processed($target)]} {
+		return
+	}
+
+	#set db $agv::target($target)
 
 	set sources [dict:at $db sources]
 	set objects [dict:at $db objects]
@@ -1826,12 +1865,12 @@ proc ProcessSources target {
 	set lang [dict:at $db language]
 
 	# Write the database before running framework's hook
-	set agv::target($target) $db
+	#set agv::target($target) $db
 
 	ExecuteFrameworks $target compile-pre $sources
 
 	# Re-read cache after possible changes were applied by the fw.
-	set db $agv::target($target)
+	#set db $agv::target($target)
 
 	# Moved here because the framework could have added something
 	set target_deps [dict:at $db depends]
@@ -1998,9 +2037,11 @@ proc ProcessSources target {
 	dict set db objects $objects
 	dict set db rules $rules
 
-	set agv::target($target) $db
+	#set agv::target($target) $db
 
 	ExecuteFrameworks $target compile-post $objects
+
+	lappend ::agv::p::processed($target) sources
 }
 
 proc Process:program target {
@@ -2140,7 +2181,8 @@ proc Process:custom target {
 	# the external command to build them.
 	$::g_debug "PROCESSING CUSTOM: $target"
 
-	set db $agv::target($target)
+	pref db ::agv::target($target)
+	#set db $agv::target($target)
 
 	set rules [dict:at $db rules]
 	set phony [dict:at $db phony]
@@ -2216,7 +2258,7 @@ proc Process:custom target {
 		dict set db phony install-$target {*}$install_parts
 	}
 
-	set agv::target($target) $db
+	#set agv::target($target) $db
 
 	DebugDisplayDatabase agv::target $target
 
@@ -2242,7 +2284,8 @@ proc ReplaceVars s {
 
 proc Process:pkg-config target {
 
-	set db $agv::target($target)
+	pref db ::agv::target($target)
+	#set db $agv::target($target)
 
 	set name [dict:at $db name]
 	set output [dict:at $db output]
@@ -2407,7 +2450,7 @@ proc Process:pkg-config target {
 	dict set db rules $target [list "\n\techo 'The pc file should be already generated'\n"]
 	dict set db flags {noclean distclean}
 
-	set agv::target($target) $db
+	#set agv::target($target) $db
 }
 
 proc PrependIfNotFound {dictvar key value} {
@@ -2426,7 +2469,7 @@ proc Process:phony target {
 	# phony nor rule added for $target yet. Just in a case when
 	# any earlier processing facility didn't set it at all.
 	# Normally a processing facility should set a rule to build the target.
-	set db $agv::target($target)
+	pref db ::agv::target($target)
 	if { [dict:at $db phony $target] == "" && [dict:at $db rules $target] == "" } {
 		vlog "TARGET '$target' has no rule nor phony - setting phony with '$deps'"
 		dict set agv::target($target) phony $target $deps
@@ -3474,8 +3517,10 @@ proc ResolveProfileDetails {} {
 		}
 	}
 
-	if { [pget agv::profile(default).debuginfo NOTFOUND] == "NOTFOUND" } {
-		dict set agv::profile(default) debuginfo $debinfo
+	#puts stderr "DEBUG PROFILE buildtype=$buildtype debinfo=$debinfo optlevel=$opt"
+
+	if { [pget agv::profile(default).debinfo NOTFOUND] == "NOTFOUND" } {
+		dict set agv::profile(default) debinfo $debinfo
 	}
 
 	if { [pget agv::profile(default).optlevel] == "" } {
@@ -4464,6 +4509,7 @@ set agfiledir ""
 set topdir ""
 set runmode genrules
 set install_prefix ""
+set build_type_spec ""
 set profile_overrides ""
 set readdbspec ""
 
@@ -4483,6 +4529,7 @@ set ag_optargs {
 	-p -profile_overrides
 	-r %readdbspec
 	--prefix install_prefix
+	--buildtype build_type_spec
 	--options *display_options
 }
 
@@ -4497,6 +4544,7 @@ set opt_help {
 	-c "<key> <val>..." "Override settings provided from a config file"
 	-r "<agfile> ?key?..." "Read and print database entries from a file"
 	--prefix "<path>" "Enforce install prefix (same as -p install:prefix <path>)"
+	--buildtype "<type>" "Set buildtype in profile: release, debug, release-debug-info"
 	--options "" "Display available project options (not running generation)"
 }
 
@@ -4584,6 +4632,10 @@ set mkv::directory $agv::builddir
 if { $install_prefix != "" } {
 	#puts stderr "DEBUG adding install:prefix: $install_prefix"
 	dict set profile_overrides install:prefix $install_prefix
+}
+
+if { $build_type_spec != "" } {
+	dict set profile_overrides buildtype $build_type_spec
 }
 
 # Set this to global so that it's derived by subdirs

@@ -372,7 +372,10 @@ proc pbind {args} {
 		#puts stderr "* pbind: final append @$end-end([string range $outbody $end end]): $out"
 	}
 	return [list args $out]
+}
 
+proc pref {v_alias v_target} {
+	uplevel 1 "upvar 0 $v_target $v_alias"
 }
 
 proc pfind {args} {
@@ -1179,6 +1182,7 @@ set public_export_util [puncomment {
 	plist
 	pmap
 	pbind
+	pref
 	prelocate
 	pnormalize
 	puncomment
