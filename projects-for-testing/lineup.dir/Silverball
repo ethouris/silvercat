@@ -3,20 +3,17 @@ ag-profile gcc-native
 # No install profile required
 
 # Original cmake-based one contained source list in a separate file
-# Let's make it simply a list of files
-
-proc get-sources {dir filename} {
-	set out ""
-	foreach f [pread [file join $dir $filename]] {
-		lappend out [file join $dir $f]
-	}
-	return $out
+# This is a version for reading a file with simply the file list.
+proc get-filelist filelist {
+	return [ppipe \
+		file dirname $filelist \
+		| pbind file join % %% \
+		| pmap % [pread $filelist]]
 }
-
 ag-profile general -I include/lineup -I opt/catch/include
 ag-profile c++ -std c++11
 
-ag lineup -type library -libspec static -s [get-sources src filelist.ag]
+ag lineup -type library -libspec static -s [get-filelist src/filelist.ag]
 ag lineupApp -type program -s src/main.cc -depends lineup
 
 ag-subdir test

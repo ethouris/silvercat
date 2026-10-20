@@ -2926,9 +2926,33 @@ proc GenerateInfoGen {source target command} {
 	return "Source {$source} Target {$target} Command {$command}"
 }
 
+proc TargetDatabase target {
+	if { [info exists agv::foreign($target)] } {
+		return $agv::foreign($target)
+	}
+	if { [info exists agv::target($target)] } {
+		return $agv::target($target)
+	}
+	return ""
+}
+
+proc ForeignProjectDirectory target {
+	set parts [file split $target]
+	set project_dir ""
+	for {set i 0} {$i < [llength $parts] - 1} {incr i} {
+		set candidate [join [lrange $parts 0 $i] /]
+		set db [TargetDatabase $candidate]
+		if { $db != "" && [dict:at $db type] == "directory" } {
+			set project_dir $candidate
+		}
+	}
+	return $project_dir
+}
+
 proc FindDepSpec {target reqspec} {
 	# Extract filename according to the specification.
-	set libspec [dict:at $agv::target($target) libspec]
+	set db [TargetDatabase $target]
+	set libspec [dict:at $db libspec]
 	if { $libspec == "" } {
 		set libspec static
 	}
@@ -3091,7 +3115,12 @@ proc ResolveOutput {output {f b}} {
 }
 
 proc GetDependentLibraryTargets {target {transit transit}} {
-	set depends [dict:at $agv::target($target) depends]  
+	set target_db [TargetDatabase $target]
+	set depends [dict:at $target_db depends]
+	set project_dir ""
+	if { [info exists agv::foreign($target)] } {
+		set project_dir [ForeignProjectDirectory $target]
+	}
 	$::g_debug "Getting dependent targets for '$target': $depends"
 	set libpacks ""
 	set langs ""
@@ -3109,17 +3138,22 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 	foreach d $depends {
 
 		$::g_debug "Getting DEP: '$d'"
+		if { $project_dir != "" } {
+			set scoped_dep [prelocate [file join $project_dir $d] $agv::builddir $agv::toplevel]
+			if { [TargetDatabase $scoped_dep] != "" } {
+				set d $scoped_dep
+			}
+		}
 		lassign [CheckDefinedTarget $d] d spec
 		if { $d == "" } {
 			error "Target '$d' (dependency of $target) is not defined"
 		}
 		$::g_debug "CheckDefinedTarget: DEP=$d SPEC=$spec"
 
-		set type [dict:at $agv::target($d) type]
+		set dep_db [TargetDatabase $d]
+		set type [dict:at $dep_db type]
 
-		# Check if this is an imported target
 		if { [info exists agv::foreign($d)] } {
-			set type [dict:at $agv::foreign($d) type]
 			vlog "--- taking foreign target '$d' type '$type'"
 		}
 
@@ -3132,13 +3166,14 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 			set slibs ""
 			lassign [GetTargetFile $d $spec] libofile ospec
 			if { $libofile == "" } {
+				$::g_debug "Target '$target' dep '$d' data: local:{[pget agv::target($d)]} foreign:{[pget agv::foreign($d)]}"
 				error "Target '$target' requested dep '$d' in spec '$spec' which '$d' does not define"
 			}
 			$::g_debug " -- LIBRARY DEP '$d': output=[pget agv::target($d).output] ($libofile) SPEC: $spec"
 			set ldflags ""
 			if { $spec == "static" } {
 				# Static libraries must carry over all its ldflags to the target
-				set slibs [dict:at $agv::target($d) ldflags]
+				set slibs [dict:at $dep_db ldflags]
 				$::g_debug " -- static library $d - importing its ldflags: $slibs"
 			} else {
 				$::g_debug " -- shared library $d - not importing ldflags"
@@ -3146,7 +3181,7 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 
 			set libpack [list $libofile $slibs]
 
-			set langs [dict:at $agv::target($d) language]
+			set langs [dict:at $dep_db language]
 			$::g_debug " --- Target '$d' provides libraries: $libpack (language: $langs)"
 
 			# Recursive call
@@ -3880,9 +3915,10 @@ proc CheckDefinedTarget {target {dspec {}}} {
 
 	# If the target exists - it's already done.
 	if { [info exists agv::target($target)] } {
+		set db [TargetDatabase $target]
 		# It this was a library, then return the first default
-		if { [dict:at $agv::target($target) type] == "library" } {
-			set ls [dict:at $agv::target($target) libspec]
+		if { [dict:at $db type] == "library" } {
+			set ls [dict:at $db libspec]
 			if { $dspec == "" } {
 				set spec [lindex $ls 0]
 				if { $spec == "" } {
@@ -3907,15 +3943,36 @@ proc CheckDefinedTarget {target {dspec {}}} {
 		return
 	}
 
-	# It is directory based.
-	# So, check if directory target is defined
-	set dir [lindex $parts 0]
-	if { ![info exists agv::target($dir)] } {
-		# XXX Maybe do lazy-define of the target?
-		error "Target '$target' is parent/child form, but no target '$dir' is defined (use ag-subdir to define)"
+	# Find the longest directory or library target prefix. Directory targets
+	# may themselves contain path elements, so the first element is not
+	# necessarily the target name.
+	set dir ""
+	set dir_end -1
+	for {set i [expr {[llength $parts] - 2}]} {$i >= 0} {incr i -1} {
+		set candidate [join [lrange $parts 0 $i] /]
+		set db [TargetDatabase $candidate]
+		if { $db == "" } {
+			continue
+		}
+		set candidate_type [dict:at $db type]
+		if { $candidate_type in {directory library} } {
+			set dir $candidate
+			set dir_end $i
+			break
+		}
 	}
 
-	set type [dict:at $agv::target($dir) type]
+	if { $dir == "" } {
+		# XXX Maybe do lazy-define of the target?
+		set dir [lindex $parts 0]
+		if { ![info exists agv::target($dir)] } {
+			error "Target '$target' is parent/child form, but no target '$dir' is defined (use ag-subdir to define)"
+		}
+		error "Target '$target' is parent/child form, but '$dir' is not a directory or library target"
+	}
+
+	set db [TargetDatabase $dir]
+	set type [dict:at $db type]
 
 	switch -- $type {
 		default {
@@ -3923,10 +3980,11 @@ proc CheckDefinedTarget {target {dspec {}}} {
 		}
 
 		library {
-			if { [lindex $parts 1] ni {static shared} } {
-				error "Target '$target' is a library, but specialization '[lindex $parts 1]' is unknown (expected: static or shared)"
+			set spec [lindex $parts [expr {$dir_end + 1}]]
+			if { $spec ni {static shared} } {
+				error "Target '$target' is a library, but specialization '$spec' is unknown (expected: static or shared)"
 			}
-			return $parts
+			return [CheckDefinedTarget $dir $spec]
 		}
 
 		directory {
@@ -3936,15 +3994,17 @@ proc CheckDefinedTarget {target {dspec {}}} {
 
 	# Ok, having that confirmed, synthesize the target
 	vlog "--- Synthesizing subdir-redirection target '$target'"
-	set subtarget [file join {*}[lrange $parts 1 end]]
+	set subtarget [file join {*}[lrange $parts [expr {$dir_end + 1}] end]]
 
 	set foreigntarget [pget agv::foreign($target)]
 
-	set agv::target($target) [plist {
+	set base [pget agv::target($target)]
+	set agv::target($target) [dict merge $base [plist {
 		name $target
 		type custom
 		command "%submake -C $dir $subtarget"
-	}]
+	}]]
+
 
 	# Take the output from the foreign target. Some processing parts
 	# may rely on the foreign target's data.
@@ -3952,15 +4012,25 @@ proc CheckDefinedTarget {target {dspec {}}} {
 		set output  [dict:at $foreigntarget output]
 		if { $output != "" } {
 			vlog " --- importing foreign target's output (in $dir): $output"
-			set output [file join $dir $output]
-			dict set agv::target($target) output $output
+			set outputs ""
+			foreach o $output {
+				lappend outputs [file join $dir $o]
+			}
+			dict set agv::target($target) output $outputs
 		}
 	}
-	return $target
+	return [CheckDefinedTarget $target $dspec]
 }
 
 proc agp-prepare-database {target {parent ""}} {
 	vlog "--- Preparing database for target '$target'"
+
+	# Make sure that the profile contains at least the "general"
+	# key with empty contents.
+
+	if { ![info exists agv::profile(default)] } {
+		set agv::profile(default) ""
+	}
 
 	# Auto-generate targets "all" and ".", if not defined
 	if { $target == "all" || $target == "." } {
@@ -4287,9 +4357,17 @@ proc ag-subdir args {
 		set args [lindex $args 0]
 	}
 
+	set exc 0
 	foreach a $args {
 		vlog "*** ANALYZING SUBDIR: $a"
-		ag-subdir1 $a
+		set exc [catch {ag-subdir1 $a} out]
+		if {$exc} {
+			puts stderr "+++ ERROR in ag-subdir: $out. interrupting"
+			break
+		}
+	}
+	if {$exc} {
+		error "+++ ag-subdir error, can't continue"
 	}
 }
 
@@ -4391,6 +4469,7 @@ proc ag-subdir1 target {
 
 	foreach t [array names agv::target] {
 		set subtarget [file join .. $t]
+		$::g_debug "MOUNT '$subtarget':'$t'={[set agv::target($t)]}"
 		$slave eval [list set agv::foreign($subtarget) [set agv::target($t)]]
 	}
 
@@ -4402,9 +4481,9 @@ proc ag-subdir1 target {
 	#}
 
 	# XXX THIS SKIPS OPTIONS - must be somehow supported!
-	$slave eval source [lindex $cmd_exe 0]
+	set sret [$slave eval source [lindex $cmd_exe 0]]
 
-	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Pinning in database."
+	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed result=$sret. Pinning in database."
 	set imported_targets ""
 	foreach t [$slave eval array names agv::target] {
 		set subtarget [file join $target $t]
@@ -4511,6 +4590,7 @@ set runmode genrules
 set install_prefix ""
 set build_type_spec ""
 set profile_overrides ""
+set config_overrides ""
 set readdbspec ""
 
 #puts stderr "CURRENT DIR: [pwd]"
@@ -4527,6 +4607,7 @@ set ag_optargs {
 	-t topdir
 	-m runmode
 	-p -profile_overrides
+	-c -config_overrides
 	-r %readdbspec
 	--prefix install_prefix
 	--buildtype build_type_spec
@@ -4908,7 +4989,11 @@ puts stderr "+++ Processing runmode '$agv::runmode':  @[prelocate [pwd] $agv::to
 set exitcode [ag-do-$agv::runmode [lrange $g_args 1 end]]
 
 if { ![info exists me_is_slave] } {
+	$::g_debug "EXIT code $exitcode"
 	exit $exitcode
+} else {
+	$::g_debug "IS SLAVE: PROPAGATE $exitcode"
+	error "ERROR: genrules exit with code $exitcode"
 }
 
 

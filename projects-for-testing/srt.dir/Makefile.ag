@@ -645,34 +645,41 @@ ag tags -command {
 
 # Test app
 
-ag test-srt -type program -I //apps -depends $TARGET_srt
-#ag test-srt -s [glob test/*.cpp]
-ag-maf test-srt test filelist.maf -s SOURCES
-
-#puts "SOURCES EXTRACTED FOR test-srt:\n[ag test-srt ?sources]"
-
-ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$BUILD_TARGET\"}
-
-# Using --with-gtest-basedir you can override the Google Test library spec.
-# If not specified, the pkg-config should provide the specs
-
+ag-config enable unittests no -h "Build unittests app, test-srt"
 ag-option --with-gtest-basedir "" -h "Specify manually gtest directory"
 
-# You can also use GTEST_BASEDIR call variable.
-pinit GTEST_BASEDIR [ag-option --with-gtest-basedir]
-if {$GTEST_BASEDIR == ""} {
-	ag test-srt -packages gtest gtest_main
-} else {
-	set GTEST_LIB [file join $GTEST_BASEDIR lib]
-	set GTEST_INC [file join $GTEST_BASEDIR googletest googletest-src googletest include]
-	puts "GTEST_BASEDIR: [file normalize $GTEST_BASEDIR]"
+if {[ag-config enable unittests]} {
 
-	if {![file isdirectory $GTEST_LIB] || ![file isdirectory $GTEST_INC]
-			|| [glob -nocomplain $GTEST_LIB/*] == ""} {
-		error "Wrong GTEST_BASEDIR=$GTEST_BASEDIR (empty or nonexistent)"
+	ag test-srt -type program -I //apps -depends $TARGET_srt
+	#ag test-srt -s [glob test/*.cpp]
+	ag-maf test-srt test filelist.maf -s SOURCES
+
+	#puts "SOURCES EXTRACTED FOR test-srt:\n[ag test-srt ?sources]"
+
+	ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$BUILD_TARGET\"}
+
+	# Using --with-gtest-basedir you can override the Google Test library spec.
+	# If not specified, the pkg-config should provide the specs
+
+
+	# You can also use GTEST_BASEDIR call variable.
+	pinit GTEST_BASEDIR [ag-option --with-gtest-basedir]
+	if {$GTEST_BASEDIR == ""} {
+		puts "--with-gtest-basedir: not specified, trying to use system-wide gtest packages..."
+		ag test-srt -packages gtest gtest_main
+	} else {
+		set GTEST_LIB [file join $GTEST_BASEDIR lib]
+		set GTEST_INC [file join $GTEST_BASEDIR googletest googletest-src googletest include]
+		puts "GTEST_BASEDIR: [file normalize $GTEST_BASEDIR]"
+
+		if {![file isdirectory $GTEST_LIB] || ![file isdirectory $GTEST_INC]
+				|| [glob -nocomplain $GTEST_LIB/*] == ""} {
+			error "Wrong GTEST_BASEDIR=$GTEST_BASEDIR (empty or nonexistent)"
+		}
+
+		ag test-srt -I $GTEST_INC -L $GTEST_LIB -libs -- -lgtest -lgtest_main
 	}
 
-	ag test-srt -I $GTEST_INC -L $GTEST_LIB -libs -- -lgtest -lgtest_main
 }
 
 # vim:ft=tclmake
