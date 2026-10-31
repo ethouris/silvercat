@@ -10,7 +10,7 @@ proc get-filelist filelist {
 		| pbind file join % %% \
 		| pmap % [pread $filelist]]
 }
-ag-profile general -I include/lineup -I opt/catch/include
+ag-profile general -I include/lineup opt/catch/include -depspec cached
 ag-profile c++ -std c++11
 
 ag lineup -type library -libspec static -s [get-filelist src/filelist.ag]
