@@ -2905,17 +2905,31 @@ proc GenerateInfoGen {source target command} {
 }
 
 proc TargetDatabase target {
-	if { [info exists agv::foreign($target)] } {
-		return $agv::foreign($target)
-	}
 	if { [info exists agv::target($target)] } {
 		return $agv::target($target)
+	}
+	if { [info exists agv::foreign($target)] } {
+		return $agv::foreign($target)
 	}
 	return ""
 }
 
+proc ResolveForeignDependency {dependency project_dir} {
+	if { $project_dir == "" } {
+		return $dependency
+	}
+	set scoped [prelocate [file join $project_dir $dependency] $agv::builddir $agv::toplevel]
+	if { [TargetDatabase $scoped] != "" } {
+		return $scoped
+	}
+	return $dependency
+}
+
 proc ForeignProjectDirectory target {
 	set parts [file split $target]
+	if { [lindex $parts 0] == ".." } {
+		return ..
+	}
 	set project_dir ""
 	for {set i 0} {$i < [llength $parts] - 1} {incr i} {
 		set candidate [join [lrange $parts 0 $i] /]
@@ -2947,7 +2961,7 @@ proc FindDepSpec {target reqspec} {
 
 proc GetTargetFile {target reqspec} {
 
-	set output [dict:at $agv::target($target) output]
+	set output [dict:at [TargetDatabase $target] output]
 
 	if { $reqspec != "" } {
 		set pos [FindDepSpec $target $reqspec]
@@ -3116,12 +3130,7 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 	foreach d $depends {
 
 		$::g_debug "Getting DEP: '$d'"
-		if { $project_dir != "" } {
-			set scoped_dep [prelocate [file join $project_dir $d] $agv::builddir $agv::toplevel]
-			if { [TargetDatabase $scoped_dep] != "" } {
-				set d $scoped_dep
-			}
-		}
+		set d [ResolveForeignDependency $d $project_dir]
 		lassign [CheckDefinedTarget $d] d spec
 		if { $d == "" } {
 			error "Target '$d' (dependency of $target) is not defined"
@@ -3863,7 +3872,7 @@ proc ExtractActualDepends {target deps} {
 		}
 
 		# For a library specification, check if such a specification is available.
-		set libspec [dict:at $agv::target($d) libspec]
+		set libspec [dict:at [TargetDatabase $d] libspec]
 		if { $libspec == "" } {
 			error "Target '$d' spec $spec (dependency of '$target' type $tartype) has no libspec defined"
 		}
@@ -3875,7 +3884,7 @@ proc ExtractActualDepends {target deps} {
 		}
 
 		# Store a library file as a dependency.
-		set depfile [ppipe dict:at $agv::target($d) output | set output % | lindex % $ix]
+		set depfile [ppipe dict:at [TargetDatabase $d] output | set output % | lindex % $ix]
 		if { $depfile == "" } {
 			error "IPE: In target '$d' output file not found for spec=$spec (libspec:$libspec ouptut:$output)"
 		}
@@ -3890,6 +3899,10 @@ proc ExtractActualDepends {target deps} {
 # have to be synthesized lazily.
 # Currently it concerns only detecting "directory-based targets" and libspec.
 proc CheckDefinedTarget {target {dspec {}}} {
+
+	if { ![info exists agv::target($target)] && [info exists agv::foreign($target)] && [dict:at $agv::foreign($target) foreign_parent] eq "1" } {
+		set agv::target($target) $agv::foreign($target)
+	}
 
 	# If the target exists - it's already done.
 	if { [info exists agv::target($target)] } {
@@ -3984,6 +3997,14 @@ proc CheckDefinedTarget {target {dspec {}}} {
 	}]]
 
 
+	if { $foreigntarget != "" } {
+		set deps ""
+		foreach dep [dict:at $foreigntarget depends] {
+			lappend deps [ResolveForeignDependency $dep $dir]
+		}
+		dict set agv::target($target) depends [pluniq $deps]
+	}
+
 	# Take the output from the foreign target. Some processing parts
 	# may rely on the foreign target's data.
 	if { $foreigntarget != "" } {
@@ -3998,6 +4019,35 @@ proc CheckDefinedTarget {target {dspec {}}} {
 		}
 	}
 	return [CheckDefinedTarget $target $dspec]
+}
+
+proc PrepareForeignParentTarget target {
+	pref db ::agv::target($target)
+	set type [dict:at $db type]
+	set output [dict:at $db output]
+	set parent_target [string range $target 3 end]
+
+	if { $type == "library" } {
+		set libspec [dict:at $db libspec]
+		if { $libspec == "" } {
+			set libspec static
+		}
+		foreach spec $libspec outfile $output {
+			dict set db rules $outfile [list {} "\n\t%submake -C .. $parent_target/$spec\n"]
+			dict set db phony $target/$spec $outfile
+		}
+		dict set db phony $target [lindex $output 0]
+	} elseif { $output != "" } {
+		foreach outfile $output {
+			dict set db rules $outfile [list {} "\n\t%submake -C .. $parent_target\n"]
+		}
+		dict set db phony $target $output
+	} else {
+		dict set db rules $target [list {} "\n\t%submake -C .. $parent_target\n"]
+	}
+
+	dict set db clean none
+	return true
 }
 
 proc agp-prepare-database {target {parent ""}} {
@@ -4049,7 +4099,14 @@ proc agp-prepare-database {target {parent ""}} {
 	set targets_depends [dict:at $agv::target($target) depends]
 	vlog "PROCESSING DEPENDS of $target (DIRECT): $targets_depends \{"
 
+	set project_dir ""
+	if { [dict:at $agv::target($target) foreign_parent] eq "1" } {
+		set project_dir ..
+	} elseif { [info exists agv::foreign($target)] } {
+		set project_dir [ForeignProjectDirectory $target]
+	}
 	foreach dep $targets_depends {
+		set dep [ResolveForeignDependency $dep $project_dir]
 		lassign [CheckDefinedTarget $dep] dep spec
 		vlog " ... DEP OF '$target': '$dep'"
 		if { ![agp-prepare-database $dep $target] } {
@@ -4058,6 +4115,10 @@ proc agp-prepare-database {target {parent ""}} {
 	}
 
 	vlog "\} END DEPENDS OF $target"
+
+	if { [dict:at $agv::target($target) foreign_parent] eq "1" } {
+		return [PrepareForeignParentTarget $target]
+	}
 
 	set type [dict:at $agv::target($target) type]
 	set cat [dict:at $agv::target($target) install]
@@ -4311,19 +4372,22 @@ proc ag-interp {target script} {
 		return [ParentEval $script]
 	}
 
-	# XXX This needs to be fixed. Target must be split into
-	# smaller paths by taking out paths from the end until
-	# reaching the smallest number of path items. For example,
-	# it should be tolerated that submodules/roj/src is searched,
-	# but submodules/roj does exist, so it should be then
-	# forwarded to the interpreter by doing
-	# return [$agv::p::slaves(submodules/roj) eval ag-interp src $script]
+	set parts [file split $target]
+	for {set i [llength $parts]} {$i > 0} {incr i -1} {
+		set directory [join [lrange $parts 0 [expr {$i - 1}]] /]
+		if {![info exists agv::p::slave($directory)]} {
+			continue
+		}
 
-	if {![info exists agv::p::slaves($target)]} {
-		error "No such subdirectory: $target"
+		set slave $agv::p::slave($directory)
+		set remainder [lrange $parts $i end]
+		if {$remainder == ""} {
+			return [$slave eval $script]
+		}
+		return [$slave eval [list ag-interp [file join {*}$remainder] $script]]
 	}
 
-	return [$agv::p::slaves($target) eval $script]
+	error "No such subdirectory: $target"
 }
 
 proc AllowParentEval {child} {
@@ -4434,24 +4498,54 @@ proc ag-subdir1 target {
 		$slave eval [list set $v [set $v]]
 	}
 
-	# Setup yourself as a directory first.
-	# This must be done before executing AG in a sub-interp because the
-	# definitions provided in the Silverball of this one will want to use
-	# our definitions.
-
-	# No, you can't use the ag command because it isn't defined yet.
-	# $slave eval ag .. -type directory -flags distclean -agfile $::agfile
-
+	# Make targets from the parent project available to the child under
+	# the ../ prefix used by child-project dependencies.
 	$slave eval [list namespace eval agv {}]
-	$slave eval [list dict set agv::target(..) type directory flags distclean agfile $::agfile]
+	$slave eval [list set agv::target(..) [list type directory flags distclean agfile $::agfile]]
 
 	foreach t [array names agv::target] {
+		pref db ::agv::target($t)
+		if { [dict:at $db type] == "library" } {
+			ProcessLanguage $t
+			set child_db $db
+			set libspec [dict:at $db libspec]
+			if { $libspec == "" } {
+				set libspec static
+			}
+			set output [dict:at $db output]
+			set resolved_output [ResolveOutput $output]
+			set outputs ""
+			set i 0
+			foreach type $libspec {
+				set outfile [lindex $output $i]
+				set outfile [CreateLibraryFilename $t $type $outfile]
+				if { $i < [llength $resolved_output] && [lindex $resolved_output $i] != "" } {
+					set outfile [lindex $resolved_output $i]
+				}
+				if { [file pathtype $outfile] != "absolute" } {
+					set outfile [file join $agv::builddir $outfile]
+				}
+				lappend outputs [prelocate $outfile $local_builddir $agv::toplevel]
+				incr i
+			}
+			dict set child_db output $outputs
+		} else {
+			set outputs [ResolveOutput [dict:at $db output]]
+			set child_db $db
+			set child_outputs ""
+			foreach outfile $outputs {
+				if { [file pathtype $outfile] != "absolute" } {
+					set outfile [file join $agv::builddir $outfile]
+				}
+				lappend child_outputs [prelocate $outfile $local_builddir $agv::toplevel]
+			}
+			dict set child_db output $child_outputs
+		}
+		dict set child_db foreign_parent 1
 		set subtarget [file join .. $t]
-		$::g_debug "MOUNT '$subtarget':'$t'={[set agv::target($t)]}"
-		$slave eval [list set agv::foreign($subtarget) [set agv::target($t)]]
+		$::g_debug "MOUNT '$subtarget':'$t'={$child_db}"
+		$slave eval [list set agv::foreign($subtarget) $child_db]
 	}
-
-
 	$::g_debug "AG-SUBDIR: processing: $sd: SOURCING '$cmd_exe'"
 	#puts stderr "DEBUG: PRIVATE VARIABLES:"
 	#foreach vv [$slave eval info vars agv::p::*] {
@@ -4464,6 +4558,9 @@ proc ag-subdir1 target {
 	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed result=$sret. Pinning in database."
 	set imported_targets ""
 	foreach t [$slave eval array names agv::target] {
+		if {$t == ".."} {
+			continue
+		}
 		set subtarget [file join $target $t]
 		set agv::foreign($subtarget) [$slave eval set agv::target($t)]
 		lappend imported_targets $subtarget ;# DEBUG ONLY

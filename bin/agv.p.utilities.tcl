@@ -180,6 +180,9 @@ proc PrepareGeneralTargets {} {
 	set subtargets {}
 	# Extract only targets of type program or library
 	foreach t [array names agv::target] {
+		if {$t == ".."} {
+			continue
+		}
 		set type [dict:at $agv::target($t) type]
 		set runon [dict:at $agv::target($t) runon]
 		set addtargets ""
@@ -484,4 +487,3 @@ proc MafRead {directory {filename {}}} {
 
 	return $output
 }
-
