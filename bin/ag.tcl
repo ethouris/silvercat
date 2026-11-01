@@ -1164,11 +1164,6 @@ proc ag-option {name args} {
 		error "ag-option: prefix '$prefix' is reserved for ag-config"
 	}
 
-#  	set others [lassign $args deflt filter]
-#  	if {$others != ""} {
-#  		error "Usage: ag-option --<name> <default-value> ?filter?"
-#  	}
-
 	set filter ""
 	set helptext ""
 	set avail ""
@@ -1805,9 +1800,6 @@ proc ProcessLanguage target {
 		}
 		dict set db language $default_language
 	}
-
-	# Write the database before running framework's hook
-	# set agv::target($target) $db
 }
 
 
@@ -1864,13 +1856,7 @@ proc ProcessSources target {
 
 	set lang [dict:at $db language]
 
-	# Write the database before running framework's hook
-	#set agv::target($target) $db
-
 	ExecuteFrameworks $target compile-pre $sources
-
-	# Re-read cache after possible changes were applied by the fw.
-	#set db $agv::target($target)
 
 	# Moved here because the framework could have added something
 	set target_deps [dict:at $db depends]
@@ -2037,8 +2023,6 @@ proc ProcessSources target {
 	dict set db objects $objects
 	dict set db rules $rules
 
-	#set agv::target($target) $db
-
 	ExecuteFrameworks $target compile-post $objects
 
 	lappend ::agv::p::processed($target) sources
@@ -2182,7 +2166,6 @@ proc Process:custom target {
 	$::g_debug "PROCESSING CUSTOM: $target"
 
 	pref db ::agv::target($target)
-	#set db $agv::target($target)
 
 	set rules [dict:at $db rules]
 	set phony [dict:at $db phony]
@@ -2258,8 +2241,6 @@ proc Process:custom target {
 		dict set db phony install-$target {*}$install_parts
 	}
 
-	#set agv::target($target) $db
-
 	DebugDisplayDatabase agv::target $target
 
 	Process:phony $target
@@ -2285,7 +2266,6 @@ proc ReplaceVars s {
 proc Process:pkg-config target {
 
 	pref db ::agv::target($target)
-	#set db $agv::target($target)
 
 	set name [dict:at $db name]
 	set output [dict:at $db output]
@@ -2449,8 +2429,6 @@ proc Process:pkg-config target {
 
 	dict set db rules $target [list "\n\techo 'The pc file should be already generated'\n"]
 	dict set db flags {noclean distclean}
-
-	#set agv::target($target) $db
 }
 
 proc PrependIfNotFound {dictvar key value} {
@@ -4551,15 +4529,7 @@ if { !$tcl_interactive } {
 }
 
 if { [info exists ::env(AG_LIB_PATH)] } {
-
-	set sep " "
-	if {$tcl_platform(platform) == "unix"} {
-		set sep :
-	} else {
-		set sep ;
-	}
-	set libpath [split $::env(AG_LIB_PATH) $sep]
-
+	set libpath [split $::env(AG_LIB_PATH) $tcl_platform(pathSeparator)]
 	foreach p $libpath {
 		lappend agv::libpath [file nornalize $p]
 	}

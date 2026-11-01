@@ -685,7 +685,7 @@ proc check_generic_upd_first {target} {
 	variable first_rule
 	# remove all "* ? [ ]", but leave untouched "\* \? \[ \]"
 	set checked [string map {{\*} {\*} {\?} {\?} {\[} {\[} {\]} {\]} * {} ? {} {[} {} {]} {}} $target]
-if { $checked != $target } {
+	if { $checked != $target } {
 		return true
 	} else {
 		if { $first_rule == "" } {
@@ -2136,7 +2136,7 @@ proc main argv {
 		-x <command> : Execute a Tcl command in makefile
 		-v : Display verbose information
 		-d : Display debugging information
-		-p <rule> : Display command assigned to specified rule
+		-p <rule> : Display commands assigned to specified rule
 	}
 
 	set keep_going 0
@@ -2154,9 +2154,6 @@ proc main argv {
 
 	if { $help } {
 		puts stderr "Options:"
-		#foreach {opt arg} $g_optargs {
-		#        puts stderr [format "  %-8s %s" $opt: $arg]
-		#}
 		puts stderr [help-options $g_opthelp]
 		return 1
 	}
