@@ -38,14 +38,14 @@ if { $cc != "" } {
 # Otherwise use the "current best default" gcc-native profile.
 } elseif { $tcl_platform(os) == "Darwin" || [phas USE_CLANG] } {
 
-	puts stderr "PROFILE: using clang"
+	puts stderr "PROFILE: using clang (system: $tcl_platform(os), explicit:$USE_CLANG)"
 	# use clang on Mac.
 	ag-profile clang-native
 	set GCCBASE clang
 	set GXXBASE clang++
 } else {
 
-	puts stderr "PROFILE: using gcc"
+	puts stderr "PROFILE: using gcc (system: $tcl_platform(os))"
 	# Use the default profile.
 	ag-profile gcc-native
 	set GCCBASE gcc

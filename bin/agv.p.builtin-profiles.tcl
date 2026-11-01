@@ -11,7 +11,8 @@ set profiles {
 	structure {
 
 		# { Lang entry named "default" defines things that are common
-		# for all languages. }
+		# for all languages. Otherwise "lang" is the language name.
+		# or %NAMETEMPLATE }
 		lang {
 			compile "Command to produce .o file from source file"
 			compile_oflag "Usually -o"
@@ -21,6 +22,13 @@ set profiles {
 			linkdl "(optional) Command to produce dynamic library file (defaults to link with dlflag)"
 			dlflag "Flag that should be added when compiling a dynamic library, using 'link'"
 			archive "Command to create static libraries (archives)"
+			ldstatic "Option to enforce creating a static library"
+			defineflag "Flag to provide preprocessor macrodefinition names"
+			libdirflag "Flag to specify library search directories"
+			incdirflag "Flag to specify include search directories"
+
+			version "Command to obtain the version and target information"
+			targetspec "Phrase in the output of %version command that contains target specification"
 
 			# { The format of the output data for gendep should be as it's generated for Makefile, that is:
 			#	 - The first word in the line is the target name followed by a colon
@@ -34,8 +42,9 @@ set profiles {
 					(produces a list of all files that can be extracted of a single source file)"
 			depspec "One of: auto, cached, explicit:
 			         auto: dependencies are generated at generation time and stored in Makefile.tcl
-					 cached: dependencies are generated at build time and stored in *.d files
+					 cached: dependencies are generated at build time and stored in *.dep files
 					 explicit: dependencies must be taken care of manually, nothing is automatically done"
+			depopt "Options to be added to the compile command that should make it also generate the dependency file"
 			preproc "Command to run preprocessor (optional, can be empty if a language doesn't use one)"
 			cflags "Flags passed always to compile command (compile, gendep, preproc)"
 			ldflags "Flags passed to link command"
@@ -56,6 +65,16 @@ set profiles {
 
 			form:archive "name format for static libraries"
 			form:sharedroot "name format for shared libraries, without extension (this will be taken from \[info sharedlibextension])"
+
+			# { Build type specifications. This will be also aliased through names:
+			# release (= build:opt2), debug (= build:opt0, build:debuginfo), release-debug-info (= build:opt2, build:debuginfo) }
+
+			buildtype "Default build type, so that you can check the current state"
+			build:debuginfo "Flags for adding debug info"
+			build:opt0 "Optimization off flag"
+			build:opt1 "Optimization level 1 flag"
+			build:opt2 "Optimization level 2 flag"
+			build:opt3 "Optimization level 3 flag"
 		}
 
 	}
@@ -69,6 +88,7 @@ set profiles {
 
 			form:archive "lib%.a"
 			form:sharedroot "lib%"
+			buildtype release
 		}
 	}
 
@@ -100,6 +120,11 @@ set profiles {
 			std_option "-std="
 			archive "ar rcs"
 			ldstatic "-static"
+			build:debuginfo "-g3"
+			build:opt0 "-O0"
+			build:opt1 "-O1"
+			build:opt2 "-O2"
+			build:opt3 "-O3"
 		}
 		c++ {
 			compile "g++ -c"
@@ -148,6 +173,11 @@ set profiles {
 			std_option "-std="
 			archive "ar rcs"
 			ldstatic "-static"
+			build:debuginfo "-g3"
+			build:opt0 "-O0"
+			build:opt1 "-O1"
+			build:opt2 "-O2"
+			build:opt3 "-O3"
 		}
 		c++ {
 			compile "clang++ -c"

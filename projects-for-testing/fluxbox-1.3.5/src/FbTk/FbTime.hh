@@ -28,9 +28,7 @@
 #endif // HAVE_CONFIG_H
 
 
-#ifdef HAVE_INTTYPES_H
-#include <inttypes.h>
-#endif // HAVE_INTTYPES_H
+#include <cstdint>
 
 namespace FbTk {
 

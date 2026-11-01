@@ -1,4 +1,3 @@
- have BASENAME
  have CASSERT
 !have CATCLOSE
 !have CATGETS
@@ -15,7 +14,6 @@
  have CSTRING
  have CTIME
 !have DOS_BASED_FILE_SYSTEM
- have FORK
 !have FRIBIDI
  have GETPID
  have ICONV
@@ -26,22 +24,16 @@
  have NL_TYPES_H
 !have RANDR
 !have RANDR1_2
- have SETENV
  have SETLOCALE
  have SIGACTION
- have SIGNAL_H
  have SSTREAM
  have STDARG_H
- have STDINT_H
- have STDLIB_H
  have STRFTIME
  have STRING_H
- have STRINGS_H
 !have STRSTREAM
  have SYNC
  have SYS_PARAM_H
  have SYS_SELECT_H
- have SYS_SOCKET_H
  have SYS_STAT_H
  have SYS_TIME_H
  have SYS_TYPES_H
@@ -57,9 +49,6 @@ append config_h {
 /* "location for nls files" */
 #define LOCALEPATH "/usr/local/share/fluxbox/nls"
 
-/* Define to 1 if `lstat' dereferences a symlink specified with a trailing
-   slash. */
-#define LSTAT_FOLLOWS_SLASHED_SYMLINK 1
 
 /* "Native language support" */
 #define NLS 1
@@ -87,18 +76,6 @@ append config_h {
 
 /* " compile with remember" */
 #define REMEMBER 1
-
-/* Define as the return type of signal handlers (`int' or `void'). */
-#define RETSIGTYPE void
-
-/* Define to the type of arg 1 for `select'. */
-#define SELECT_TYPE_ARG1 int
-
-/* Define to the type of args 2, 3 and 4 for `select'. */
-#define SELECT_TYPE_ARG234 (fd_set *)
-
-/* Define to the type of arg 5 for `select'. */
-#define SELECT_TYPE_ARG5 (struct timeval *)
 
 /* Define to 1 if you have SHAPE */
 /* #undef SHAPE */

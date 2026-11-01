@@ -25,31 +25,6 @@
 #include <sys/time.h>
 
 
-#ifdef HAVE_CLOCK_GETTIME // linux|*bsd|solaris
-#include <time.h>
-
-namespace {
-
-uint64_t _mono() {
-
-    uint64_t t = 0L;
-    timespec ts;
-
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
-        t = (ts.tv_sec * FbTk::FbTime::IN_SECONDS) + (ts.tv_nsec / 1000L);
-    }
-
-    return t;
-}
-
-}
-
-#endif // HAVE_CLOCK_GETTIME
-
-
-
-
-
 #ifdef HAVE_MACH_ABSOLUTE_TIME // macosx
 
 // http://stackoverflow.com/questions/5167269/clock-gettime-alternative-in-mac-os-x
@@ -78,6 +53,25 @@ uint64_t _mono() {
     }
 
     return static_cast<uint64_t>(mach_absolute_time() * micro_scale);
+}
+
+}
+
+#else
+#include <time.h>
+
+namespace {
+
+uint64_t _mono() {
+
+    uint64_t t = 0L;
+    timespec ts;
+
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        t = (ts.tv_sec * FbTk::FbTime::IN_SECONDS) + (ts.tv_nsec / 1000L);
+    }
+
+    return t;
 }
 
 }

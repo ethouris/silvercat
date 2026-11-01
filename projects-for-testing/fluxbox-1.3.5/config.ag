@@ -13,6 +13,7 @@ set DEFAULT_INIT  [agv::prefix]/share/fluxbox/init
 set DEFAULT_APPSFILE [agv::prefix]/share/fluxbox/apps
 set DEFAULT_OVERLAY [agv::prefix]/share/fluxbox/overlay
 set DEFAULT_WINDOWMENU [agv::prefix]/share/fluxbox/windowmenu
+set LOCALEPATH [agv::prefix]/share/fluxbox/nls
 
 
 ag-export {
@@ -23,6 +24,7 @@ ag-export {
 	DEFAULT_APPSFILE
 	DEFAULT_OVERLAY
 	DEFAULT_WINDOWMENU
+	LOCALEPATH
 }
 
 

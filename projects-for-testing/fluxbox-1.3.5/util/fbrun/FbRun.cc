@@ -123,7 +123,7 @@ void FbRun::run(const std::string &command) {
         return;
     }
 
-#ifdef HAVE_FORK
+#if !defined(_WIN32)
     // fork and execute program
     if (!fork()) {
 
@@ -135,7 +135,7 @@ void FbRun::run(const std::string &command) {
         execl(shell, shell, "-c", command.c_str(), static_cast<void*>(NULL));
         exit(0); //exit child
     }
-#elif defined(_WIN32)
+#else
 	/// @todo - unduplicate from FbCommands.cc
 #ifndef PATH_MAX
 #define PATH_MAX 1024
@@ -152,8 +152,6 @@ void FbRun::run(const std::string &command) {
 
     spawnlp(P_NOWAIT, comspec, comspec, "/c", command.c_str(), static_cast<void*>(NULL));
 
-#else
-#error "Can't build FbRun - don't know how to launch without fork on your platform"
 #endif
 
     hide(); // hide gui

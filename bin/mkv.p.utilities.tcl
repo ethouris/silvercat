@@ -29,6 +29,18 @@ proc pset {name args} {
 	return $var
 }
 
+proc pshift {r_list {nelems 1}} {
+	upvar $r_list list
+
+	set len [llength $list]
+	if {$len == 0 || $nelems <= 0} {
+		return
+	}
+	set out [lrange $list 0 [expr {$nelems-1}]]
+	set list [lrange $list $nelems end]
+	return $out
+}
+
 proc RegexpJoinWords {a1 args} {
 	set out "^($a1"
 	foreach a $args {
@@ -135,6 +147,71 @@ proc pget {name {default ""}} {
     return $lname
 }
 
+# Looks like general-purpose utility; consider merging with process-options.
+proc ParseOptionsConfig {arglist scheme} {
+	array set optscheme $scheme
+
+	set values() ""
+	set lastkey ""
+
+	while {$arglist != ""} {
+		set first [pshift arglist]
+		## puts stderr "GRAB: '$first' - remain: $arglist"
+		if {$first == "--"} {
+			break
+		}
+		if {[string index $first 0] == "-"} {
+			lappend options $first
+			## puts stderr "OPTION: $first SCHEME: [pget optscheme($first) 0(default)]"
+			if {[info exists optscheme($first)]} {
+				if {$optscheme($first) == 1} {
+					set arglist [lassign $arglist values($first)]
+					## puts stderr "ARG: 1, val=$values($first), remain: $arglist"
+				} elseif {$optscheme($first) == -1} {
+					# Consume all up to the next option
+					# Unless you get --, in which case others
+					# are consumed with no regard of option
+					## puts stderr "ARG: INF, CHECKING END: $arglist..."
+
+					set trackopt yes
+					set stopped no
+					for {set i 0} {$i < [llength $arglist]} {incr i} {
+						set v [lindex $arglist $i]
+						## puts stderr "... '$v' - will track option: $trackopt"
+						if {$trackopt} {
+							if {[string index $v 0] == "-"} {
+								if {$v == "--"} {
+									## puts stderr "... NOOPT. val=$values($first) rem: will be added: [lrange $arglist $i+1 end]"
+									set trackopt no
+									continue
+								}
+								# Break here, remove used values
+								set arglist [lrange $arglist $i end]
+								#puts stderr "... v=$v STOP HERE. remain: $arglist"
+								set stopped yes
+								break
+							}
+						}
+						## puts stderr "... val=[pget values($first)] ADDING: '$v', REMAIN: [lrange $arglist $i+1 end]"
+						lappend values($first) $v
+					}
+					## puts stderr "ARG: INF: val=[pget values($first)] remain: $arglist"
+					if {!$stopped} {
+						#set values($first) $arglist
+						set arglist ""
+					}
+				}
+				# For 0 same as nonexistent: do not grab
+			}
+		} else {
+			lappend values() $first
+		}
+	}
+
+	return [array get values]
+}
+
+
 proc palias {name body} {
 	set procbody "return \[$body {*}\$args\]"
 	namespace inscope :: proc $name args $procbody
@@ -186,19 +263,31 @@ proc pupdate {filename contents} {
 
 # This function is directly copied from 'apply' Tcl manpage.
 # Just wanted to be clear about it, although it doesn't kick, but...
-proc pmap {lambda list} {
+proc pmaps {lambda list} {
 	set result {}
 	if { [llength $lambda] == 1 } {
 		# Then it's a command name
 		foreach item $list {
-		        lappend result [$lambda $item]
+			lappend result [$lambda $item]
 		}
 	} else {
 		foreach item $list {
-		        lappend result [apply $lambda $item]
+			lappend result [apply $lambda $item]
 		}
 	}
 	return $result
+}
+
+proc pmap {lambda list} {
+	lassign $lambda arglist body
+	if {$body == ""} {
+		error "pmap: Not a lambda expression: '$lambda'"
+	}
+	if {[llength $arglist] != 1} {
+		error "pmap: expected lambda with one argument, got '$arglist'"
+	}
+	#puts stderr "*DEBUG*:pmap: lmap $arglist {$list} { $body }"
+	return [lmap $arglist $list $body]
 }
 
 # Some people do not like lambdas and prefer just argument number.
@@ -217,33 +306,76 @@ proc pbind {args} {
 	# % - alias to %0
 	# %* - all arguments, having variadic arguments
 	# %<n> - nth argument
-	set outpipe ""
-	foreach it $args {
-		if {[string index $it 0] == "%"} {
-			switch -glob -- [string index $it 1] {
-				% {
-					# if this is % followed by %, simply append
-					# whatever follows this %. This allows multiplying
-					# % in nested ppipe expressions
-					append outpipe "[string range $it 1 end] "
-				}
-				"" {
-					append outpipe {[lindex $args 0] }
-				}
-				[0-9] {
-					set n [expr 0+[string range $it 1 end]]
-					append outpipe "\[lindex \$args $n\] "
-				}
-				* {
-					append outpipe "\$args "
-				}
+
+
+	# Mind a problem if __arg__ is already there, in
+	set argpx __arg__
+	set keeppx __keep__
+
+	set found no
+	if {[string first $argpx $args] != -1} {
+		for {set i 65} {$i < 91} {incr i} {
+			set argpx [format "__arg%c__" $i]
+			if {[string first $argpx $args] != -1} {
+				set found yes
+				break
 			}
-		} else {
-			append outpipe "$it "
+		}
+		if {!$found} {
+			error "pbind: body must not contain __arg*__ named variables"
 		}
 	}
 
-	return [list args $outpipe]
+	# Pre-fetch %% to avoid replacement of % later
+	set outbody [string map [list %% $keeppx] $args]
+
+	# Now all % -> __arg__ and %% -> __keep__
+	set outbody [string map [list % $argpx] $outbody]
+	#puts stderr "DEBUG: phase1: '$outbody'"
+
+	# Now all % -> __arg__ and %% -> %
+	set outbody [string map [list $keeppx %] $outbody]
+	#puts stderr "DEBUG: phase2: '$outbody'"
+
+	set found no
+
+	# Extract the numbers following __arg__; so
+	# every __arg__3 is turned into [lindex $args 3]
+	set match_indices [regexp -all -inline -indices "${argpx}(\[0-9\]*)" $outbody] 
+
+	set out ""
+	set lastend 0
+	foreach {argmatch submatch} $match_indices {
+		lassign $argmatch abegin end
+		lassign $submatch begin end
+
+		# First, grab the string fragment in between
+		if {$lastend < $abegin} {
+			set send [expr $abegin-1]
+			append out [string range $outbody $lastend $send]
+		}
+
+		if {$begin > $end} {
+			# single __arg__ 
+			append out "\$\{args\}"
+		} else {
+			# Identify the number
+			set n [string range $outbody $begin $end]
+			append out "\[lindex \$args $n\]"
+		}
+		#puts stderr "* pbind: append @$lastend + @$abegin-@${end}([string range $outbody $abegin $end]): $out"
+		set lastend [expr {$end+1}]
+	}
+	if {$end < [string length $outbody]} {
+		incr end
+		append out [string range $outbody $end end]
+		#puts stderr "* pbind: final append @$end-end([string range $outbody $end end]): $out"
+	}
+	return [list args $out]
+}
+
+proc pref {v_alias v_target} {
+	uplevel 1 "upvar 0 $v_target $v_alias"
 }
 
 proc pfind {args} {
@@ -666,6 +798,36 @@ proc process-options {argv optargd} {
 	return [list $args $variables $longoptions]
 }
 
+proc help-options {help {width 80}} {
+
+	set fortext {}
+	set maxlen 0
+	foreach l [split $help \n] {
+		set l [string trim $l]
+		if {$l == ""} {
+			continue
+		}
+		set parts [split $l :]
+		set parts [lassign $parts name]
+		set txt [string trim [join $parts :]]
+		set name [string trim $name]
+		lappend fortext $name $txt
+		set maxlen [expr {max($maxlen,[string length $name])}]
+	}
+	# This can be improved to maintain the maximum width
+	# Simple version, skipped for now
+
+	set output ""
+	foreach {name txt} $fortext {
+		if {$txt == ""} {
+			append output "  $name\n"
+		} else {
+			append output [format "  %-${maxlen}s: %s\n" $name $txt]
+		}
+	}
+	return $output
+}
+
 proc pass args { return $args }
 
 proc pver {args} {
@@ -712,9 +874,19 @@ proc pdip {format list} {
 	if {$format == ""} {
 		error "pdip: format cannot be empty"
 	}
-	set pproc {return [string map "[list % \$n]" $format]}
+
+	set pproc {string map "[list % \$n]" $format}
 	set pproc [subst -nocommands $pproc]
-	return [[namespace current]::pmap [list n $pproc] [[namespace current]::plist $list]]
+	set pmap_cmd [namespace current]::pmap
+	set lamda [list n $pproc]
+	set post_list [[namespace current]::plist {*}$list]
+
+	#puts stderr "*DEBUG* pdip: format=$format list=$list ;"
+	#puts stderr "... lamda='$lamda' real-list=$post_list"
+
+	set post [$pmap_cmd $lamda $post_list]
+	#puts stderr "... processed: $post"
+	return $post
 }
 
 # Returns first string from the list that is nonempty
@@ -734,7 +906,10 @@ proc psfirst args {
 proc pif args {
 	set isq [lsearch -exact $args ?]
 	if { $isq == -1 } {
-		lassign $args cond iftrue iffalse
+		set rest [lassign $args cond iftrue iffalse]
+		if {$rest != ""} {
+			error "pif: with no operators, expected <condition> <true value> <false value>"
+		}
 	} else {
 		set cond [lrange $args 0 $isq-1]
 		set end [lsearch -start $isq -exact $args :]
@@ -746,18 +921,30 @@ proc pif args {
 			set iffalse [lrange $args $end+1 end]
 		}
 	}
+	#puts stderr "PIF: cond='$cond' ? '$iftrue' : '$iffalse'"
 
-	if [uplevel expr $cond] {
+	# If both are empty, return 1 or 0, respectively
+	# If only false is empty, make it an empty string.
+	if { $iffalse == "" } {
+		if {$iftrue == ""} {
+			set iftrue 1
+			set iffalse 0
+		} else {
+			set iffalse ""
+		}
+	}
+
+	if {[uplevel expr $cond]} {
 		return $iftrue
 	}
 	return $iffalse
 }
 
-proc pis args {
-	set rest [lassign $args value pattern]
-
-	if { [lindex $rest 0] == "?" } {
-		set rest [lrange $rest 1 end]
+proc pis {value pattern args} {
+	if { [lindex $args 0] == "?" } {
+		set rest [lrange $args 1 end]
+	} else {
+		set rest $args
 	}
 
 	set end [lsearch $rest :]
@@ -765,6 +952,7 @@ proc pis args {
 		set iftrue $rest
 		set iffalse ""
 	} elseif {$end == 0} {
+		# : after ? of rider - remaininig part is else
 		set iftrue ""
 		set iffalse [lrange $rest 1 end]
 	} else {
@@ -772,22 +960,19 @@ proc pis args {
 		set iffalse [lrange $rest $end+1 end]
 	}
 
+	#puts stderr "PIS: $value == $pattern ? '$iftrue' : '$iffalse'"
+
 	set istrue 0
 
-	if {$value != $pattern} {
-		if {![string match $pattern $value]} {
-			if { ![string match -nocase $pattern $value] } {
-			} else {
-				set istrue 1
-			}
-		} else {
-			set istrue 1
-		}
-	} else {
-		set istrue 1
+	if {$value == $pattern} {
+		return $iftrue
+	}
+	
+	if {[string match -nocase $pattern $value]} {
+		return $iftrue
 	}
 
-	return [pif $istrue $iftrue $iffalse]
+	return $iffalse
 }
 
 
@@ -974,6 +1159,7 @@ proc pswap {ra rb} {
 	return
 }
 
+
 set public_export_util [puncomment {
 
 	# Utility functions
@@ -996,6 +1182,7 @@ set public_export_util [puncomment {
 	plist
 	pmap
 	pbind
+	pref
 	prelocate
 	pnormalize
 	puncomment
@@ -1014,6 +1201,7 @@ set public_export_util [puncomment {
 	pswap
 	pdispatch
 	process-options
+	help-options
 	number-cores
 	dict:at
 	dict:filterkey

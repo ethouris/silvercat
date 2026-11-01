@@ -180,6 +180,9 @@ proc PrepareGeneralTargets {} {
 	set subtargets {}
 	# Extract only targets of type program or library
 	foreach t [array names agv::target] {
+		if {$t == ".."} {
+			continue
+		}
 		set type [dict:at $agv::target($t) type]
 		set runon [dict:at $agv::target($t) runon]
 		set addtargets ""
@@ -386,7 +389,7 @@ proc MafRead {directory {filename {}}} {
 
 	set isgo 1
 
-	set gotempty no
+	set gotempty yes ;# must start with at least one label
 
 	while { [gets $fd line] >= 0 } {
 		set oline [string trim $line]
@@ -484,4 +487,3 @@ proc MafRead {directory {filename {}}} {
 
 	return $output
 }
-

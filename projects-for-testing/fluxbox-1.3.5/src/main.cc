@@ -57,10 +57,8 @@
   #include <unistd.h>
 #endif
 
-#ifdef HAVE_SYS_STAT_H
 #include <sys/types.h>
 #include <sys/stat.h>
-#endif // HAVE_SYS_STAT_H
 
 #include <fstream>
 #include <stdexcept>

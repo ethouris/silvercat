@@ -1,0 +1,26 @@
+
+ag-profile gcc-native
+
+# This test employs:
+
+# file1: main program
+
+# src-libff: library ff
+# src-libgg: library gg
+# src-libhh: library hh
+
+# ff is static only
+# gg is shared only
+# hh is both
+
+# main depends on ff and gg
+# gg depends on hh
+
+ag hh -type library -libspec static shared -s src-libhh.cc
+ag gg -type library -libspec shared -s src-libgg.cc -depends hh/shared
+ag ff -type library -libspec static -s src-libff.cc
+
+# XXX ERROR: deep recursive dependencies must be specified explicitly.
+# That is, hh/shared's target must be added to the command also for all
+# targets indirectly dependent
+ag mm -type program -s src-main.cc -depends ff gg

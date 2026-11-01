@@ -30,11 +30,7 @@
 #include <X11/Xatom.h>
 #include <iostream>
 
-#ifdef HAVE_CSTRING
-  #include <cstring>
-#else
-  #include <string.h>
-#endif
+#include <cstring>
 
 using std::string;
 using std::strlen;

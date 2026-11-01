@@ -6,7 +6,10 @@ lassign [split $SRT_VERSION .] SRT_VERSION_MAJOR SRT_VERSION_MINOR SRT_VERSION_P
 
 #set VERSION 1.3.0
 
-if { [info exists ENABLE_CLANG_SANITIZER] } {
+# Check prior to selecting the toolchain
+ag-config enable clang-tsa no -h "Compile with clang Thread Safety Analysis mode (requires clang as compiler)"
+
+if {[ag-config enable clang-tsa]} {
 	set USE_CLANG 1
 }
 
@@ -15,7 +18,7 @@ if { [info exists ENABLE_CLANG_SANITIZER] } {
 source ag/ag-choose-toolchain-profile.tcl
 ag-profile posix-install
 
-ag-option --std "" ~c++*
+ag-option --std "" -f ~c++* -h "Use specified C++ standard"
 
 if { ![info exists STD] } {
 	set STD [ag-option --std]
@@ -31,6 +34,10 @@ if { $STD != "" } {
 	if { $stdver == "0x" } {
 		set stdver 11
 	}
+	if { $stdver == "98" } {
+		set stdver 03
+		set STD "c++03"
+	}
 	set parts [split $stdver ""]
 	if { [lindex $parts 0] < 1 } {
 		set STD_APPS c++11
@@ -38,8 +45,8 @@ if { $STD != "" } {
 			error "C++0x series is only C++03"
 		}
 	} else {
-		if { $stdver ni {11 14 17} } {
-			error "$STD: unknown C++ standard"
+		if { $stdver ni {11 14 17 20 23} } {
+			error "$STD: unknown (or too new) C++ standard"
 		}
 		set STD_APPS $STD
 	}
@@ -57,14 +64,33 @@ set clang_sanitizers {
 	memory
 }
 
-if { [info exists ENABLE_CLANG_SANITIZER] } {
+ag-option --sanitize "" -a $clang_sanitizers -h "Use sanitizer of specified type"
 
-	if {$ENABLE_CLANG_SANITIZER ni $clang_sanitizers} {
-		error "Invalid sanitizer: '$ENABLE_CLANG_SANITIZER'. Available: [join $clang_sanitizers { }]"
-	}
-	ag-profile {c c++} -cflags -- -fsanitize=$ENABLE_CLANG_SANITIZER
-	ag-profile {c c++} -ldflags -- -fsanitize=$ENABLE_CLANG_SANITIZER
+set csan [ag-option --sanitize]
+
+if { $csan != "" } {
+	ag-profile {c c++} -cflags -- -fsanitize=$csan
+	ag-profile {c c++} -ldflags -- -fsanitize=$csan
 }
+
+proc macroflag {flag} {
+	return [string toupper [string map {- _ + X} $flag]]
+}
+
+proc config-define {pfx cat name {target {}}} {
+	set fullname "$pfx-$cat-$name"
+	set ppvar [macroflag $fullname]
+	
+	if {[ag-config $cat $name]} {
+		if {$target == {}} {
+			ag-profile {c c++} -D $ppvar=1
+		} else {
+			ag $target -D SRT_$ppvar=1
+		}
+		#puts "Per --$cat-$name, add -DSRT_$ppvar=1"
+	}
+}
+
 
 # Experimental: Use a separate directory for intermediate files
 #namespace eval agv::p {
@@ -75,106 +101,98 @@ if { [info exists ENABLE_CLANG_SANITIZER] } {
 #}
 #ag-profile general -imgen mydir-path
 
-# Ok, now variables
+# XXX These are not implemented -- please add!
+ag-config enable win32-shared no -h "Generate definitions for Win32 DLL"
 
-pinit ENABLE_WIN32_SHARED 0
-pinit ENABLE_STDCXX_SYNC 0
+# This should add -DENABLE_STDCXX_SYNC=1 macro.
+ag-config enable stdc++-sync [expr {$STD == "c++03" ? no : yes}] -h "Use C++11 implementation of the sync module"
 
-if {!$ENABLE_STDCXX_SYNC} {
+if {![ag-config enable stdc++-sync]} {
 	ag-profile c++ -D HVU_EXT_INCLUDE_SYNC="../srtcore/srt_sync_cxx98.h"
 }
+config-define srt enable stdc++-sync
 
 set srtstatic 0
 set srtshared 0
 
-if { [info exists WITH_LIBSPEC] } {
-	if { [string first , $WITH_LIBSPEC] != -1 } {
-		set WITH_LIBSPEC [split $WITH_LIBSPEC ,]
-	}
+# avail should get options as:
+# - radiobutton: one of the options, one is selected as default
+# - checkbutton: zero or more options, any can be set as default
+# XXX REQUIRED SENSIEBLE SYNTAX FOR IT.
+ag-config avail libspec -default *static *shared -h "Request static or shared library to build"
+ag-config enable shared yes -h "Build shared library (--use-libspec overrides this)"
+ag-config enable static yes -h "Build static library (--use-libspec overrides this)"
+set WITH_LIBSPEC [ag-config use libspec]
 
-	if { "shared" in $WITH_LIBSPEC } {
-		set srtshared 1
-	}
+# Ok, so default is both static and shared.
+# 1. Can be changed by having nondefault --use-libespec
+# 2. Can be changed by --disable-* (static or shared).
 
-	if { "static" in $WITH_LIBSPEC } {
-		set srtstatic 1
-	}
-} else {
+# So, particular spec is confirmed only if present in both.
+# Additionally, you can't dissable both.
 
-	if { [phas ENABLE_SHARED] } {
-		set srtshared 1
-	}
-
-	if { [phas ENABLE_STATIC] } {
-		set srtstatic 1
-	}
+set WITH_LIBSPEC [ag-config use libspec]
+set srt_libspec ""
+if {"shared" in $WITH_LIBSPEC && [ag-config enable shared]} {
+	lappend srt_libspec shared
 }
-
-# Enable static and shared by default
-# Disable shared only if ENABLE_STATIC
-# Keep default shared enabled due to LGPL requirements.
-# Keep also static enabled because it's required as a dependency of stransmit.
-
-if { $srtshared == 0 && $srtstatic == 1 } {
-	pset srt_libspec static
-} else {
-	pset srt_libspec static shared
+if {"static" in $WITH_LIBSPEC && [ag-config enable static]} {
+	lappend srt_libspec static
 }
-
-puts "SRT LIBSPEC: $srt_libspec"
+if {$srt_libspec == ""} {
+	puts "ERROR: You cant disable both static and shared"
+	exit 1
+}
+#puts "LIBSPEC=[ag-config use libspec] STATIC=[ag-config enable static] SHARED=[ag-config enable shared]"
+#puts "SRT LIBSPEC: $srt_libspec"
 
 ag-profile {c c++} -D {SRT_VERSION=\"$SRT_VERSION\"}
 
 
 # -- Selecting  debug/release version
 
-# XXX This feature is not yet supported
-# if { [ag-config option ?buildtype] == "debug" } {
-# 	set SRT_DEBUG_ENABLED 1
-# 	set SRT_DEBUG_OPT "-ggdb -O0"
-# } else {
-# 	set SRT_DEBUG_ENABLED 0
-# 	set SRT_DEBUG_OPT "-O2 -DNDEBUG"
-# }
-# ag-profile {c c++} -cflags $SRT_DEBUG_OPT
+# IDEA:
+#
+# 1. Create "builtin config" parts. These are
+#    config items that are reserved for the system.
+# 2. There should be possible the following:
+#    - single build type
+#    - multiple build types
+#    Configured can be only one of these above.
+# 
+# 3. If one build type, generated makefile executes this type.
+#
+# 4. If multi build type, then:
+#    - the generated makefile uses separate directories per type
+#      (the build directory is the root directory for build)
+#    - the build can be done by entering the right type dir
+#      and also in the overall build directory, in which case
+#      all build types are built 
+# THE MULTI BUILD TYPE IS TO BE SUPPORTED LATER (reserve the option tho)
+#
+# To define the build type, use keys in ag-profile:
+# 
+# DIRECT OPTIONS:
+#
+# ag-profile general -debuginfo on
+# ag-profile general -opt off
+#
+# ag-profile general -buildtype <type>
+# 
+# is an alias translated to the following:
+# 
+#   -buildtype release = -debuginfo off -optlevel 2
+#   -buildtype debug   = -debuginfo on -optlevel 0
+#   -buildtype release-debug-info = -debuginfo on -optlevel 2
+# 
 
-# Old name
-if { [phas DEBUG] } {
-	set ENABLE_DEBUG $DEBUG
-}
+set fdebug [pis [ag-profile general ?buildtype] *debug* ? -D_DEBUG : -DNDEBUG]
 
-# CONSIDER:
-# set BUILD_TYPE [ag-config option ?buildtype]
-switch -- [pget ENABLE_DEBUG] {
-	"" - 0 {
-		set BUILD_TYPE release
-	}
+puts "BUILD TYPE: [ag-profile general ?buildtype]  cflags: $fdebug"
 
-	1 {
-		set BUILD_TYPE debug
-	}
+ag-profile {c c++} -cflags -- $fdebug
 
-	2 {
-		set BUILD_TYPE release-debug-info
-	}
-}
-
-set foptimize [pis $BUILD_TYPE release* ? -O3 : -O0]
-set fdebug [pis $BUILD_TYPE *debug* ? -g -D_DEBUG : -DNDEBUG]
-
-puts "BUILD TYPE: $BUILD_TYPE  cflags: opt:$foptimize debug:$fdebug"
-
-ag-profile {c c++} -cflags -- $foptimize $fdebug
-
-# XXX EXPERIMENTAL for socket groups
-ag-profile {c c++} -D SRT_ENABLE_APP_READER
-
-set ENABLE_HEAVY_LOGGING_DEFAULT [string match *debug* $BUILD_TYPE]
-
-pinit ENABLE_LOGGING 1
-pinit ENABLE_HEAVY_LOGGING $ENABLE_HEAVY_LOGGING_DEFAULT
-pinit ENABLE_ENCRYPTION 1
-
+set ENABLE_HEAVY_LOGGING_DEFAULT [string match *debug* [ag-profile general ?buildtype]]
 
 # -- Selecting profiled version
 
@@ -203,23 +221,25 @@ if { [catch {exec git rev-parse --show-toplevel} gittop] } {
 	# List all ls-files at toplevel,
 	#  filter in directory-based,
 	#  cut off dirname,
+	# (( here % is interpreted by `pbind`, then %% by `ppipe` ))
+	set filter_dirname [pbind ppipe file split % | lindex %% 0]
 	#  collect in toplevel_dirs
 	ppipe exec git ls-files --full-name $gittop | \
 		  lsearch -all -inline % */* | \
-		  pmap [pbind file dirname %] % | \
+		  pmap $filter_dirname % | \
+          pluniq % | \
 		  set toplevel_dirs %
-	# Alternative method for [file dirname], but looks more entangled
-	# First % is interpreted by pbind, second %% turned to % by pbind
-	# pmap [pbind ppipe split % / | lindex %% 0] % | 
 }
 proc find-top-dir {args} {
-	puts "Checking if any found in toplevel '$::gittop': $args"
+	puts -nonewline "Checking dir at '$::gittop': $args ... "; flush stdout
 
 	foreach name $args {
 		if {$name in $::toplevel_dirs} {
+			puts $name
 			return $name
 		}
 	}
+	puts "NONE FOUND!"
 }
 
 
@@ -238,40 +258,40 @@ set TARGET_srt srt
 # which will be fixed when the virtual targets are supported.
 set TARGET_haicrypt haicrypt
 
-if { [pget WITH_SRT_NAME] != "" } {
-	set TARGET_srt $WITH_SRT_NAME
+ag-option --with-srt-name "" -f keyword -h "Override the library name 'srt'"
+
+if { [ag-option --with-srt-name] != "" } {
+	set TARGET_srt [ag-option --with-srt-name]
 }
 
 if { [pget WITH_HAICRYPT_NAME] != "" } {
 	set TARGET_haicrypt $WITH_HAICRYPT_NAME
 }
 
-ag $TARGET_haicrypt -type library
+#puts "NAMES: srt=$TARGET_srt haicrypt=$TARGET_haicrypt"
+
 ag $TARGET_srt -type library
 
-proc export-flag {name {target {}}} {
-	if { [uplevel phas $name] } {
-		if {$target == {}} {
-			ag-profile {c c++} -D SRT_${name}=1
-		} else {
-			ag $target -D SRT_${name}=1
-		}
-	}
+ag-config enable logging on -h "Enable logging facility"
+config-define hvu enable logging
+
+ag-config enable heavy-logging $ENABLE_HEAVY_LOGGING_DEFAULT -h "Enable HLOG logging entries, too"
+if {![ag-config enable logging]} {
+	ag-config enable heavy-logging off
 }
+config-define hvu enable heavy-logging
 
-# Use this flag for library and all apps
-if { $ENABLE_LOGGING } {
-	ag-profile general -D SRT_ENABLE_LOGGING=1 HVU_ENABLE_LOGGING=1
+ag-config enable encryption on -h "Build with encryption supported"
+config-define srt enable encryption $TARGET_srt
 
-	if {[phas ENABLE_HEAVY_LOGGING]} {
-		ag-profile general -D SRT_ENABLE_HEAVY_LOGGING=1 HVU_ENABLE_HEAVY_LOGGING=1
-	}
-}
+ag-config enable getnameinfo no -h "Use getnameinfo() to resolve IP names"
+config-define srt enable getnameinfo
 
-export-flag ENABLE_ENCRYPTION $TARGET_srt
-export-flag ENABLE_GETNAMEINFO
-export-flag ENABLE_PKTINFO
-export-flag ENABLE_BONDING
+ag-config enable pktinfo [expr {$tcl_platform(platform) == "Linux"}] -h "Support pktinfo (prevents same-IP confusion)"
+config-define srt enable pktinfo
+
+ag-config enable bonding on -h "Build with Bonding feature"
+config-define srt enable bonding
 
 # XXX
 # As Silvercat doesn't support virtual libraries yet,
@@ -285,6 +305,8 @@ export-flag ENABLE_BONDING
 # the cflags defined in the depending library. Only linker flags
 # are just integrated linker flags for both. Here it's not preserved.
 # {
+
+ag $TARGET_haicrypt -type library
 if { $haicrypt_libspec == "virtual" } {
 
 	# Turn off automatic compiling of this library. Just stays for formality.
@@ -312,24 +334,44 @@ if {$STD_SRTLIB != ""} {
 
 # HaiCrypt
 
-pinit USE_ENCLIB openssl
+ag-config avail enclib openssl-evp openssl gnutls mbedtls botan -h "Select encryption library"
 
 set enclib_modules {
+	openssl-evp {libssl libcrypto}
 	openssl {libssl libcrypto}
 	gnutls {gnutls nettle}
 	mbedtls {mbedtls mbedcrypto}
+	botan botan
+}
+
+set enclib_cryspr2 {
+	openssl-evp
+	openssl
+	botan
 }
 
 set host_system [lindex [split $tcl_platform(os) _] 0]
 pinit BUILD_HOST $host_system
 pinit BUILD_TARGET $BUILD_HOST
-
 set sourcedirs ""
 set enclib_defines ""
-if {$ENABLE_ENCRYPTION} {
+
+# XXX IMPORTANT!!!
+# The MAF format still requires that the build system provide variables.
+# It was designed for CMake, hence conditional inclusion rquires global
+# variables to enable them.
+
+# Worse: you need to have all option already defined before you table it.
+
+set ENABLE_STDCXX_SYNC [ag-config enable stdc++-sync]
+set ENABLE_BONDING [ag-config enable bonding]
+
+if {[ag-config enable encryption]} {
+
+	#error "Encryption should be off"
 
 	# XXX Provide support for mbedtls and gnutls/nettle.
-	pinit USE_ENCLIB openssl
+	set USE_ENCLIB [ag-config use enclib]
 
 	set maf_haicrypt [ag-maf $TARGET_haicrypt haicrypt filelist-$USE_ENCLIB.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 	ag $TARGET_haicrypt -hidir srt
@@ -341,22 +383,28 @@ if {$ENABLE_ENCRYPTION} {
 		lappend sourcedirs common
 	}
 
-	ag $TARGET_haicrypt -D {
-	   HAICRYPT_USE_OPENSSL_EVP=1
-	   HAICRYPT_USE_OPENSSL_AES
+	if {$USE_ENCLIB == "openssl-evp"} {
+		ag $TARGET_haicrypt -D HAICRYPT_USE_OPENSSL_EVP=1
+	}
+	ag $TARGET_haicrypt -D HAICRYPT_USE_OPENSSL_AES
+	if {$USE_ENCLIB in $enclib_cryspr2} {
+		ag $TARGET_haicrypt -D CRYSPR2
 	}
 
-	set enclib_defines "-D USE_[string toupper $USE_ENCLIB]"
+	set enclib_defines "-D USE_[macroflag $USE_ENCLIB]"
 
 	ag $TARGET_haicrypt {*}$enclib_defines
 }
 
-# HaiSRT
-
 set maf_srt [ag-maf $TARGET_srt srtcore filelist.maf -s SOURCES -h {PUBLIC HEADERS} {PROTECTED HEADERS}]
 ag $TARGET_srt -hidir srt
+
 lappend sourcedirs srtcore {*}[find-top-dir logging]
 
+# XXX This kind of check checks the host, not targed, and is not
+# suitable for cross compiling.
+#
+# Consider [ag-config use target-system] == Linux, Windows, Mac etc.
 if { [pget tcl_platform(os)] == "Linux" } {
 	ag $TARGET_srt -ldflags -- -lpthread
 
@@ -368,8 +416,9 @@ if { [pget tcl_platform(os)] == "Linux" } {
 }
 
 # In case when using clang, add -Wthread-safety
-if {$GCCBASE == "clang"} {
-	ag $TARGET_srt -cflags -- -Wthread-safety
+if {$GCCBASE == "clang" && [ag-config enable clang-tsa ?]} {
+	ag $TARGET_srt -cflags -- -Wthread-safety -Wthread-safety-beta
+	ag $TARGET_srt -D SRT_ENABLE_CLANG_TSA=1
 }
 
 set DEFINE_SRT_VERSION_BUILD ""
@@ -399,12 +448,14 @@ ag srt_pc -type custom -install lib -installdir pkgconfig -s scripts/srt.pc.in -
 # XXX Use MAF file to specify these details!
 
 # Include directories (see Issue #72)
-ag-profile general -I [pdip $agv::srcdir/% {
+set extra_incdir [pdip $agv::srcdir/% {
 	srtcore
 	haicrypt
 	common
 	logging
 }]
+ag-profile {c c++} -I $extra_incdir
+#puts "EXTRA -I: $extra_incdir"
 
 # Definitions
 ag-profile general -D {
@@ -435,7 +486,7 @@ pset sources [pluniq [concat [ag $TARGET_srt ?sources] [ag $TARGET_haicrypt ?sou
 # Extract all header files for tag generations
 
 set all_headers [dict:sel $maf_srt -glob "* HEADERS"]
-if {$ENABLE_ENCRYPTION} {
+if {[ag-config enable encryption]} {
 	lappend all_headers {*}[dict:sel $maf_haicrypt -glob "* HEADERS"]
 }
 
@@ -447,7 +498,6 @@ set appdeveldir [find-top-dir tools testing]
 if {$appdeveldir == ""} {
 	error "No 'testing' or 'tools' directory found in toplevel"
 }
-puts "DEVEL APPS DIR FOUND: $appdeveldir"
 set exampledir examples
 
 # Turn off compiling applications if static srt is unwanted
@@ -521,15 +571,21 @@ if { "static" in $srt_libspec } {
 	testapp uriparser-test -D TEST
 	testapp-srt srt-test-live
 	testapp-srt srt-test-file
+	testapp-srt srt-test-mpbond
 	testapp-srt srt-test-relay
-
-	# Not available on all versions, check first
-	if {[file exists $agv::srcdir/$appdeveldir/srt-test-stow.maf]} {
-		testapp-srt srt-test-stow
-	}
 	ag srt-test-relay -D SRT_ENABLE_VERBOSE_LOCK -imgen target-name
 
 	testapp-srt srt-test-multiplex
+
+	proc testapp-srt-ifavail {prg args} {
+		if {[file exists $agv::srcdir/$::appdeveldir/${prg}.maf]} {
+			testapp-srt $prg {*}$args
+		}
+	}
+
+	# Not available on all versions, check first
+	testapp-srt-ifavail srt-test-stow
+	testapp-srt-ifavail srt-tunnel
 
 	lappend sourcedirs $appdeveldir
 
@@ -589,18 +645,33 @@ ag tags -command {
 
 # Test app
 
-ag test-srt -type program -s [glob test/*.cpp] -I //apps -depends $TARGET_srt
-set system [lindex [split $tcl_platform(os) _] 0]
-ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$system\"}
+ag test-srt -type program -I //apps -depends $TARGET_srt
+#ag test-srt -s [glob test/*.cpp]
+ag-maf test-srt test filelist.maf -s SOURCES
 
-# Using GTEST_BASEDIR you can override the Google Test library spec.
+#puts "SOURCES EXTRACTED FOR test-srt:\n[ag test-srt ?sources]"
+
+ag test-srt -D {SRT_TEST_SYSTEM_NAME=\"$BUILD_TARGET\"}
+
+# Using --with-gtest-basedir you can override the Google Test library spec.
 # If not specified, the pkg-config should provide the specs
-pinit GTEST_BASEDIR ""
+
+ag-option --with-gtest-basedir "" -h "Specify manually gtest directory"
+
+# You can also use GTEST_BASEDIR call variable.
+pinit GTEST_BASEDIR [ag-option --with-gtest-basedir]
 if {$GTEST_BASEDIR == ""} {
 	ag test-srt -packages gtest gtest_main
 } else {
 	set GTEST_LIB [file join $GTEST_BASEDIR lib]
 	set GTEST_INC [file join $GTEST_BASEDIR googletest googletest-src googletest include]
+	puts "GTEST_BASEDIR: [file normalize $GTEST_BASEDIR]"
+
+	if {![file isdirectory $GTEST_LIB] || ![file isdirectory $GTEST_INC]
+			|| [glob -nocomplain $GTEST_LIB/*] == ""} {
+		error "Wrong GTEST_BASEDIR=$GTEST_BASEDIR (empty or nonexistent)"
+	}
+
 	ag test-srt -I $GTEST_INC -L $GTEST_LIB -libs -- -lgtest -lgtest_main
 }
 

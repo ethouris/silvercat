@@ -326,7 +326,7 @@ ag-check-option enable-systemtray "include code for the systemtray (default=yes)
 
 
 # AM_PATH_XFT - skip this shit. XFT is supported by pkg-config
-ag-config project packages xft
+ag-config project -packages xft
 
 
 ag-check-option enable-xrender "XRENDER (transparent) support (default=yes)" -then {
