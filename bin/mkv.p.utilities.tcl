@@ -1201,6 +1201,7 @@ set public_export_util [puncomment {
 	pswap
 	pdispatch
 	process-options
+	pshift
 	help-options
 	number-cores
 	dict:at

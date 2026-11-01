@@ -1164,11 +1164,6 @@ proc ag-option {name args} {
 		error "ag-option: prefix '$prefix' is reserved for ag-config"
 	}
 
-#  	set others [lassign $args deflt filter]
-#  	if {$others != ""} {
-#  		error "Usage: ag-option --<name> <default-value> ?filter?"
-#  	}
-
 	set filter ""
 	set helptext ""
 	set avail ""
@@ -1805,9 +1800,6 @@ proc ProcessLanguage target {
 		}
 		dict set db language $default_language
 	}
-
-	# Write the database before running framework's hook
-	# set agv::target($target) $db
 }
 
 
@@ -1864,13 +1856,7 @@ proc ProcessSources target {
 
 	set lang [dict:at $db language]
 
-	# Write the database before running framework's hook
-	#set agv::target($target) $db
-
 	ExecuteFrameworks $target compile-pre $sources
-
-	# Re-read cache after possible changes were applied by the fw.
-	#set db $agv::target($target)
 
 	# Moved here because the framework could have added something
 	set target_deps [dict:at $db depends]
@@ -2037,8 +2023,6 @@ proc ProcessSources target {
 	dict set db objects $objects
 	dict set db rules $rules
 
-	#set agv::target($target) $db
-
 	ExecuteFrameworks $target compile-post $objects
 
 	lappend ::agv::p::processed($target) sources
@@ -2182,7 +2166,6 @@ proc Process:custom target {
 	$::g_debug "PROCESSING CUSTOM: $target"
 
 	pref db ::agv::target($target)
-	#set db $agv::target($target)
 
 	set rules [dict:at $db rules]
 	set phony [dict:at $db phony]
@@ -2258,8 +2241,6 @@ proc Process:custom target {
 		dict set db phony install-$target {*}$install_parts
 	}
 
-	#set agv::target($target) $db
-
 	DebugDisplayDatabase agv::target $target
 
 	Process:phony $target
@@ -2285,7 +2266,6 @@ proc ReplaceVars s {
 proc Process:pkg-config target {
 
 	pref db ::agv::target($target)
-	#set db $agv::target($target)
 
 	set name [dict:at $db name]
 	set output [dict:at $db output]
@@ -2449,8 +2429,6 @@ proc Process:pkg-config target {
 
 	dict set db rules $target [list "\n\techo 'The pc file should be already generated'\n"]
 	dict set db flags {noclean distclean}
-
-	#set agv::target($target) $db
 }
 
 proc PrependIfNotFound {dictvar key value} {
@@ -3175,6 +3153,7 @@ proc GetDependentLibraryTargets {target {transit transit}} {
 			set slibs ""
 			lassign [GetTargetFile $d $spec] libofile ospec
 			if { $libofile == "" } {
+				$::g_debug "Target '$target' dep '$d' data: local:{[pget agv::target($d)]} foreign:{[pget agv::foreign($d)]}"
 				error "Target '$target' requested dep '$d' in spec '$spec' which '$d' does not define"
 			}
 			$::g_debug " -- LIBRARY DEP '$d': output=[pget agv::target($d).output] ($libofile) SPEC: $spec"
@@ -3905,7 +3884,7 @@ proc ExtractActualDepends {target deps} {
 		}
 
 		# Store a library file as a dependency.
-		set depfile [lindex [dict:at [TargetDatabase $d] output] $ix]
+		set depfile [ppipe dict:at [TargetDatabase $d] output | set output % | lindex % $ix]
 		if { $depfile == "" } {
 			error "IPE: In target '$d' output file not found for spec=$spec (libspec:$libspec ouptut:$output)"
 		}
@@ -4010,11 +3989,13 @@ proc CheckDefinedTarget {target {dspec {}}} {
 
 	set foreigntarget [pget agv::foreign($target)]
 
-	set agv::target($target) [plist {
+	set base [pget agv::target($target)]
+	set agv::target($target) [dict merge $base [plist {
 		name $target
 		type custom
 		command "%submake -C $dir $subtarget"
-	}]
+	}]]
+
 
 	if { $foreigntarget != "" } {
 		set deps ""
@@ -4071,6 +4052,10 @@ proc PrepareForeignParentTarget target {
 
 proc agp-prepare-database {target {parent ""}} {
 	vlog "--- Preparing database for target '$target'"
+
+	# Make sure that the profile contains at least the "default"
+	# key with empty contents.
+	pinit agv::profile(default) ""
 
 	# Auto-generate targets "all" and ".", if not defined
 	if { $target == "all" || $target == "." } {
@@ -4411,9 +4396,17 @@ proc ag-subdir args {
 		set args [lindex $args 0]
 	}
 
+	set exc 0
 	foreach a $args {
 		vlog "*** ANALYZING SUBDIR: $a"
-		ag-subdir1 $a
+		set exc [catch {ag-subdir1 $a} out]
+		if {$exc} {
+			puts stderr "+++ ERROR in ag-subdir: $out. interrupting"
+			break
+		}
+	}
+	if {$exc} {
+		error "+++ ag-subdir error, can't continue"
 	}
 }
 
@@ -4547,6 +4540,7 @@ proc ag-subdir1 target {
 		}
 		dict set child_db foreign_parent 1
 		set subtarget [file join .. $t]
+		$::g_debug "MOUNT '$subtarget':'$t'={$child_db}"
 		$slave eval [list set agv::foreign($subtarget) $child_db]
 	}
 	$::g_debug "AG-SUBDIR: processing: $sd: SOURCING '$cmd_exe'"
@@ -4556,9 +4550,9 @@ proc ag-subdir1 target {
 	#}
 
 	# XXX THIS SKIPS OPTIONS - must be somehow supported!
-	$slave eval source [lindex $cmd_exe 0]
+	set sret [$slave eval source [lindex $cmd_exe 0]]
 
-	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed. Pinning in database."
+	$::g_debug "AG-SUBDIR: Silverfile from subdirectory '$sd' processed result=$sret. Pinning in database."
 	set imported_targets ""
 	foreach t [$slave eval array names agv::target] {
 		if {$t == ".."} {
@@ -4629,15 +4623,7 @@ if { !$tcl_interactive } {
 }
 
 if { [info exists ::env(AG_LIB_PATH)] } {
-
-	set sep " "
-	if {$tcl_platform(platform) == "unix"} {
-		set sep :
-	} else {
-		set sep ;
-	}
-	set libpath [split $::env(AG_LIB_PATH) $sep]
-
+	set libpath [split $::env(AG_LIB_PATH) $tcl_platform(pathSeparator)]
 	foreach p $libpath {
 		lappend agv::libpath [file nornalize $p]
 	}
@@ -5064,9 +5050,14 @@ puts stderr "+++ Processing runmode '$agv::runmode':  @[prelocate [pwd] $agv::to
 
 set exitcode [ag-do-$agv::runmode [lrange $g_args 1 end]]
 
-if { ![info exists me_is_slave] } {
-	exit $exitcode
+if {$exitcode != 0} {
+	if { ![info exists me_is_slave] } {
+		$::g_debug "EXIT code $exitcode"
+		exit $exitcode
+	} else {
+		$::g_debug "IS SLAVE: PROPAGATE $exitcode"
+		error "ERROR: genrules exit with code $exitcode"
+	}
 }
-
 
 } ;# END OF INTERACTIVE

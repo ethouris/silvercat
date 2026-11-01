@@ -2,6 +2,6 @@
 ag-profile gcc-native
 
 ag-profile general -depspec cached
-ag-profile c++ -depspec cached -I ../opt/catch/include ../include/lineup
+ag-profile c++ -I ../opt/catch/include ../include/lineup
 
 ag lineupTest -type program -s Compiler.cc main.cc Tokenizer.cc -depends ../lineup
