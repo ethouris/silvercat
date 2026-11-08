@@ -392,6 +392,10 @@ proc MafRead {directory {filename {}}} {
 	set gotempty yes ;# must start with at least one label
 
 	while { [gets $fd line] >= 0 } {
+		if { [string index [string trimleft $line] 0] == "#" } {
+			continue
+		}
+
 		set oline [string trim $line]
 		if { $oline == "" } {
 			set gotempty yes
@@ -400,10 +404,6 @@ proc MafRead {directory {filename {}}} {
 
 		set newsection $gotempty
 		set gotempty no
-
-		if { [string index $line 0] == "#" } {
-			continue
-		}
 
 		if { $newsection && [regexp {^[A-Z ]} $line] } {
 			# A Section. Setup the section name

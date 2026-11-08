@@ -129,6 +129,8 @@ namespace eval agv {
 		# Data: {flags sources depends} 
 		# Missing = not processed yet. Use lappend processed(target) sources
 		array set processed ""
+
+		set current_file $argv0
 	}
 
 	set exe $p::exefor([info sharedlibextension])
@@ -187,6 +189,16 @@ namespace eval agv {
 }
 
 namespace import agv::p::GenFileBase
+
+proc SourceCatch filename {
+	set err [catch {uplevel source $filename} out]
+	if {$err} {
+		puts stderr "*** ERROR: source: $agv::p::current_file"
+		puts stderr "***: $out"
+		return false
+	}
+	return true
+}
 
 proc RealSourcePath target {
 
@@ -703,7 +715,7 @@ proc ExecuteFrameworks {target step args} {
 		vlog "... Found step $step for framework '$frm'"
 
 		if { [catch {$procname $target {*}$args} err] } {
-			error "Error executing framework '$procname' on '$target':\n$err"
+			error "Error executing framework '$procname' on '$target':\n*** $err"
 		}
 	}
 	return true
@@ -759,15 +771,19 @@ proc ag-require args {
 		set optional 1
 	}
 
+	set caller $agv::p::current_file
+
 	set ibrk 0
 	foreach a $args {
-		foreach p $agv::libpath {
+		foreach p [concat $agv::srcdir $agv::libpath $agv::toplevel] {
 			if { $ibrk } {
 				break
 			}
 			set n [file join $p $a]
 			if { [file exists $n] } {
-				source $n
+				set agv::p::current_file $n
+				uplevel source $n
+				set agv::p::current_file $caller
 				set ibrk 1
 				continue
 			}
@@ -4406,7 +4422,7 @@ proc ag-subdir args {
 		}
 	}
 	if {$exc} {
-		error "+++ ag-subdir error, can't continue"
+		error "ag-subdir error, can't continue"
 	}
 }
 
@@ -4633,14 +4649,25 @@ if { [info exists ::env(AG_LIB_PATH)] } {
 
 set wd [pwd]
 
+set go_on 1
 foreach p $agv::libpath {
 	cd $p
 	if { [file exists startup] } {
-		source startup
+		set agv::p::current_file [file normalize startup]
+		set go_on [SourceCatch startup]
+		if {!$go_on} {
+			break
+		}
 	}
 }
 
+if {!$go_on} {
+	puts stderr "Error in startup file, bailing out"
+	exit 1
+}
+
 cd $wd
+set agv::p::current_file $argv0
 
 if { !$tcl_interactive } {
 
@@ -4885,7 +4912,14 @@ puts stderr "+++ Reading database: [prelocate [pwd] $agv::toplevel]"
 
 # Tracing every written file would be tempting, but it's way too radical.
 #trace add execution open leave agv-notify-filewrite-handler
-source $agfile
+
+set agv::p::current_file $agfile
+if {![SourceCatch $agfile]} {
+	puts "*** ERROR reported from '$agfile', bailing out"
+	exit 1
+}
+set agv::p::current_file $argv0
+
 #trace remove execution open leave agv-notify-filewrite-handler
 
 foreach {k v} $agv::p::profile_overrides {

@@ -1,6 +1,6 @@
 #
 
-source ../../config.ag
+ag-require config.ag
 
 # CPPFLAGS?
 

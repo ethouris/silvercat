@@ -15,6 +15,7 @@ set DEFAULT_OVERLAY [agv::prefix]/share/fluxbox/overlay
 set DEFAULT_WINDOWMENU [agv::prefix]/share/fluxbox/windowmenu
 set LOCALEPATH [agv::prefix]/share/fluxbox/nls
 
+set TOP [file dirname [info script]]
 
 ag-export {
 	DEFAULT_MENU
@@ -27,9 +28,6 @@ ag-export {
 	LOCALEPATH
 }
 
-
-set TOP [file dirname [info script]]
-ag-export TOP
 
 # To be automatically added by configurator
 
