@@ -130,7 +130,7 @@ namespace eval agv {
 		# Missing = not processed yet. Use lappend processed(target) sources
 		array set processed ""
 
-		set current_file $argv0
+		set current_file [file normalize $argv0]
 	}
 
 	set exe $p::exefor([info sharedlibextension])
@@ -191,13 +191,26 @@ namespace eval agv {
 namespace import agv::p::GenFileBase
 
 proc SourceCatch filename {
-	set err [catch {uplevel source $filename} out]
-	if {$err} {
-		puts stderr "*** ERROR: source: $agv::p::current_file"
-		puts stderr "***: $out"
-		return false
-	}
-	return true
+    # Run the source natively inside catch to preserve file-based line numbers.
+    # If it must be evaluated in the caller's scope, use 'uplevel 1' INSIDE the file 
+    # or rely strictly on the -errorinfo string regex below.
+    set err [catch {source $filename} out options]
+    
+    if {$err} {
+        set line_num [dict get $options -errorline]
+        set stack_trace [dict get $options -errorinfo]
+
+        # Robust Fallback: Extract true line number from the stack trace string
+        # because Tcl always writes the exact physical file line to the trace log.
+        if {[regexp {\(file "([^"]+)" line (\d+)\)} $stack_trace -> scanned_file scanned_line]} {
+            set line_num $scanned_line
+        }
+
+        puts stderr "*** ERROR: source: $filename at line $line_num"
+        puts stderr "***: $out"
+        return false
+    }
+    return true
 }
 
 proc RealSourcePath target {
@@ -781,7 +794,7 @@ proc ag-require args {
 			}
 			set n [file join $p $a]
 			if { [file exists $n] } {
-				set agv::p::current_file $n
+				set agv::p::current_file [file normalize $n]
 				uplevel source $n
 				set agv::p::current_file $caller
 				set ibrk 1
@@ -4368,6 +4381,7 @@ proc ag-declare-generated {filename {wdstate b}} {
 # The interface for executing a code in the child interpreter
 # by referring to the parent interpreter
 proc RootEval {script} {
+	#puts stderr "DEBUG: RootEval: -----\n$script\n------"
 	return [uplevel #0 $script]
 }
 
@@ -4382,6 +4396,9 @@ proc ag-interp {target script} {
 	}
 
 	if {$target == ".."} {
+		if {[info command ParentEval] == ""} {
+			error "Can't run 'agcat' standalone here because it refers to parent directory"
+		}
 		return [ParentEval $script]
 	}
 
