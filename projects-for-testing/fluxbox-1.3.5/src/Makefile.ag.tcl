@@ -13,7 +13,7 @@ ag-profile c++ -incdir $agv::srcdir/FbTk
 ag-profile general -depspec cached
 
 set VERSION 1.3.5
-ag-instantiate //../version.h.in
+ag-instantiate ../version.h.in
 
 set defaults_tpl_h {
 // This file is generated from Makefile. Do not edit!

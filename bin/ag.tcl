@@ -188,6 +188,30 @@ namespace eval agv {
 
 namespace import agv::p::GenFileBase
 
+proc SourceCatch filename {
+    # Run the source natively inside catch to preserve file-based line numbers.
+    # If it must be evaluated in the caller's scope, use 'uplevel 1' INSIDE the file 
+    # or rely strictly on the -errorinfo string regex below.
+
+    set err [catch {uplevel 1 source $filename} out options]
+
+    if {$err} {
+        set line_num [dict get $options -errorline]
+        set stack_trace [dict get $options -errorinfo]
+
+        # Robust Fallback: Extract true line number from the stack trace string
+        # because Tcl always writes the exact physical file line to the trace log.
+        if {[regexp {\(file "([^"]+)" line (\d+)\)} $stack_trace -> scanned_file scanned_line]} {
+            set line_num $scanned_line
+        }
+
+        puts stderr "*** ERROR: source: $filename at line $line_num"
+        puts stderr "***: $out"
+        return false
+    }
+    return true
+}
+
 proc RealSourcePath target {
 
 	if { [string range $target 0 1] == "//" } {
@@ -703,7 +727,7 @@ proc ExecuteFrameworks {target step args} {
 		vlog "... Found step $step for framework '$frm'"
 
 		if { [catch {$procname $target {*}$args} err] } {
-			error "Error executing framework '$procname' on '$target':\n$err"
+			error "Error executing framework '$procname' on '$target':\n*** $err"
 		}
 	}
 	return true
@@ -759,15 +783,19 @@ proc ag-require args {
 		set optional 1
 	}
 
+	set caller $agv::p::current_file
+
 	set ibrk 0
 	foreach a $args {
-		foreach p $agv::libpath {
+		foreach p [concat $agv::srcdir $agv::libpath $agv::toplevel] {
 			if { $ibrk } {
 				break
 			}
 			set n [file join $p $a]
 			if { [file exists $n] } {
-				source $n
+				set agv::p::current_file [file normalize $n]
+				uplevel source $n
+				set agv::p::current_file $caller
 				set ibrk 1
 				continue
 			}
@@ -4053,12 +4081,9 @@ proc PrepareForeignParentTarget target {
 proc agp-prepare-database {target {parent ""}} {
 	vlog "--- Preparing database for target '$target'"
 
-	# Make sure that the profile contains at least the "general"
+	# Make sure that the profile contains at least the "default"
 	# key with empty contents.
-
-	if { ![info exists agv::profile(default)] } {
-		set agv::profile(default) ""
-	}
+	pinit agv::profile(default) ""
 
 	# Auto-generate targets "all" and ".", if not defined
 	if { $target == "all" || $target == "." } {
@@ -4355,6 +4380,7 @@ proc ag-declare-generated {filename {wdstate b}} {
 # The interface for executing a code in the child interpreter
 # by referring to the parent interpreter
 proc RootEval {script} {
+	#puts stderr "DEBUG: RootEval: -----\n$script\n------"
 	return [uplevel #0 $script]
 }
 
@@ -4369,6 +4395,9 @@ proc ag-interp {target script} {
 	}
 
 	if {$target == ".."} {
+		if {[info command ParentEval] == ""} {
+			error "Can't run 'agcat' standalone here because it refers to parent directory"
+		}
 		return [ParentEval $script]
 	}
 
@@ -4409,7 +4438,7 @@ proc ag-subdir args {
 		}
 	}
 	if {$exc} {
-		error "+++ ag-subdir error, can't continue"
+		error "ag-subdir error, can't continue"
 	}
 }
 
@@ -4636,14 +4665,25 @@ if { [info exists ::env(AG_LIB_PATH)] } {
 
 set wd [pwd]
 
+set go_on 1
 foreach p $agv::libpath {
 	cd $p
 	if { [file exists startup] } {
-		source startup
+		set agv::p::current_file [file normalize startup]
+		set go_on [SourceCatch startup]
+		if {!$go_on} {
+			break
+		}
 	}
 }
 
+if {!$go_on} {
+	puts stderr "Error in startup file, bailing out"
+	exit 1
+}
+
 cd $wd
+set agv::p::current_file $argv0
 
 if { !$tcl_interactive } {
 
@@ -4657,7 +4697,6 @@ set runmode genrules
 set install_prefix ""
 set build_type_spec ""
 set profile_overrides ""
-set config_overrides ""
 set readdbspec ""
 
 #puts stderr "CURRENT DIR: [pwd]"
@@ -4674,7 +4713,6 @@ set ag_optargs {
 	-t topdir
 	-m runmode
 	-p -profile_overrides
-	-c -config_overrides
 	-r %readdbspec
 	--prefix install_prefix
 	--buildtype build_type_spec
@@ -4890,7 +4928,14 @@ puts stderr "+++ Reading database: [prelocate [pwd] $agv::toplevel]"
 
 # Tracing every written file would be tempting, but it's way too radical.
 #trace add execution open leave agv-notify-filewrite-handler
-source $agfile
+
+set agv::p::current_file $agfile
+if {![SourceCatch $agfile]} {
+	puts "*** ERROR reported from '$agfile', bailing out"
+	exit 1
+}
+set agv::p::current_file $argv0
+
 #trace remove execution open leave agv-notify-filewrite-handler
 
 foreach {k v} $agv::p::profile_overrides {
@@ -5055,13 +5100,14 @@ puts stderr "+++ Processing runmode '$agv::runmode':  @[prelocate [pwd] $agv::to
 
 set exitcode [ag-do-$agv::runmode [lrange $g_args 1 end]]
 
-if { ![info exists me_is_slave] } {
-	$::g_debug "EXIT code $exitcode"
-	exit $exitcode
-} else {
-	$::g_debug "IS SLAVE: PROPAGATE $exitcode"
-	error "ERROR: genrules exit with code $exitcode"
+if {$exitcode != 0} {
+	if { ![info exists me_is_slave] } {
+		$::g_debug "EXIT code $exitcode"
+		exit $exitcode
+	} else {
+		$::g_debug "IS SLAVE: PROPAGATE $exitcode"
+		error "ERROR: genrules exit with code $exitcode"
+	}
 }
-
 
 } ;# END OF INTERACTIVE
