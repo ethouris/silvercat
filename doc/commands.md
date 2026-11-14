@@ -256,7 +256,7 @@ The `<target>` must be the subdirectory that has been previously declared
 through `ag-subdir`. Special values of `<target>` are:
 
 * `.` (dot): resolves to `eval <script>` call
-* `..` (two dots): evaluates the script on the direct parent directory
+* `..` (two dots): evaluates the script in the direct parent build file's scope
 
 
 ## `ag-export`

@@ -194,7 +194,7 @@ proc SourceCatch filename {
     # Run the source natively inside catch to preserve file-based line numbers.
     # If it must be evaluated in the caller's scope, use 'uplevel 1' INSIDE the file 
     # or rely strictly on the -errorinfo string regex below.
-    set err [catch {source $filename} out options]
+    set err [catch {uplevel 1 source $filename} out options]
     
     if {$err} {
         set line_num [dict get $options -errorline]
@@ -1096,6 +1096,10 @@ proc CheckSetConfigUse {key vals} {
 proc ag-profile {name args} {
 	if { $args == "" } {
 		return [InstallProfile $name]
+	}
+
+	if {[string index $name 0] == "-"} {
+		return [ag-profile:[string range $name 1 end] $args]
 	}
 
 	# Otherwise "name" is:
@@ -4382,7 +4386,9 @@ proc ag-declare-generated {filename {wdstate b}} {
 # by referring to the parent interpreter
 proc RootEval {script} {
 	#puts stderr "DEBUG: RootEval: -----\n$script\n------"
-	return [uplevel #0 $script]
+	#return [uplevel #0 $script]
+	# Skip ag-subdir1 and ag-subdir to evaluate in the build-file scope.
+	return [uplevel 3 $script]
 }
 
 proc ag-interp {target script} {
