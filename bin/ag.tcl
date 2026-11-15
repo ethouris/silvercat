@@ -194,8 +194,9 @@ proc SourceCatch filename {
     # Run the source natively inside catch to preserve file-based line numbers.
     # If it must be evaluated in the caller's scope, use 'uplevel 1' INSIDE the file 
     # or rely strictly on the -errorinfo string regex below.
+
     set err [catch {uplevel 1 source $filename} out options]
-    
+
     if {$err} {
         set line_num [dict get $options -errorline]
         set stack_trace [dict get $options -errorinfo]

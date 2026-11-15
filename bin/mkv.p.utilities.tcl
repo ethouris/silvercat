@@ -343,8 +343,11 @@ proc pbind {args} {
 	# every __arg__3 is turned into [lindex $args 3]
 	set match_indices [regexp -all -inline -indices "${argpx}(\[0-9\]*)" $outbody] 
 
+	#puts stderr "DEBUG: match-indices: $match_indices"
+
 	set out ""
 	set lastend 0
+	set end -1 ;# In case when $match_indices is empty
 	foreach {argmatch submatch} $match_indices {
 		lassign $argmatch abegin end
 		lassign $submatch begin end

@@ -284,6 +284,9 @@ config-define hvu enable heavy-logging
 ag-config enable encryption on -h "Build with encryption supported"
 config-define srt enable encryption $TARGET_srt
 
+ag-config enable aead off -h "Enable AEAD support (requires enabled encryption)"
+config-define srt enable aead $TARGET_srt
+
 ag-config enable getnameinfo no -h "Use getnameinfo() to resolve IP names"
 config-define srt enable getnameinfo
 
@@ -639,9 +642,20 @@ ag tags -type custom -s $sources $all_headers -runon demand  -output //tags -cle
 # Source dir as relative to the build path - needed where // would not be expanded
 set relsrcdir [prelocate $agv::srcdir $agv::builddir]
 
-ag tags -command {
-	cd $relsrcdir && ctags --c++-kinds=+px $ignoreppopt -R $sourcedirs && /usr/bin/ctags -a --c++-kinds=+px $ignoreppopt -R $sourcedirs
-}
+pset default_ctags_cmds [join {ctags ctags-exuberant} $tcl_platform(pathSeparator)]
+
+ag-option --with-ctags-cmds $default_ctags_cmds -h "Specify ctags commands to be run in given order (path-separated)"
+
+set ctags_cmds [split [ag-option --with-ctags-cmds] $tcl_platform(pathSeparator)]
+
+set ctags_cmd_args "--c++-kinds=+px $ignoreppopt -R $sourcedirs"
+
+set ctags_cmd [concat \
+	cd $relsrcdir \
+	{*}[pmap [pbind concat &&  %  $ctags_cmd_args] $ctags_cmds]]
+
+ag tags -command $ctags_cmd
+	#cd $relsrcdir && ctags --c++-kinds=+px $ignoreppopt -R $sourcedirs && ctags-exuberant -a --c++-kinds=+px $ignoreppopt -R $sourcedirs
 
 # Test app
 
