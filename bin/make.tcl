@@ -799,6 +799,7 @@ proc subst_action action {
 proc is_target_stale {target depend} {
 	variable db_phony
 	variable db_depends
+	variable db_actions
 	variable db_stale
 
 	$mkv::debug "is_target_stale: Checking if '$target' is stale against '$depend'"
@@ -807,11 +808,22 @@ proc is_target_stale {target depend} {
 		return true
 	}
 
-	# Check if $depend is phony.
-	# If phony, then just forward the request to its depends.
+	# Action-bearing phony targets are rebuilt every time, so their dependents
+	# are stale. Actionless phony targets forward freshness to their depends.
 	# XXX THIS FEATURE IS SLIGHTLY CONTROVERSIAL.
 	# Probably another type of target "forward" should exist, parallel to "phony".
 	if { [info exists db_phony($depend)] } {
+		if { [info exists db_actions($depend)] && [string trim $db_actions($depend)] != "" } {
+			vlog "... ... '$depend' is phony and has an action - declare '$target' stale."
+			return true
+		}
+
+		set generic [find_generic $depend]
+		if { $generic != "" && [info exists db_actions($generic)] && [string trim $db_actions($generic)] != "" } {
+			vlog "... ... '$depend' is phony and has a generic action - declare '$target' stale."
+			return true
+		}
+
 		set out false
 		if { [info exists db_depends($depend)] && [expr {$db_depends($depend) != ""}] } {
 			set target_deps [getdeps $depend]
